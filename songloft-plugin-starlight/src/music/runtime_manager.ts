@@ -15,16 +15,14 @@ export class RuntimeManager {
         continue;
       }
 
-      const script = await this.sourceManager.getScript(source.id);
-      if (script === null) {
-        continue;
-      }
-
       try {
-        const runtime = await SourceRuntime.create(source.id, script);
-        if (runtime) {
-          this.runtimes.push(runtime);
+        const script = await this.sourceManager.getScript(source.id);
+        if (script === null) {
+          continue;
         }
+
+        const runtime = await SourceRuntime.create(source.id, script);
+        this.runtimes.push(runtime);
       } catch (error) {
         songloft.log.warn(`Failed to load music source ${source.id}: ${String(error)}`);
       }

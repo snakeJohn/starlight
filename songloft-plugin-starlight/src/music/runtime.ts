@@ -3,7 +3,7 @@ import { LX_SHIM } from './lx_shim';
 import type { LxSongInfo, MusicPlatform, MusicQuality } from './types';
 
 interface SourceConfig {
-  sources?: Record<string, unknown>;
+  sources: Record<string, unknown>;
 }
 
 interface RuntimeEvent {
@@ -24,7 +24,18 @@ interface DispatchEnvelope {
 let nextDispatchId = 1;
 
 function envNameFor(sourceId: string): string {
-  return `starlight_lx_${sourceId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+  const sanitized = sourceId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `starlight_lx_${sanitized}_${stableShortHash(sourceId)}`;
+}
+
+function stableShortHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+
+  return hash.toString(36).padStart(7, '0');
 }
 
 function parseEventData(data: unknown): unknown {
@@ -45,6 +56,26 @@ function findEvent(events: unknown[] | undefined, name: string): RuntimeEvent | 
   return null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function normalizeSourceConfig(value: unknown): SourceConfig | null {
+  const config = asRecord(value);
+  if (!config) {
+    return null;
+  }
+
+  const sources = asRecord(config.sources);
+  if (!sources) {
+    return null;
+  }
+
+  return { sources };
+}
+
 function stringUrl(value: unknown): string | null {
   if (typeof value === 'string' && value.length > 0) {
     return value;
@@ -60,13 +91,14 @@ function stringUrl(value: unknown): string | null {
 
 export class SourceRuntime {
   private destroyed = false;
+  private dispatchQueue: Promise<void> = Promise.resolve();
 
   private constructor(
     private readonly envName: string,
     private readonly config: SourceConfig,
   ) {}
 
-  static async create(sourceId: string, script: string): Promise<SourceRuntime | null> {
+  static async create(sourceId: string, script: string): Promise<SourceRuntime> {
     const envName = envNameFor(sourceId);
 
     try {
@@ -83,7 +115,13 @@ export class SourceRuntime {
         throw new StarlightError('SOURCE_IMPORT_INVALID', '音源未调用 lx.send("inited")', false);
       }
 
-      return new SourceRuntime(envName, parseEventData(initEvent.data) as SourceConfig);
+      const config = parseSourceConfig(initEvent.data);
+      if (!config) {
+        await destroyEnv(envName);
+        throw new StarlightError('SOURCE_IMPORT_INVALID', '音源 inited 配置无效', false);
+      }
+
+      return new SourceRuntime(envName, config);
     } catch (error) {
       if (error instanceof StarlightError) {
         throw error;
@@ -95,10 +133,43 @@ export class SourceRuntime {
   }
 
   supportsPlatform(platform: MusicPlatform | string): boolean {
-    return Boolean(this.config.sources?.[platform]);
+    return Boolean(this.config.sources[platform]);
   }
 
   async getMusicUrl(
+    platform: MusicPlatform | string,
+    quality: MusicQuality | string,
+    songInfo: LxSongInfo,
+  ): Promise<string | null> {
+    return this.enqueueDispatch(() => this.dispatchMusicUrl(platform, quality, songInfo));
+  }
+
+  async destroy(): Promise<void> {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.destroyed = true;
+    await songloft.jsenv.destroy(this.envName);
+  }
+
+  private async enqueueDispatch<T>(task: () => Promise<T>): Promise<T> {
+    const previous = this.dispatchQueue;
+    let release = () => {};
+    this.dispatchQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await previous;
+
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  }
+
+  private async dispatchMusicUrl(
     platform: MusicPlatform | string,
     quality: MusicQuality | string,
     songInfo: LxSongInfo,
@@ -137,15 +208,6 @@ export class SourceRuntime {
     }
   }
 
-  async destroy(): Promise<void> {
-    if (this.destroyed) {
-      return;
-    }
-
-    this.destroyed = true;
-    await songloft.jsenv.destroy(this.envName);
-  }
-
   private findDispatchEvent(events: unknown[] | undefined, name: string, dispatchId: string): RuntimeEvent | null {
     for (const event of events ?? []) {
       if (event === null || typeof event !== 'object') {
@@ -167,6 +229,14 @@ export class SourceRuntime {
       }
     }
 
+    return null;
+  }
+}
+
+function parseSourceConfig(data: unknown): SourceConfig | null {
+  try {
+    return normalizeSourceConfig(parseEventData(data));
+  } catch {
     return null;
   }
 }

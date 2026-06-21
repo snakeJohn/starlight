@@ -57,15 +57,19 @@ const songInfo: LxSongInfo = {
 };
 
 function installJsenvMock(handler: ExecuteWaitHandler) {
-  const create = vi.fn(async () => '');
+  const create = vi.fn(async (_name: string, _initCode?: string) => '');
   const executeWait = vi.fn(handler);
-  const destroy = vi.fn(async () => undefined);
+  const destroy = vi.fn(async (_name: string) => undefined);
   const jsenv = songloft.jsenv as unknown as TestJsenv;
   jsenv.create = create;
   jsenv.executeWait = executeWait;
   jsenv.destroy = destroy;
 
   return { create, executeWait, destroy };
+}
+
+function expectEnvName(value: string, readablePrefix: string): void {
+  expect(value).toMatch(new RegExp(`^starlight_lx_${readablePrefix}(?:_[a-z0-9]+)?$`));
 }
 
 function result(events: JsenvEvent[], error = ''): JsenvResult {
@@ -76,6 +80,13 @@ function initedEvent(sources: Record<string, unknown>): JsenvEvent {
   return {
     name: 'inited',
     data: JSON.stringify({ sources }),
+  };
+}
+
+function rawEvent(name: string, data: unknown): JsenvEvent {
+  return {
+    name,
+    data: JSON.stringify(data),
   };
 }
 
@@ -173,7 +184,7 @@ async function createRuntimeWithDispatch(
       return result([initedEvent({ kw: {} })]);
     }
 
-    expect(name).toBe('starlight_lx_synthetic_source');
+    expectEnvName(name, 'synthetic_source');
     expect(waitEvents).toEqual(['dispatchResult', 'dispatchError']);
     const dispatch = dispatchCallFrom(code);
     dispatches.push(dispatch);
@@ -188,7 +199,7 @@ async function createRuntimeWithDispatch(
 describe('SourceRuntime', () => {
   test('loads a source and reads supported platforms from inited event', async () => {
     const { create, executeWait } = installJsenvMock((name, code, timeoutMs, waitEvents) => {
-      expect(name).toBe('starlight_lx_source_1');
+      expectEnvName(name, 'source_1');
       expect(code).toBe(syntheticScript);
       expect(timeoutMs).toBe(30000);
       expect(waitEvents).toEqual(['inited']);
@@ -199,13 +210,31 @@ describe('SourceRuntime', () => {
 
     expect(runtime).not.toBeNull();
     expect(create).toHaveBeenCalledWith(
-      'starlight_lx_source_1',
+      expect.stringMatching(/^starlight_lx_source_1(?:_[a-z0-9]+)?$/),
       expect.stringContaining("globalThis.lx.env = 'desktop'"),
     );
     expect(executeWait).toHaveBeenCalledTimes(1);
     expect(runtime?.supportsPlatform('kw')).toBe(true);
     expect(runtime?.supportsPlatform('kg')).toBe(true);
     expect(runtime?.supportsPlatform('wy')).toBe(false);
+  });
+
+  test('create appends stable hash to readable env name for sanitized collisions', async () => {
+    const { create } = installJsenvMock((_name, _code, _timeoutMs, waitEvents) => {
+      expect(waitEvents).toEqual(['inited']);
+      return result([initedEvent({ kw: {} })]);
+    });
+
+    const first = await SourceRuntime.create('source!id', syntheticScript);
+    const second = await SourceRuntime.create('source?id', syntheticScript);
+
+    const [firstEnvName, secondEnvName] = create.mock.calls.map((call) => call[0]);
+    expect(firstEnvName).toMatch(/^starlight_lx_source_id_[a-z0-9]+$/);
+    expect(secondEnvName).toMatch(/^starlight_lx_source_id_[a-z0-9]+$/);
+    expect(firstEnvName).not.toBe(secondEnvName);
+
+    await first.destroy();
+    await second.destroy();
   });
 
   test('getMusicUrl returns a dispatch result string URL', async () => {
@@ -237,7 +266,7 @@ describe('SourceRuntime', () => {
         return result([initedEvent({ kw: {} })]);
       }
 
-      expect(name).toBe('starlight_lx_error_source');
+      expectEnvName(name, 'error_source');
       return result([dispatchErrorEvent(code, 'resolver failed')]);
     });
     const runtime = await SourceRuntime.create('error/source', syntheticScript);
@@ -258,6 +287,54 @@ describe('SourceRuntime', () => {
     await expect(runtime?.getMusicUrl('kw', '320k', songInfo)).resolves.toBeNull();
   });
 
+  test('serializes concurrent getMusicUrl dispatches on one runtime', async () => {
+    const dispatches: Array<{ id: string; event: string; payload: unknown }> = [];
+    const releases: Array<(url: string) => void> = [];
+    const released = new Set<number>();
+    installJsenvMock((_name, code, _timeoutMs, waitEvents) => {
+      if (waitEvents.includes('inited')) {
+        return result([initedEvent({ kw: {} })]);
+      }
+
+      const dispatch = dispatchCallFrom(code);
+      dispatches.push(dispatch);
+      return new Promise<JsenvResult>((resolve) => {
+        releases.push((url) => resolve(result([dispatchResultEvent(code, url)])));
+      });
+    });
+    const runtime = await SourceRuntime.create('serialized/source', syntheticScript);
+
+    const first = runtime.getMusicUrl('kw', '320k', songInfo);
+    const second = runtime.getMusicUrl('kw', 'flac', { ...songInfo, musicId: 'second-id' });
+
+    const release = (index: number, url: string) => {
+      if (!released.has(index) && releases[index]) {
+        released.add(index);
+        releases[index](url);
+      }
+    };
+
+    try {
+      await Promise.resolve();
+      expect(dispatches).toHaveLength(1);
+
+      release(0, 'https://cdn.invalid/first.mp3');
+      await expect(first).resolves.toBe('https://cdn.invalid/first.mp3');
+      await Promise.resolve();
+
+      expect(dispatches).toHaveLength(2);
+      expect(dispatches[0].id).not.toBe(dispatches[1].id);
+
+      release(1, 'https://cdn.invalid/second.flac');
+      await expect(second).resolves.toBe('https://cdn.invalid/second.flac');
+    } finally {
+      release(0, 'https://cdn.invalid/cleanup-first.mp3');
+      await Promise.resolve();
+      release(1, 'https://cdn.invalid/cleanup-second.mp3');
+      await Promise.allSettled([first, second]);
+    }
+  });
+
   test('create destroys env and throws structured error on script eval failure', async () => {
     const { destroy } = installJsenvMock(() => result([], 'SyntaxError: synthetic failure'));
 
@@ -266,19 +343,29 @@ describe('SourceRuntime', () => {
       message: 'SyntaxError: synthetic failure',
       retryable: false,
     });
-    expect(destroy).toHaveBeenCalledWith('starlight_lx_broken_source');
+    expect(destroy).toHaveBeenCalledWith(expect.stringMatching(/^starlight_lx_broken_source(?:_[a-z0-9]+)?$/));
   });
 
   test('missing inited event destroys env and throws SOURCE_IMPORT_INVALID', async () => {
     const { destroy } = installJsenvMock(() => result([]));
+    const createPromise = SourceRuntime.create('missing/inited', syntheticScript);
 
-    await expect(SourceRuntime.create('missing/inited', syntheticScript)).rejects.toThrow(StarlightError);
-    await expect(SourceRuntime.create('missing/inited', syntheticScript)).rejects.toMatchObject({
+    await expect(createPromise).rejects.toMatchObject({
       code: 'SOURCE_IMPORT_INVALID',
       message: '音源未调用 lx.send("inited")',
       retryable: false,
     });
-    expect(destroy).toHaveBeenCalledWith('starlight_lx_missing_inited');
+    expect(destroy).toHaveBeenCalledWith(expect.stringMatching(/^starlight_lx_missing_inited(?:_[a-z0-9]+)?$/));
+  });
+
+  test('malformed inited payload destroys env and throws SOURCE_IMPORT_INVALID', async () => {
+    const { destroy } = installJsenvMock(() => result([rawEvent('inited', { sources: [] })]));
+
+    await expect(SourceRuntime.create('malformed/inited', syntheticScript)).rejects.toMatchObject({
+      code: 'SOURCE_IMPORT_INVALID',
+      retryable: false,
+    });
+    expect(destroy).toHaveBeenCalledWith(expect.stringMatching(/^starlight_lx_malformed_inited(?:_[a-z0-9]+)?$/));
   });
 });
 
@@ -412,15 +499,52 @@ describe('RuntimeManager', () => {
     expect(manager.count()).toBe(1);
     expect(managerSource.getScript).toHaveBeenCalledTimes(1);
     expect(managerSource.getScript).toHaveBeenCalledWith('enabled-a');
-    expect(create).toHaveBeenCalledWith('starlight_lx_enabled-a', expect.any(String));
+    expect(create).toHaveBeenCalledWith(
+      expect.stringMatching(/^starlight_lx_enabled-a(?:_[a-z0-9]+)?$/),
+      expect.any(String),
+    );
 
     sources = [sourceMeta('enabled-c', true)];
     await manager.loadEnabledSources();
 
-    expect(destroy).toHaveBeenCalledWith('starlight_lx_enabled-a');
+    expect(destroy).toHaveBeenCalledWith(expect.stringMatching(/^starlight_lx_enabled-a(?:_[a-z0-9]+)?$/));
     expect(manager.count()).toBe(1);
     expect(managerSource.getScript).toHaveBeenLastCalledWith('enabled-c');
-    expect(create).toHaveBeenCalledWith('starlight_lx_enabled-c', expect.any(String));
+    expect(create).toHaveBeenCalledWith(
+      expect.stringMatching(/^starlight_lx_enabled-c(?:_[a-z0-9]+)?$/),
+      expect.any(String),
+    );
+  });
+
+  test('loadEnabledSources continues when one enabled source script fails to load', async () => {
+    const getScript = vi.fn(async (id: string) => {
+      if (id === 'broken') {
+        throw new Error('script read failed');
+      }
+
+      return id === 'later' ? 'later-script' : null;
+    });
+    const managerSource = {
+      listSources: () => [sourceMeta('broken', true), sourceMeta('later', true)],
+      getScript,
+    } as unknown as SourceManager;
+    const { create } = installJsenvMock((_name, code, _timeoutMs, waitEvents) => {
+      expect(code).toBe('later-script');
+      expect(waitEvents).toEqual(['inited']);
+      return result([initedEvent({ kg: {} })]);
+    });
+    const manager = new RuntimeManager(managerSource);
+
+    await expect(manager.loadEnabledSources()).resolves.toBeUndefined();
+
+    expect(getScript).toHaveBeenNthCalledWith(1, 'broken');
+    expect(getScript).toHaveBeenNthCalledWith(2, 'later');
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledWith(
+      expect.stringMatching(/^starlight_lx_later(?:_[a-z0-9]+)?$/),
+      expect.any(String),
+    );
+    expect(manager.count()).toBe(1);
   });
 
   test('getMusicUrl skips unsupported platforms and returns first matching URL', async () => {
@@ -441,13 +565,13 @@ describe('RuntimeManager', () => {
     const manager = new RuntimeManager(managerSource);
     await manager.loadEnabledSources();
 
-    await expect(manager.getMusicUrl('kg', '320k', songInfo)).resolves.toBe(
-      'https://cdn.invalid/starlight_lx_kg-only.mp3',
+    await expect(manager.getMusicUrl('kg', '320k', songInfo)).resolves.toMatch(
+      /^https:\/\/cdn\.invalid\/starlight_lx_kg-only(?:_[a-z0-9]+)?\.mp3$/,
     );
 
     const dispatchCalls = executeWait.mock.calls.filter((call) => call[3].includes('dispatchResult'));
     expect(dispatchCalls).toHaveLength(1);
-    expect(dispatchCalls[0][0]).toBe('starlight_lx_kg-only');
+    expect(dispatchCalls[0][0]).toMatch(/^starlight_lx_kg-only(?:_[a-z0-9]+)?$/);
   });
 
   test('getMusicUrl returns null when no runtime matches the platform', async () => {
@@ -484,7 +608,7 @@ describe('RuntimeManager', () => {
 
     await manager.close();
 
-    expect(destroy).toHaveBeenCalledWith('starlight_lx_enabled-a');
+    expect(destroy).toHaveBeenCalledWith(expect.stringMatching(/^starlight_lx_enabled-a(?:_[a-z0-9]+)?$/));
     expect(manager.count()).toBe(0);
   });
 });
