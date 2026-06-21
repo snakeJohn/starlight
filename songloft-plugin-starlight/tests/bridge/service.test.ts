@@ -1,5 +1,8 @@
+import { createRouter } from '@songloft/plugin-sdk';
+import type { HTTPRequest, HTTPResponse } from '@songloft/plugin-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BridgeService } from '../../src/bridge/service';
+import { registerBridgeHandlers } from '../../src/handlers/bridge';
 import { OnlineSearcher } from '../../src/voicecmd/online_searcher';
 import type { ConfigManager } from '../../src/config/manager';
 import type { PlatformRegistry } from '../../src/music/platforms/registry';
@@ -20,6 +23,22 @@ const song = {
     songInfo: { source: 'kw', name: 'Song', singer: 'Singer', album: 'Album', duration: 200, musicId: '123' },
   },
 } satisfies SearchResultSong;
+
+function parseResponseBody(response: HTTPResponse): any {
+  const body = response.body;
+  const text = typeof body === 'string' ? body : new TextDecoder().decode(body);
+  return JSON.parse(text);
+}
+
+function request(method: string, path: string, body?: unknown): HTTPRequest {
+  return {
+    method,
+    path,
+    query: '',
+    headers: {},
+    body: body === undefined ? null : JSON.stringify(body),
+  } as HTTPRequest;
+}
 
 function createService(options: {
   url?: string | null;
@@ -113,6 +132,17 @@ describe('BridgeService', () => {
     });
   });
 
+  it('returns an empty import result without fetching Songloft for an explicit empty song list', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    globalThis.fetch = fetchMock;
+    const { service, runtimes } = createService();
+
+    await expect(service.importSongs([])).resolves.toEqual({ total: 0, payloads: [] });
+
+    expect(runtimes.getMusicUrl).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('plays resolved URLs on a MIoT speaker', async () => {
     const { service, minaService } = createService();
 
@@ -140,6 +170,144 @@ describe('BridgeService', () => {
 
     expect(emptyProvider.search).toHaveBeenCalledWith('Song', 1, 5);
     expect(hitProvider.search).toHaveBeenCalledWith('Song', 1, 5);
+  });
+
+  it('continues external search when one provider throws', async () => {
+    const throwingProvider = createProvider('kw', []);
+    throwingProvider.search = vi.fn(async () => {
+      throw new Error('provider unavailable');
+    });
+    const hitProvider = createProvider('kg', [song]);
+    const warnSpy = vi.spyOn(songloft.log, 'warn');
+    const { service } = createService({ providers: [throwingProvider, hitProvider] });
+
+    await expect(service.externalSearch('Song')).resolves.toBe(song);
+
+    expect(throwingProvider.search).toHaveBeenCalledWith('Song', 1, 5);
+    expect(hitProvider.search).toHaveBeenCalledWith('Song', 1, 5);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('kw'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('provider unavailable'));
+  });
+});
+
+describe('registerBridgeHandlers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function createRouteHarness(options: Parameters<typeof createService>[0] = {}) {
+    const router = createRouter();
+    const harness = createService(options);
+    registerBridgeHandlers(router, harness.service);
+    return { router, ...harness };
+  }
+
+  it('rejects malformed preview songs before calling the service', async () => {
+    const bridge = {
+      previewUrl: vi.fn(async () => 'https://audio.test/song.mp3'),
+      importSongs: vi.fn(),
+      playOnSpeaker: vi.fn(),
+      externalSearch: vi.fn(),
+    } as unknown as BridgeService;
+    const router = createRouter();
+    registerBridgeHandlers(router, bridge);
+
+    const response = await router.handle(request('POST', '/api/bridge/preview-url', {
+      song: { title: 'Song', source_data: { platform: '', quality: '320k', songInfo: {} } },
+    }));
+
+    expect(response.statusCode).toBe(400);
+    expect(parseResponseBody(response).error.code).toBe('BAD_REQUEST');
+    expect(bridge.previewUrl).not.toHaveBeenCalled();
+  });
+
+  it('maps preview URL resolution failures to 404', async () => {
+    const { router } = createRouteHarness({ url: null });
+
+    const response = await router.handle(request('POST', '/api/bridge/preview-url', { song }));
+
+    expect(response.statusCode).toBe(404);
+    expect(parseResponseBody(response).error).toMatchObject({
+      code: 'PLAY_URL_RESOLVE_FAILED',
+      retryable: true,
+    });
+  });
+
+  it('maps speaker playback failures to 503', async () => {
+    const { router } = createRouteHarness({ playResult: false });
+
+    const response = await router.handle(request('POST', '/api/bridge/play-url', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+      song,
+    }));
+
+    expect(response.statusCode).toBe(503);
+    expect(parseResponseBody(response).error.code).toBe('DEVICE_OFFLINE');
+  });
+
+  it('rejects missing or non-array import songs without calling the service', async () => {
+    const bridge = {
+      previewUrl: vi.fn(),
+      importSongs: vi.fn(async () => ({ total: 0, payloads: [] })),
+      playOnSpeaker: vi.fn(),
+      externalSearch: vi.fn(),
+    } as unknown as BridgeService;
+    const router = createRouter();
+    registerBridgeHandlers(router, bridge);
+
+    for (const body of [{}, { songs: null }, { songs: song }]) {
+      const response = await router.handle(request('POST', '/api/bridge/songs/import', body));
+
+      expect(response.statusCode).toBe(400);
+      expect(parseResponseBody(response).error.code).toBe('BAD_REQUEST');
+    }
+    expect(bridge.importSongs).not.toHaveBeenCalled();
+  });
+
+  it('returns an empty import result for an explicit empty song list', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    globalThis.fetch = fetchMock;
+    const { router, runtimes } = createRouteHarness();
+
+    const response = await router.handle(request('POST', '/api/bridge/songs/import', { songs: [] }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response).data).toEqual({ total: 0, payloads: [] });
+    expect(runtimes.getMusicUrl).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('validates every import song before calling the service', async () => {
+    const bridge = {
+      previewUrl: vi.fn(),
+      importSongs: vi.fn(async () => ({ total: 1, payloads: [] })),
+      playOnSpeaker: vi.fn(),
+      externalSearch: vi.fn(),
+    } as unknown as BridgeService;
+    const router = createRouter();
+    registerBridgeHandlers(router, bridge);
+
+    const response = await router.handle(request('POST', '/api/bridge/songs/import', {
+      songs: [song, { title: 'Broken', source_data: { platform: 'kw', quality: '', songInfo: {} } }],
+    }));
+
+    expect(response.statusCode).toBe(400);
+    expect(parseResponseBody(response).error.code).toBe('BAD_REQUEST');
+    expect(bridge.importSongs).not.toHaveBeenCalled();
+  });
+
+  it('maps upstream import failures to 502', async () => {
+    globalThis.fetch = vi.fn(async () => ({ ok: false, status: 503 }) as Response);
+    const { router } = createRouteHarness();
+
+    const response = await router.handle(request('POST', '/api/bridge/songs/import', { songs: [song] }));
+
+    expect(response.statusCode).toBe(502);
+    expect(parseResponseBody(response).error).toMatchObject({
+      code: 'INTERNAL_ERROR',
+      retryable: true,
+    });
   });
 });
 
@@ -180,5 +348,18 @@ describe('OnlineSearcher bridge integration', () => {
     expect(bridge.externalSearch).toHaveBeenCalledWith('Song');
     expect(bridge.playOnSpeaker).toHaveBeenCalledWith('acc-1', 'dev-1', song);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not use bridge search or playback when external search is disabled', async () => {
+    const bridge = {
+      externalSearch: vi.fn(async () => song),
+      playOnSpeaker: vi.fn(async () => ({ url: 'https://audio.test/song.mp3' })),
+    } as unknown as BridgeService;
+    const searcher = new OnlineSearcher(configManager(false), bridge);
+
+    await expect(searcher.searchAndPlay('Song', { title: 'Song' }, 'acc-1', 'dev-1', {} as MinaService)).resolves.toBe(false);
+
+    expect(bridge.externalSearch).not.toHaveBeenCalled();
+    expect(bridge.playOnSpeaker).not.toHaveBeenCalled();
   });
 });

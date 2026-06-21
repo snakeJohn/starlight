@@ -146,6 +146,10 @@ export class OnlineSearcher {
     deviceId: string,
     minaService: MinaService,
   ): Promise<boolean> {
+    if (!(await this.isExternalSearchConfigured())) {
+      return false;
+    }
+
     if (this.bridgeService) {
       try {
         const result = await this.bridgeService.externalSearch(keyword);

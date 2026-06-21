@@ -28,6 +28,10 @@ export class BridgeService {
   }
 
   async importSongs(songs: SearchResultSong[]): Promise<{ total: number; payloads: RemoteSongPayload[] }> {
+    if (songs.length === 0) {
+      return { total: 0, payloads: [] };
+    }
+
     const payloads: RemoteSongPayload[] = [];
     for (const song of songs) {
       const url = await this.previewUrl(song);
@@ -42,7 +46,10 @@ export class BridgeService {
       body: JSON.stringify(payloads),
     });
     if (!response.ok) {
-      throw new StarlightError('INTERNAL_ERROR', `导入 Songloft 歌曲失败: ${response.status}`, true);
+      throw new StarlightError('INTERNAL_ERROR', `导入 Songloft 歌曲失败: ${response.status}`, true, {
+        upstream: 'songloft_remote_import',
+        status: response.status,
+      });
     }
 
     return { total: payloads.length, payloads };
@@ -65,13 +72,25 @@ export class BridgeService {
         continue;
       }
 
-      const result = await provider.search(keyword, 1, 5);
-      const first = result.list[0];
-      if (first) {
-        return first;
+      try {
+        const result = await provider.search(keyword, 1, 5);
+        const first = result.list[0];
+        if (first) {
+          return first;
+        }
+      } catch (error) {
+        songloft.log.warn(`[BridgeService] External search provider ${platform.id} failed: ${sanitizeProviderError(error)}`);
       }
     }
 
     return null;
   }
+}
+
+function sanitizeProviderError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/token[=:]\s*\S+/gi, 'token=[redacted]')
+    .slice(0, 500);
 }
