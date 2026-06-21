@@ -62,7 +62,7 @@ export const LX_SHIM = String.raw`
           };
 
           if (typeof callback === 'function') {
-            callback(null, result);
+            callback(null, response, body);
           }
 
           return result;
@@ -70,7 +70,7 @@ export const LX_SHIM = String.raw`
       })
       .catch(function (error) {
         if (typeof callback === 'function') {
-          callback(error);
+          callback(error, null, null);
           return null;
         }
 
@@ -104,7 +104,7 @@ export const LX_SHIM = String.raw`
         emit('dispatchError', {
           id: id,
           event: event,
-          error: error && error.stack ? error.stack : String(error),
+          error: String(error && error.message || error),
         });
       });
   };

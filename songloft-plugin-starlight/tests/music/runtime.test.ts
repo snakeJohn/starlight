@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
+import { LX_SHIM } from '../../src/music/lx_shim';
 import { RuntimeManager } from '../../src/music/runtime_manager';
 import { SourceRuntime } from '../../src/music/runtime';
 import type { SourceManager } from '../../src/music/source_manager';
@@ -27,6 +28,21 @@ interface TestJsenv {
   create: (name: string, initCode?: string) => Promise<string>;
   executeWait: ExecuteWaitHandler;
   destroy: (name: string) => Promise<void>;
+}
+
+interface ShimLx {
+  request(
+    url: string,
+    options: Record<string, unknown>,
+    callback: (error: unknown, response: unknown, text: unknown) => void,
+  ): Promise<unknown>;
+  on(name: string, handler: (payload: unknown) => unknown): void;
+  _dispatch(id: string, event: string, payload: unknown): void;
+}
+
+interface ShimGlobal {
+  lx?: ShimLx;
+  __songloftEmitEvent?: (name: string, data: string) => void;
 }
 
 const syntheticScript = String.raw`lx.send('inited', { sources: { kw: {}, kg: {} } });`;
@@ -66,24 +82,55 @@ function initedEvent(sources: Record<string, unknown>): JsenvEvent {
 function dispatchResultEvent(code: string, dispatchResult: unknown): JsenvEvent {
   return {
     name: 'dispatchResult',
-    data: JSON.stringify({ id: dispatchIdFrom(code), result: dispatchResult }),
+    data: JSON.stringify({ id: dispatchCallFrom(code).id, result: dispatchResult }),
   };
 }
 
 function dispatchErrorEvent(code: string, error: string): JsenvEvent {
   return {
     name: 'dispatchError',
-    data: JSON.stringify({ id: dispatchIdFrom(code), error }),
+    data: JSON.stringify({ id: dispatchCallFrom(code).id, error }),
   };
 }
 
-function dispatchIdFrom(code: string): string {
-  const match = code.match(/_dispatch\("([^"]+)"/);
+function dispatchCallFrom(code: string): { id: string; event: string; payload: unknown } {
+  const match = code.match(/^globalThis\.lx\._dispatch\((".*?"), "([^"]+)", (.*)\);$/);
   if (!match) {
-    throw new Error(`Dispatch id not found in code: ${code}`);
+    throw new Error(`Dispatch call not found in code: ${code}`);
   }
 
-  return match[1];
+  return {
+    id: JSON.parse(match[1]) as string,
+    event: match[2],
+    payload: JSON.parse(match[3]) as unknown,
+  };
+}
+
+function installShim(): { shimGlobal: ShimGlobal; restore: () => void } {
+  const shimGlobal = globalThis as typeof globalThis & ShimGlobal;
+  const previousLx = shimGlobal.lx;
+  const previousEmitEvent = shimGlobal.__songloftEmitEvent;
+
+  delete shimGlobal.lx;
+  shimGlobal.__songloftEmitEvent = vi.fn();
+  Function(LX_SHIM)();
+
+  return {
+    shimGlobal,
+    restore: () => {
+      if (previousLx === undefined) {
+        delete shimGlobal.lx;
+      } else {
+        shimGlobal.lx = previousLx;
+      }
+
+      if (previousEmitEvent === undefined) {
+        delete shimGlobal.__songloftEmitEvent;
+      } else {
+        shimGlobal.__songloftEmitEvent = previousEmitEvent;
+      }
+    },
+  };
 }
 
 function sourceMeta(id: string, enabled: boolean): MusicSourceMeta {
@@ -111,7 +158,10 @@ function fakeSourceManager(
   } as unknown as SourceManager;
 }
 
-async function createRuntimeWithDispatch(dispatchResult: unknown): Promise<SourceRuntime> {
+async function createRuntimeWithDispatch(
+  dispatchResult: unknown,
+): Promise<{ runtime: SourceRuntime; dispatches: Array<{ id: string; event: string; payload: unknown }> }> {
+  const dispatches: Array<{ id: string; event: string; payload: unknown }> = [];
   installJsenvMock((name, code, timeoutMs, waitEvents) => {
     expect(timeoutMs).toBe(30000);
 
@@ -121,14 +171,14 @@ async function createRuntimeWithDispatch(dispatchResult: unknown): Promise<Sourc
 
     expect(name).toBe('starlight_lx_synthetic_source');
     expect(waitEvents).toEqual(['dispatchResult', 'dispatchError']);
-    expect(code).toContain('"musicUrl"');
-    expect(code).toContain('"platform":"kw"');
+    const dispatch = dispatchCallFrom(code);
+    dispatches.push(dispatch);
     return result([dispatchResultEvent(code, dispatchResult)]);
   });
 
   const runtime = await SourceRuntime.create('synthetic/source', syntheticScript);
   expect(runtime).not.toBeNull();
-  return runtime as SourceRuntime;
+  return { runtime: runtime as SourceRuntime, dispatches };
 }
 
 describe('SourceRuntime', () => {
@@ -155,13 +205,24 @@ describe('SourceRuntime', () => {
   });
 
   test('getMusicUrl returns a dispatch result string URL', async () => {
-    const runtime = await createRuntimeWithDispatch('https://cdn.invalid/song.mp3');
+    const { runtime, dispatches } = await createRuntimeWithDispatch('https://cdn.invalid/song.mp3');
 
     await expect(runtime.getMusicUrl('kw', '320k', songInfo)).resolves.toBe('https://cdn.invalid/song.mp3');
+    expect(dispatches).toHaveLength(1);
+    expect(dispatches[0].id).toMatch(/^musicUrl_\d+$/);
+    expect(dispatches[0].event).toBe('request');
+    expect(dispatches[0].payload).toEqual({
+      source: 'kw',
+      action: 'musicUrl',
+      info: {
+        musicInfo: songInfo,
+        type: '320k',
+      },
+    });
   });
 
   test('getMusicUrl supports object dispatch result with url', async () => {
-    const runtime = await createRuntimeWithDispatch({ url: 'https://cdn.invalid/object.flac' });
+    const { runtime } = await createRuntimeWithDispatch({ url: 'https://cdn.invalid/object.flac' });
 
     await expect(runtime.getMusicUrl('kw', 'flac', songInfo)).resolves.toBe('https://cdn.invalid/object.flac');
   });
@@ -214,6 +275,81 @@ describe('SourceRuntime', () => {
       retryable: false,
     });
     expect(destroy).toHaveBeenCalledWith('starlight_lx_missing_inited');
+  });
+});
+
+describe('LX_SHIM', () => {
+  test('lx.request calls back with error, response, and text on success', async () => {
+    const { shimGlobal, restore } = installShim();
+    const previousFetch = globalThis.fetch;
+    const callback = vi.fn();
+    const response = {
+      status: 201,
+      headers: {
+        forEach(handler: (value: string, key: string) => void) {
+          handler('text/plain', 'content-type');
+        },
+      },
+      text: async () => 'body text',
+    } as Response;
+    globalThis.fetch = vi.fn(async () => response);
+
+    try {
+      const promiseResult = await shimGlobal.lx?.request('https://example.invalid/api', { method: 'POST' }, callback);
+
+      expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ status: 201 }), 'body text');
+      expect(promiseResult).toEqual(expect.objectContaining({ status: 201, body: 'body text', data: 'body text' }));
+    } finally {
+      globalThis.fetch = previousFetch;
+      restore();
+    }
+  });
+
+  test('lx.request calls back with error, null, and null on failure', async () => {
+    const { shimGlobal, restore } = installShim();
+    const previousFetch = globalThis.fetch;
+    const callback = vi.fn();
+    const error = new Error('network failed');
+    globalThis.fetch = vi.fn(async () => {
+      throw error;
+    });
+
+    try {
+      await expect(shimGlobal.lx?.request('https://example.invalid/api', {}, callback)).resolves.toBeNull();
+      expect(callback).toHaveBeenCalledWith(error, null, null);
+    } finally {
+      globalThis.fetch = previousFetch;
+      restore();
+    }
+  });
+
+  test('_dispatch emits dispatchError from error message instead of stack', async () => {
+    const { shimGlobal, restore } = installShim();
+    const emittedEvents: Array<{ name: string; data: string }> = [];
+    shimGlobal.__songloftEmitEvent = (name, data) => emittedEvents.push({ name, data });
+    shimGlobal.lx?.on('request', () => {
+      const error = new Error('resolver failed');
+      error.stack = 'stack details';
+      throw error;
+    });
+
+    try {
+      shimGlobal.lx?._dispatch('dispatch-1', 'request', {});
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(emittedEvents).toEqual([
+        {
+          name: 'dispatchError',
+          data: JSON.stringify({
+            id: 'dispatch-1',
+            event: 'request',
+            error: 'resolver failed',
+          }),
+        },
+      ]);
+    } finally {
+      restore();
+    }
   });
 });
 

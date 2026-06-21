@@ -104,8 +104,15 @@ export class SourceRuntime {
     songInfo: LxSongInfo,
   ): Promise<string | null> {
     const dispatchId = `musicUrl_${nextDispatchId++}`;
-    const payload = { platform, quality, songInfo };
-    const code = `globalThis.lx._dispatch(${JSON.stringify(dispatchId)}, "musicUrl", ${JSON.stringify(payload)});`;
+    const payload = {
+      source: platform,
+      action: 'musicUrl',
+      info: {
+        musicInfo: songInfo,
+        type: quality,
+      },
+    };
+    const code = `globalThis.lx._dispatch(${JSON.stringify(dispatchId)}, "request", ${JSON.stringify(payload)});`;
 
     try {
       const dispatchResult = await songloft.jsenv.executeWait(
