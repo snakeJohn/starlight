@@ -179,6 +179,27 @@ async function flushMicrotasks(turns = 5): Promise<void> {
   }
 }
 
+async function waitForMicrotaskCondition(condition: () => boolean, turns = 50): Promise<void> {
+  for (let index = 0; index < turns; index += 1) {
+    if (condition()) {
+      return;
+    }
+
+    await Promise.resolve();
+  }
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: unknown) => void } {
+  let resolve: (value: T) => void = () => {};
+  let reject: (error: unknown) => void = () => {};
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 async function createRuntimeWithDispatch(
   dispatchResult: unknown,
 ): Promise<{ runtime: SourceRuntime; dispatches: Array<{ id: string; event: string; payload: unknown }> }> {
@@ -766,5 +787,90 @@ describe('RuntimeManager', () => {
 
     releaseFirstDestroy();
     await expect(close).resolves.toBeUndefined();
+  });
+
+  test('close waits for active load and prevents late-published runtimes', async () => {
+    const scriptLoad = deferred<string>();
+    const getScript = vi.fn(async () => scriptLoad.promise);
+    const managerSource = {
+      listSources: () => [sourceMeta('enabled-a', true)],
+      getScript,
+    } as unknown as SourceManager;
+    installJsenvMock((_name, _code, _timeoutMs, waitEvents) => {
+      expect(waitEvents).toEqual(['inited']);
+      return result([initedEvent({ kw: {} })]);
+    });
+    const manager = new RuntimeManager(managerSource);
+
+    const load = manager.loadEnabledSources();
+    await flushMicrotasks();
+    expect(getScript).toHaveBeenCalledWith('enabled-a');
+
+    let closeResolved = false;
+    const close = manager.close().then(() => {
+      closeResolved = true;
+    });
+    await flushMicrotasks();
+
+    expect(closeResolved).toBe(false);
+
+    scriptLoad.resolve('script-a');
+    await expect(load).resolves.toBeUndefined();
+    await expect(close).resolves.toBeUndefined();
+    expect(closeResolved).toBe(true);
+    expect(manager.count()).toBe(0);
+  });
+
+  test('getMusicUrl waits for reload to publish the new complete runtime list', async () => {
+    let sources = [sourceMeta('old-kw', true)];
+    const delayedSecondScript = deferred<string>();
+    const getScript = vi.fn(async (id: string) => {
+      if (id === 'new-kw') {
+        return delayedSecondScript.promise;
+      }
+
+      return `${id}-script`;
+    });
+    const managerSource = {
+      listSources: () => sources,
+      getScript,
+    } as unknown as SourceManager;
+    installJsenvMock((name, code, _timeoutMs, waitEvents) => {
+      if (waitEvents.includes('inited')) {
+        const platform = code.includes('kg') ? 'kg' : 'kw';
+        return result([initedEvent({ [platform]: {} })]);
+      }
+
+      return result([dispatchResultEvent(code, `https://cdn.invalid/${name}.mp3`)]);
+    });
+    const manager = new RuntimeManager(managerSource);
+    await manager.loadEnabledSources();
+    expect(manager.count()).toBe(1);
+
+    sources = [sourceMeta('new-kg', true), sourceMeta('new-kw', true)];
+    const reload = manager.loadEnabledSources();
+    await waitForMicrotaskCondition(() => getScript.mock.calls.some((call) => call[0] === 'new-kw'));
+
+    expect(getScript).toHaveBeenCalledWith('new-kg');
+    expect(getScript).toHaveBeenCalledWith('new-kw');
+
+    let lookupResolved = false;
+    const lookup = manager.getMusicUrl('kw', '320k', songInfo).then((url) => {
+      lookupResolved = true;
+      return url;
+    });
+    await flushMicrotasks();
+
+    expect(lookupResolved).toBe(false);
+
+    delayedSecondScript.resolve('new-kw-script');
+    await expect(reload).resolves.toBeUndefined();
+    expect(manager.count()).toBe(2);
+    await expect(lookup).resolves.toMatch(
+      /^https:\/\/cdn\.invalid\/starlight_lx_new-kw(?:_[a-z0-9]+)?\.mp3$/,
+    );
+    await expect(manager.getMusicUrl('kg', '320k', songInfo)).resolves.toMatch(
+      /^https:\/\/cdn\.invalid\/starlight_lx_new-kg(?:_[a-z0-9]+)?\.mp3$/,
+    );
   });
 });

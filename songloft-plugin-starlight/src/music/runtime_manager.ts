@@ -4,35 +4,42 @@ import type { LxSongInfo, MusicPlatform, MusicQuality } from './types';
 
 export class RuntimeManager {
   private runtimes: SourceRuntime[] = [];
-  private reloadQueue: Promise<void> = Promise.resolve();
+  private lifecycleQueue: Promise<void> = Promise.resolve();
+  private lifecycleBusy = false;
 
   constructor(private readonly sourceManager: SourceManager) {}
 
   async loadEnabledSources(): Promise<void> {
-    const reload = this.reloadQueue.then(() => this.reloadEnabledSources());
-    this.reloadQueue = reload.catch(() => undefined);
-    return reload;
+    return this.enqueueLifecycle(() => this.reloadEnabledSources());
   }
 
   private async reloadEnabledSources(): Promise<void> {
     await this.closeLoadedRuntimes();
 
-    for (const source of this.sourceManager.listSources()) {
-      if (!source.enabled) {
-        continue;
-      }
-
-      try {
-        const script = await this.sourceManager.getScript(source.id);
-        if (script === null) {
+    const nextRuntimes: SourceRuntime[] = [];
+    try {
+      for (const source of this.sourceManager.listSources()) {
+        if (!source.enabled) {
           continue;
         }
 
-        const runtime = await SourceRuntime.create(source.id, script);
-        this.runtimes.push(runtime);
-      } catch (error) {
-        songloft.log.warn(`Failed to load music source ${source.id}: ${String(error)}`);
+        try {
+          const script = await this.sourceManager.getScript(source.id);
+          if (script === null) {
+            continue;
+          }
+
+          const runtime = await SourceRuntime.create(source.id, script);
+          nextRuntimes.push(runtime);
+        } catch (error) {
+          songloft.log.warn(`Failed to load music source ${source.id}: ${String(error)}`);
+        }
       }
+
+      this.runtimes = nextRuntimes;
+    } catch (error) {
+      await this.destroyRuntimes(nextRuntimes);
+      throw error;
     }
   }
 
@@ -41,6 +48,10 @@ export class RuntimeManager {
     quality: MusicQuality | string,
     songInfo: LxSongInfo,
   ): Promise<string | null> {
+    if (this.lifecycleBusy) {
+      await this.lifecycleQueue;
+    }
+
     for (const runtime of this.runtimes) {
       if (!runtime.supportsPlatform(platform)) {
         continue;
@@ -60,13 +71,37 @@ export class RuntimeManager {
   }
 
   async close(): Promise<void> {
-    await this.closeLoadedRuntimes();
+    await this.enqueueLifecycle(() => this.closeLoadedRuntimes());
+  }
+
+  private async enqueueLifecycle(task: () => Promise<void>): Promise<void> {
+    const previous = this.lifecycleQueue;
+    let release = () => {};
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.lifecycleQueue = current;
+    this.lifecycleBusy = true;
+
+    await previous;
+    try {
+      await task();
+    } finally {
+      release();
+      if (this.lifecycleQueue === current) {
+        this.lifecycleBusy = false;
+      }
+    }
   }
 
   private async closeLoadedRuntimes(): Promise<void> {
     const runtimes = this.runtimes;
     this.runtimes = [];
 
+    await this.destroyRuntimes(runtimes);
+  }
+
+  private async destroyRuntimes(runtimes: SourceRuntime[]): Promise<void> {
     const destroys = runtimes.map(async (runtime) => {
       try {
         await runtime.destroy();
