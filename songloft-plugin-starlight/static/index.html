@@ -3,1020 +3,439 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>MIoT 智能音箱</title>
+    <title>Starlight Songloft</title>
     <link rel="icon" type="image/svg+xml" href="static/icon.svg">
     <link rel="stylesheet" href="static/css/style.css">
-
 </head>
 <body>
-    <!-- AppBar -->
-    <header class="app-bar">
-        <button class="btn-icon app-bar-back" id="navBackBtn" style="display:none" title="返回">
-            <span class="material-symbols-outlined">arrow_back</span>
-        </button>
-        <span class="material-symbols-outlined app-bar-icon" id="appBarIcon">speaker</span>
-        <h1 id="appBarTitle">MIoT 智能音箱</h1>
-        <button class="btn-icon" id="accountBtn" title="账号管理">
-            <span class="material-symbols-outlined">person</span>
-        </button>
-        <button class="btn-icon" id="settingsBtn" title="设置">
-            <span class="material-symbols-outlined">settings</span>
-        </button>
-        <button class="btn-icon" id="refreshBtn" title="刷新">
-            <span class="material-symbols-outlined">refresh</span>
-        </button>
-    </header>
+    <div class="app-shell">
+        <aside class="side-rail" id="sideRail"></aside>
+        <main class="workspace">
+            <header class="status-strip" id="statusStrip"></header>
 
-    <!-- Player Toolbar: 歌单选择 + 设备选择 -->
-    <div class="player-toolbar" id="playerToolbar">
-        <div class="playlist-selector" id="playlistSelectorBar" onclick="togglePlaylistSelectPanel(this)">
-            <span class="material-symbols-outlined">queue_music</span>
-            <span class="playlist-selector-text" id="playlistSelectorText">请选择歌单</span>
-            <span class="material-symbols-outlined playlist-selector-arrow">expand_more</span>
-        </div>
-        <div class="toolbar-divider"></div>
-        <div class="toolbar-device-selector" id="toolbarDeviceCard" onclick="toggleDeviceSelectPanel(this)">
-            <span class="material-symbols-outlined toolbar-device-icon">speaker</span>
-            <span class="toolbar-device-label" id="toolbarDeviceLabel">设备</span>
-            <span class="material-symbols-outlined toolbar-device-arrow">expand_more</span>
-        </div>
-    </div>
-
-    <!-- Page: 播放控制 -->
-    <div class="page-content active" id="tab-player">
-        <div class="container">
-            <select id="playlistSelect" style="display:none" aria-label="选择歌单"></select>
-
-            <!-- 歌曲搜索栏 -->
-            <div class="search-bar" id="songSearchBar" style="display:none">
-                <span class="material-symbols-outlined">search</span>
-                <input type="text" id="songSearchInput" placeholder="搜索歌曲..." autocomplete="off" aria-label="搜索歌曲">
-            </div>
-
-            <!-- 歌曲列表 -->
-            <div class="song-list" id="songList">
-                <div class="song-list-empty">请选择歌单</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Page: 账号管理 -->
-    <div class="page-content" id="tab-devices">
-        <div class="container">
-            <!-- 隐藏的 select 元素供 JS 使用 -->
-            <div style="display:none">
-                <select id="accountSelect" aria-label="选择账号"></select>
-                <select id="deviceSelect" aria-label="选择设备"></select>
-                <span id="currentDeviceName"></span>
-                <span id="currentDeviceAccount"></span>
-                <span id="currentDeviceStatus"></span>
-            </div>
-
-            <!-- 账号登录卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">person_add</span>
-                    添加账号
+            <section class="tab-panel active" id="tab-search">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Music Bridge</p>
+                        <h1>搜索</h1>
+                    </div>
+                    <div class="status-pill" data-role="source-count">0 个音源</div>
                 </div>
-                <div class="card-body">
-                    <!-- 子 Tab 切换 -->
-                    <div class="auth-tabs" role="tablist">
-                        <button class="auth-tab-btn active" data-auth-tab="qrcode" role="tab">扫码登录</button>
-                        <button class="auth-tab-btn" data-auth-tab="password" role="tab">账号密码</button>
-                        <button class="auth-tab-btn" data-auth-tab="token" role="tab">手动 Token</button>
-                    </div>
 
-                    <!-- 扫码登录 -->
-                    <div class="auth-tab-content active" id="auth-tab-qrcode">
-                        <div class="qrcode-hint" style="font-size:13px;color:var(--md-on-surface-variant);margin-bottom:16px">
-                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle">info</span>
-                            使用米家APP扫描二维码登录，系统将自动创建账号
-                        </div>
-                        <div style="text-align:center">
-                            <button class="btn-filled" id="getQRCodeBtn" style="width:100%">
-                                <span class="material-symbols-outlined">qr_code_2</span>
-                                获取二维码
-                            </button>
-                        </div>
-                        <div id="qrcodeContainer" style="display:none;margin-top:16px;text-align:center">
-                            <img id="qrcodeImage" style="max-width:200px;border-radius:var(--md-radius-md);border:1px solid var(--md-outline-variant)" alt="登录二维码">
-                            <div id="qrcodeLoginLink" style="margin-top:8px"></div>
-                            <div id="qrcodeStatus" style="margin-top:12px;font-size:14px;color:var(--md-on-surface-variant)"></div>
-                        </div>
-                    </div>
+                <form class="control-grid compact" data-role="music-search-form">
+                    <label>
+                        <span>平台</span>
+                        <select name="source_id" data-role="platform-select"></select>
+                    </label>
+                    <label>
+                        <span>音质</span>
+                        <select name="quality" data-role="quality-select">
+                            <option value="320k">320k</option>
+                            <option value="128k">128k</option>
+                            <option value="flac">flac</option>
+                            <option value="flac24bit">flac24bit</option>
+                        </select>
+                    </label>
+                    <label class="wide-field">
+                        <span>关键词</span>
+                        <input name="keyword" type="search" placeholder="歌曲、歌手或专辑" autocomplete="off">
+                    </label>
+                    <button class="primary-button" type="submit">搜索</button>
+                </form>
 
-                    <!-- 账号密码登录 -->
-                    <div class="auth-tab-content" id="auth-tab-password">
-                        <div class="form-group">
-                            <label class="form-label">用户名</label>
-                            <input type="text" class="text-field" id="username" placeholder="手机号/邮箱" aria-label="用户名">
+                <div class="surface-section">
+                    <div class="section-bar">
+                        <h2>结果</h2>
+                        <span data-role="search-total">0</span>
+                    </div>
+                    <div class="list-stack" data-role="search-results"></div>
+                </div>
+            </section>
+
+            <section class="tab-panel" id="tab-speaker">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">MIoT</p>
+                        <h1>音箱</h1>
+                    </div>
+                    <button class="ghost-button" type="button" data-action="refresh-speaker">刷新</button>
+                </div>
+
+                <div class="two-column">
+                    <section class="surface-section">
+                        <div class="section-bar">
+                            <h2>账号</h2>
+                            <span data-role="auth-summary">未加载</span>
                         </div>
-                        <div class="form-group" style="margin-top:12px">
-                            <label class="form-label">密码</label>
-                            <input type="password" class="text-field" id="password" placeholder="密码" aria-label="密码">
+                        <div class="segmented" role="tablist">
+                            <button class="active" type="button" data-auth-mode="qrcode">扫码</button>
+                            <button type="button" data-auth-mode="password">密码</button>
+                            <button type="button" data-auth-mode="token">Token</button>
                         </div>
-                        <div style="margin-top:16px">
-                            <button class="btn-filled" id="addAccountBtn" style="width:100%">
-                                <span class="material-symbols-outlined">login</span>
-                                添加账号
-                            </button>
-                        </div>
-                        <!-- 验证码区域（隐藏） -->
-                        <div class="captcha-container" id="captchaContainer" style="display:none">
-                            <div class="form-group" style="margin-top:16px">
-                                <label class="form-label">验证码</label>
-                                <div style="display:flex;gap:8px;align-items:center">
-                                    <img id="captchaImage" style="height:40px;border-radius:var(--md-radius-sm)" alt="验证码图片">
-                                    <input type="text" class="text-field" id="captchaInput" placeholder="输入验证码" style="flex:1" aria-label="验证码">
-                                    <button class="btn-filled" id="submitCaptchaBtn">提交</button>
-                                </div>
+
+                        <div class="auth-panel active" data-auth-panel="qrcode">
+                            <div class="inline-actions">
+                                <button class="primary-button" type="button" data-action="qr-start">获取二维码</button>
+                                <button class="ghost-button" type="button" data-action="qr-poll">轮询</button>
+                            </div>
+                            <div class="qr-box" data-role="qr-box">
+                                <img data-role="qr-image" alt="二维码">
+                                <a data-role="qr-link" target="_blank" rel="noreferrer"></a>
+                                <span data-role="qr-status">等待生成</span>
                             </div>
                         </div>
-                        <!-- 二次验证区域（隐藏） -->
-                        <div class="verify-container" id="verifyContainer" style="display:none">
-                            <div class="form-group" style="margin-top:16px">
-                                <label class="form-label">二次验证</label>
-                                <p style="font-size:13px;color:var(--md-on-surface-variant)">请在浏览器中完成验证后输入验证码</p>
-                                <div style="display:flex;gap:8px;margin-top:8px">
-                                    <button class="btn-outlined" id="openVerifyBtn">
-                                        <span class="material-symbols-outlined">open_in_new</span>
-                                        打开验证
-                                    </button>
-                                    <input type="text" class="text-field" id="verifyCodeInput" placeholder="验证码" style="flex:1" aria-label="二次验证码">
-                                    <button class="btn-filled" id="submitVerifyBtn">提交</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
 
-                    <!-- Token 设置 -->
-                    <div class="auth-tab-content" id="auth-tab-token">
-                        <div class="qrcode-hint" style="font-size:13px;color:var(--md-on-surface-variant);margin-bottom:16px">
-                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle">info</span>
-                            从浏览器登录小米账号后，在 Cookie 中提取 userId 和 passToken
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">User ID</label>
-                            <input type="text" class="text-field" id="tokenUserId" placeholder="Cookie 中的 userId" aria-label="User ID">
-                        </div>
-                        <div class="form-group" style="margin-top:12px">
-                            <label class="form-label">Pass Token</label>
-                            <input type="text" class="text-field" id="passToken" placeholder="Cookie 中的 passToken" aria-label="Pass Token">
-                        </div>
-                        <div style="margin-top:16px">
-                            <button class="btn-filled" id="addTokenBtn" style="width:100%">
-                                <span class="material-symbols-outlined">key</span>
-                                添加账号
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                        <form class="auth-panel control-stack" data-auth-panel="password" data-role="password-login-form">
+                            <label>
+                                <span>账号 ID</span>
+                                <input name="account_id" autocomplete="username" placeholder="可留空">
+                            </label>
+                            <label>
+                                <span>用户名</span>
+                                <input name="username" autocomplete="username" required>
+                            </label>
+                            <label>
+                                <span>密码</span>
+                                <input name="password" type="password" autocomplete="current-password" required>
+                            </label>
+                            <button class="primary-button" type="submit">登录</button>
+                        </form>
 
-            <!-- 已登录账号列表卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">group</span>
-                    已登录账号
-                </div>
-                <div class="card-body" id="accountList">
-                    <div class="empty-state">暂无账号，请先添加</div>
-                </div>
-            </div>
-        </div>
-    </div>
+                        <form class="auth-panel control-stack" data-auth-panel="token" data-role="token-login-form">
+                            <label>
+                                <span>账号 ID</span>
+                                <input name="account_id" placeholder="可留空">
+                            </label>
+                            <label>
+                                <span>User ID</span>
+                                <input name="user_id" required>
+                            </label>
+                            <label>
+                                <span>Pass Token</span>
+                                <input name="pass_token" required>
+                            </label>
+                            <button class="primary-button" type="submit">保存 Token</button>
+                        </form>
 
-    <!-- Page: 设置 -->
-    <div class="page-content" id="tab-settings">
-        <div class="container">
-            <!-- 服务器地址配置卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">dns</span>
-                    服务器配置
-                </div>
-                <div class="card-body">
-                    <div class="form-group">
-                        <label class="form-label">服务器地址</label>
-                        <input type="text" class="text-field" id="serverHost" placeholder="例如: http://192.168.1.100:58091" aria-label="服务器地址">
-                    </div>
-                    <div class="server-host-warning" id="serverHostWarning" style="display:none">
-                        <span class="material-symbols-outlined" style="font-size:16px;flex-shrink:0">warning</span>
-                        <span id="serverHostWarningText"></span>
-                    </div>
-                    <div class="toolbar" style="padding:12px 0 0;justify-content:flex-end">
-                        <button class="btn-text" id="autoFillBtn">
-                            <span class="material-symbols-outlined">auto_fix_high</span>
-                            自动填充
-                        </button>
-                        <button class="btn-filled" id="saveConfigBtn">
-                            <span class="material-symbols-outlined">save</span>
-                            保存
-                        </button>
-                    </div>
-                </div>
-            </div>
+                        <div class="list-stack tight" data-role="account-list"></div>
+                    </section>
 
-            <!-- 音频格式卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">audio_file</span>
-                    音频格式
-                </div>
-                <div class="card-body">
-                    <div class="switch-row">
-                        <div class="switch-row-label">
-                            <span class="switch-row-title">统一转为 MP3</span>
-                            <span class="switch-row-subtitle">部分音响仅支持 MP3 格式，开启后播放时自动转码</span>
+                    <section class="surface-section">
+                        <div class="section-bar">
+                            <h2>设备</h2>
+                            <button class="ghost-button" type="button" data-action="refresh-devices">刷新</button>
                         </div>
-                        <label class="switch">
-                            <input type="checkbox" id="forceMp3Switch" aria-label="统一转为 MP3">
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 指示灯 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">lightbulb</span>
-                    指示灯
-                </div>
-                <div class="card-body">
-                    <div class="switch-row">
-                        <div class="switch-row-label">
-                            <span class="switch-row-title">播放时保持指示灯</span>
-                            <span class="switch-row-subtitle">关闭后播放音乐时音箱指示灯不亮，适合夜间使用</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="indicatorLightSwitch" aria-label="播放时保持指示灯">
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 自定义 Music API 型号 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">speaker</span>
-                    自定义 Music API 型号
-                </div>
-                <div class="card-body">
-                    <p class="card-description">部分较新型号的音箱需要使用 Music API 播放，如果你的音箱播放时静音，可在此添加设备型号代码。型号可在账号页面的设备列表中查看。</p>
-                    <div class="input-row" style="margin-top:8px">
-                        <input type="text" id="extraMusicApiModelsInput" placeholder="例如: L15A, L16A" class="input-field" style="flex:1" aria-label="自定义 Music API 型号">
-                        <button class="btn btn-primary" id="saveExtraMusicApiModelsBtn">保存</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 对话监听卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">record_voice_over</span>
-                    对话监听
-                </div>
-                <div class="card-body">
-                    <!-- 开关 -->
-                    <div class="switch-row">
-                        <div class="switch-row-label">
-                            <span class="switch-row-title">启用对话监听</span>
-                            <span class="switch-row-subtitle" id="conversationStatusText">已关闭</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="conversationMonitorSwitch" aria-label="启用对话监听">
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-
-                    <!-- 监听状态 -->
-                    <div id="conversationStatusPanel" style="display:none;margin-top:12px">
-                        <div class="status-chips" id="conversationDeviceChips"></div>
-                    </div>
-
-                    <!-- Webhook 管理 -->
-                    <div style="margin-top:16px">
-                        <div class="section-title">
-                            <span class="material-symbols-outlined" style="font-size:18px">webhook</span>
-                            Webhook 回调
-                        </div>
-                        <div class="webhook-list" id="webhookList">
-                            <div class="empty-state" style="padding:12px;font-size:13px">暂无 Webhook</div>
-                        </div>
-                        <div class="webhook-add-row" style="margin-top:8px">
-                            <input type="text" class="text-field" id="webhookUrlInput" placeholder="输入回调 URL" style="flex:1" aria-label="Webhook 回调 URL">
-                            <button class="btn-filled btn-sm" id="addWebhookBtn">
-                                <span class="material-symbols-outlined" style="font-size:18px">add</span>
-                                添加
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- 最近对话记录 -->
-                    <div style="margin-top:16px">
-                        <div class="section-title">
-                            <span class="material-symbols-outlined" style="font-size:18px">chat</span>
-                            最近对话
-                            <button class="btn-text btn-sm" id="refreshConversationBtn" style="margin-left:auto;font-size:12px">
-                                <span class="material-symbols-outlined" style="font-size:16px">refresh</span>
-                            </button>
-                        </div>
-                        <div class="conversation-list" id="conversationList">
-                            <div class="empty-state" style="padding:12px;font-size:13px">暂无对话记录</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 歌曲/歌单索引卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">database</span>
-                    歌曲索引
-                </div>
-                <div class="card-body">
-                    <div class="voice-cmd-index-status" id="voiceCommandIndexStatus">
-                        <span class="material-symbols-outlined" style="font-size:16px">database</span>
-                        <span id="indexStatusText">索引未就绪</span>
-                        <button class="btn-text btn-sm" id="refreshIndexBtn" style="margin-left:auto;font-size:12px">
-                            <span class="material-symbols-outlined" style="font-size:16px">refresh</span>
-                            刷新索引
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 语音口令卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">mic</span>
-                    语音口令
-                </div>
-                <div class="card-body">
-                    <!-- 开关 -->
-                    <div class="switch-row">
-                        <div class="switch-row-label">
-                            <span class="switch-row-title">启用语音口令</span>
-                            <span class="switch-row-subtitle" id="voiceCommandStatusText">已关闭</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="voiceCommandSwitch" aria-label="启用语音口令">
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-
-                    <!-- 依赖提示 -->
-                    <div id="voiceCommandDependencyHint" class="voice-cmd-hint" style="display:none;margin-top:8px">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle">warning</span>
-                        需要先开启「对话监听」才能使用语音口令
-                    </div>
-
-                    <!-- 口令列表 -->
-                    <div id="voiceCommandList" style="margin-top:16px">
-                        <div class="empty-state" style="padding:12px;font-size:13px">加载中...</div>
-                    </div>
-                    <!-- 底部操作 -->
-                    <div class="toolbar" style="padding:12px 0 0;justify-content:flex-end">
-                        <button class="btn-text" id="resetVoiceCommandsBtn">
-                            <span class="material-symbols-outlined">restart_alt</span>
-                            恢复默认
-                        </button>
-                    </div>
-
-                    <!-- AI 分析配置 -->
-                    <div class="voice-cmd-ai-panel" id="aiAnalysisPanel" style="margin-top:16px">
-                        <div class="section-title">
-                            <span class="material-symbols-outlined" style="font-size:18px">psychology</span>
-                            AI 口令分析
-                        </div>
-                        <div style="margin-top:8px;padding:8px 12px;background:rgba(0,0,0,0.03);border-radius:6px;font-size:13px;color:#666;line-height:1.5">
-                            💡 启用后，系统将优先使用 AI 分析用户语音口令，上面的语音口令规则将不再生效。
-                        </div>
-                        <div class="switch-row" style="margin-top:8px">
-                            <div class="switch-row-label">
-                                <span class="switch-row-title">启用 AI 分析</span>
-                                <span class="switch-row-subtitle" id="aiAnalysisStatusText">已关闭</span>
-                            </div>
-                            <label class="switch">
-                                <input type="checkbox" id="aiAnalysisSwitch" aria-label="启用 AI 分析">
-                                <span class="switch-slider"></span>
+                        <div class="control-grid">
+                            <label>
+                                <span>账号</span>
+                                <select data-role="account-select"></select>
+                            </label>
+                            <label>
+                                <span>设备</span>
+                                <select data-role="device-select"></select>
                             </label>
                         </div>
-
-                        <!-- AI 分析依赖提示 -->
-                        <div id="aiAnalysisDependencyHint" class="voice-cmd-hint" style="display:none;margin-top:8px">
-                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle">warning</span>
-                            需要先开启「语音口令」才能使用 AI 分析
-                        </div>
-
-                        <!-- AI 配置表单 -->
-                        <div id="aiConfigPanel" style="display:none;margin-top:12px">
-                            <div class="form-group">
-                                <label class="form-label">API 地址</label>
-                                <input type="text" class="text-field" id="aiApiUrl" placeholder="例如: https://dashscope.aliyuncs.com/compatible-mode/v1" aria-label="AI API 地址">
-                                <div style="margin-top:4px;font-size:12px;color:#999">兼容 OpenAI 格式的 API 地址，如阿里百炼</div>
-                            </div>
-                            <div class="form-group" style="margin-top:8px">
-                                <label class="form-label">API Key</label>
-                                <input type="password" class="text-field" id="aiApiKey" placeholder="API 密钥" aria-label="AI API 密钥">
-                                <div style="margin-top:4px;font-size:12px;color:#999">用于身份验证的 API 密钥，请妥善保管</div>
-                            </div>
-                            <div class="form-group" style="margin-top:8px">
-                                <label class="form-label">模型</label>
-                                <input type="text" class="text-field" id="aiModel" placeholder="例如: qwen-flash" aria-label="AI 模型名称">
-                                <div style="margin-top:4px;font-size:12px;color:#999">使用的 AI 模型名称，推荐使用快速响应的轻量级模型</div>
-                            </div>
-                            <div class="form-group" style="margin-top:8px">
-                                <label class="form-label">超时（秒）</label>
-                                <input type="number" class="text-field" id="aiTimeout" min="1" max="30" value="6" placeholder="6" aria-label="AI 请求超时秒数">
-                                <div style="margin-top:4px;font-size:12px;color:#999">AI 请求的最大等待时间，建议 3-10 秒，避免长时间等待</div>
-                            </div>
-                            <div class="toolbar" style="padding:8px 0 0;justify-content:flex-end">
-                                <button class="btn-filled" id="saveAIConfigBtn">
-                                    <span class="material-symbols-outlined">save</span>
-                                    保存
-                                </button>
-                            </div>
-
-                            <!-- AI 分析测试 -->
-                            <div style="margin-top:12px;padding:10px 12px;background:rgba(0,0,0,0.03);border-radius:6px">
-                                <div style="font-size:12px;color:var(--md-on-surface-variant);margin-bottom:6px;font-weight:500">口令分析测试</div>
-                                <div style="display:flex;gap:6px">
-                                    <input type="text" id="aiTestInput" class="text-field" style="flex:1;font-size:13px;padding:6px 10px" placeholder="输入语音指令，例如「播放周杰伦的晴天」" aria-label="AI 口令分析测试输入">
-                                    <button class="btn-filled" id="aiTestBtn" style="padding:6px 16px">
-                                        <span class="material-symbols-outlined" style="font-size:16px">send</span>
-                                    </button>
-                                </div>
-                                <div id="aiTestResult" style="margin-top:8px;font-size:12px;color:var(--md-on-surface-variant);white-space:pre-wrap;word-break:break-all;display:none"></div>
-                            </div>
-                        </div>
-                    </div>
+                        <div class="list-stack tight" data-role="device-list"></div>
+                    </section>
                 </div>
-            </div>
 
-            <!-- 外部搜索卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">search</span>
-                    外部搜索
-                </div>
-                <div class="card-body">
-                    <div class="switch-row">
-                        <div class="switch-row-label">
-                            <span class="switch-row-title">启用外部搜索 <span id="externalSearchSpecLink" class="link">接口规范</span></span>
-                            <div style="margin-top:8px;padding:8px 12px;background:rgba(0,0,0,0.03);border-radius:6px;font-size:13px;color:#666;line-height:1.5">
-                                💡 启用后，系统将在本地歌曲搜索未命中时调用外部接口。
-                            </div>
-                        </div>
-                            <label class="switch">
-                            <input type="checkbox" id="externalSearchSwitch" aria-label="启用外部搜索">
-                            <span class="switch-slider"></span>
-                        </label>
+                <section class="surface-section">
+                    <div class="section-bar">
+                        <h2>播放控制</h2>
+                        <span data-role="speaker-message">就绪</span>
                     </div>
-
-                    <!-- 外部搜索依赖提示 -->
-                    <div id="externalSearchDependencyHint" class="voice-cmd-hint" style="display:none;margin-top:8px">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle">warning</span>
-                        需要先开启「语音口令」才能使用外部搜索
+                    <div class="control-grid">
+                        <form class="inline-form" data-role="volume-form">
+                            <label>
+                                <span>音量</span>
+                                <input name="volume" type="range" min="0" max="100" value="35">
+                            </label>
+                            <output data-role="volume-value">35</output>
+                            <button class="primary-button" type="submit">设置</button>
+                        </form>
+                        <form class="inline-form" data-role="url-play-form">
+                            <label class="wide-field">
+                                <span>URL</span>
+                                <input name="url" type="url" placeholder="https://">
+                            </label>
+                            <button class="primary-button" type="submit">播放</button>
+                        </form>
                     </div>
-
-                    <div id="externalSearchConfigPanel" style="display:none;margin-top:12px">
-                        <div style="margin-bottom:10px">
-                            <div style="font-size:12px;color:var(--md-on-surface-variant);margin-bottom:4px;font-weight:500">搜索 API 地址</div>
-                            <input type="text" id="externalSearchUrlInput" class="text-field" style="font-size:13px;padding:7px 10px" placeholder="https://example.com/api/search/topone 或 /api/v1/jsplugin/**" aria-label="外部搜索 API 地址">
-                        </div>
-                        <div style="margin-top:10px">
-                            <div style="font-size:12px;color:var(--md-on-surface-variant);margin-bottom:4px;font-weight:500">Authorization Token 认证（可选,为空则使用插件Token）</div>
-                            <input type="text" id="externalSearchTokenInput" class="text-field" style="font-size:13px;padding:7px 10px" placeholder="Bearer *****" aria-label="外部搜索认证 Token">
-                        </div>
-                    </div>
-                    <div class="toolbar" style="padding:12px 0 0;justify-content:flex-end">
-                        <button class="btn-filled" id="saveExternalSearchBtn">
-                            <span class="material-symbols-outlined">save</span>
-                            保存配置
-                        </button>
-                    </div>
-                    <div style="margin-top:12px;padding:10px 12px;background:rgba(0,0,0,0.03);border-radius:6px">
-                        <div style="font-size:12px;color:var(--md-on-surface-variant);margin-bottom:6px;font-weight:500">接口测试</div>
-                        <div style="display:flex;gap:6px">
-                            <input type="text" id="externalSearchTestInput" class="text-field" style="flex:1;font-size:13px;padding:6px 10px" placeholder="输入搜索关键字" aria-label="外部搜索测试关键字">
-                            <button class="btn-filled" id="externalSearchTestBtn" style="padding:6px 16px">
-                                <span class="material-symbols-outlined" style="font-size:16px">send</span>
-                            </button>
-                        </div>
-                        <div id="externalSearchTestResult" style="margin-top:8px;font-size:12px;color:var(--md-on-surface-variant);white-space:pre-wrap;word-break:break-all;display:none"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 搜索提示卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">record_voice_over</span>
-                    搜索提示
-                </div>
-                <div class="card-body">
-                    <div style="margin-bottom:12px;padding:8px 12px;background:rgba(0,0,0,0.03);border-radius:6px;font-size:13px;color:#666;line-height:1.5">
-                        语音搜歌时会自动打断音箱的播报回应。开启下方选项可在搜索期间播报提示语，给用户反馈。
-                    </div>
-                    <div class="switch-row">
-                        <div class="switch-row-label">
-                            <span class="switch-row-title">播放搜索提示</span>
-                            <span class="switch-row-subtitle">打断播报后播报"正在搜索"等提示语</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="interruptTtsHintSwitch" aria-label="播放搜索提示">
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-                    <div id="interruptTtsTextPanel" style="display:none;margin-top:12px">
-                        <div style="font-size:12px;color:var(--md-on-surface-variant);margin-bottom:4px;font-weight:500">提示语内容</div>
-                        <div style="display:flex;gap:8px;align-items:center">
-                            <input type="text" id="interruptTtsHintText" class="text-field" style="flex:1;font-size:13px;padding:7px 10px" placeholder="正在搜索，请稍候" aria-label="搜索提示语内容">
-                            <button class="btn-filled" id="saveInterruptTtsTextBtn" style="padding:6px 16px">
-                                <span class="material-symbols-outlined" style="font-size:16px">save</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- URL 播放卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">link</span>
-                    URL 播放
-                </div>
-                <div class="card-body">
-                    <div class="form-group">
-                        <label class="form-label">音乐 URL</label>
-                        <input type="text" class="text-field" id="playUrlInput" placeholder="输入音乐播放链接" value="https://lhttp.qtfm.cn/live/4915/64k.mp3" aria-label="音乐播放 URL">
-                    </div>
-                    <div style="margin-top:12px;text-align:center">
-                        <button class="btn-filled" id="playUrlBtn">
-                            <span class="material-symbols-outlined">play_arrow</span>
-                            播放
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 时区配置 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">schedule</span>
-                    时区设置
-                </div>
-                <div class="card-body">
-                    <div class="form-group">
-                        <label class="form-label">系统时区</label>
-                        <div style="font-size:13px;color:var(--md-on-surface-variant);margin-bottom:8px">
-                            定时任务的执行时间依赖此设置
-                        </div>
-                        <select class="text-field" id="timezoneSelect" aria-label="系统时区">
-                            <option value="Asia/Shanghai">北京时间 (Asia/Shanghai)</option>
-                            <option value="Asia/Hong_Kong">香港时间 (Asia/Hong_Kong)</option>
-                            <option value="Asia/Tokyo">日本时间 (Asia/Tokyo)</option>
-                            <option value="Asia/Singapore">新加坡时间 (Asia/Singapore)</option>
-                            <option value="America/New_York">纽约时间 (America/New_York)</option>
-                            <option value="America/Los_Angeles">洛杉矶时间 (America/Los_Angeles)</option>
-                            <option value="Europe/London">伦敦时间 (Europe/London)</option>
-                            <option value="UTC">协调世界时 (UTC)</option>
+                    <div class="player-actions">
+                        <button class="icon-button" type="button" data-action="player-previous" title="上一首" aria-label="上一首">Prev</button>
+                        <button class="icon-button" type="button" data-action="player-stop" title="停止" aria-label="停止">Stop</button>
+                        <button class="icon-button" type="button" data-action="player-next" title="下一首" aria-label="下一首">Next</button>
+                        <select data-role="play-mode-select" aria-label="播放模式">
+                            <option value="order">顺序</option>
+                            <option value="repeat">循环</option>
+                            <option value="random">随机</option>
+                            <option value="single">单曲</option>
                         </select>
+                        <button class="ghost-button" type="button" data-action="player-mode">应用模式</button>
                     </div>
-                    <div class="toolbar" style="padding:12px 0 0;justify-content:flex-end">
-                        <button class="btn-filled" id="saveTimezoneBtn">
-                            <span class="material-symbols-outlined">save</span>
-                            保存时区
-                        </button>
-                    </div>
-                </div>
-            </div>
+                </section>
+            </section>
 
-            <!-- 定时任务卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">schedule</span>
-                    定时任务
-                </div>
-                <div class="card-body">
-                    <!-- 开关 -->
-                    <div class="switch-row">
-                        <div class="switch-row-label">
-                            <span class="switch-row-title">启用定时任务</span>
-                            <span class="switch-row-subtitle" id="scheduledTasksStatusText">已关闭</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="scheduledTasksSwitch" aria-label="启用定时任务">
-                            <span class="switch-slider"></span>
-                        </label>
-                    </div>
-
-                    <!-- 操作栏 -->
-                    <div class="toolbar" style="padding:12px 0 0;gap:8px">
-                        <button class="btn-filled btn-sm" id="addScheduleBtn">
-                            <span class="material-symbols-outlined" style="font-size:18px">add</span>
-                            添加任务
-                        </button>
-                        <button class="btn-text btn-sm" id="viewScheduleLogsBtn" style="margin-left:auto">
-                            <span class="material-symbols-outlined" style="font-size:16px">history</span>
-                            执行日志
-                        </button>
-                    </div>
-
-                    <!-- 任务列表 -->
-                    <div id="scheduleTaskList" style="margin-top:12px">
-                        <div class="empty-state" style="padding:12px;font-size:13px">加载中...</div>
-                    </div>
-
-                    <!-- 执行日志面板 -->
-                    <div id="scheduleLogsPanel" style="display:none;margin-top:16px">
-                        <div class="section-title">
-                            <span class="material-symbols-outlined" style="font-size:18px">history</span>
-                            执行日志
-                        </div>
-                        <div id="scheduleLogList">
-                            <div class="empty-state" style="padding:12px;font-size:13px">暂无执行记录</div>
-                        </div>
+            <section class="tab-panel" id="tab-songlists">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Discovery</p>
+                        <h1>歌单</h1>
                     </div>
                 </div>
-            </div>
-
-            <!-- 操作结果卡片 -->
-            <div class="card">
-                <div class="card-header">
-                    <span class="material-symbols-outlined">terminal</span>
-                    操作结果
-                    <button class="btn-text" id="clearResultBtn" style="margin-left:auto;font-size:13px">
-                        <span class="material-symbols-outlined" style="font-size:18px">delete_sweep</span>
-                        清空
-                    </button>
-                </div>
-                <div class="card-body">
-                    <pre class="result-pre" id="resultContent">暂无操作结果</pre>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 固定播放控制栏 -->
-    <div class="player-bar">
-        <div class="player-bar-top">
-            <div class="player-bar-top-clickable" onclick="openFullscreenPlayer()">
-                <div class="player-bar-cover-wrap" id="playerBarCoverWrap">
-                    <img class="player-bar-cover" id="playerBarCover" alt="封面">
-                    <span class="material-symbols-outlined player-bar-cover-placeholder">music_note</span>
-                </div>
-                <div class="player-bar-info">
-                    <!-- 歌曲信息：标题 - 艺术家 -->
-                    <div class="player-bar-meta" id="playerBarMeta">
-                        <span class="player-bar-title" id="currentSongTitle">暂无播放</span>
-                        <span class="player-bar-artist" id="currentSongArtist">-</span>
-                    </div>
-                    <!-- 歌词行 -->
-                    <div class="player-bar-lyric" id="playerBarLyric">暂无歌词</div>
-                </div>
-            </div>
-            <button class="btn-icon player-bar-volume-btn" id="volumePopupBtn" title="音量">
-                <span class="material-symbols-outlined" id="volumeIcon">volume_up</span>
-            </button>
-        </div>
-        <!-- 播放进度条 -->
-        <div class="progress-bar-container">
-            <span class="progress-time" id="currentTime">0:00</span>
-            <div class="progress-track" id="progressTrack">
-                <div class="progress-fill" id="progressFill"></div>
-                <div class="progress-thumb" id="progressThumb"></div>
-            </div>
-            <span class="progress-time" id="totalTime">0:00</span>
-        </div>
-        <div class="playback-controls">
-            <button class="btn-icon" id="playModeBtn" title="播放模式">
-                <span class="material-symbols-outlined">repeat</span>
-            </button>
-            <button class="btn-icon" id="prevBtn" title="上一首">
-                <span class="material-symbols-outlined">skip_previous</span>
-            </button>
-            <button class="btn-icon play-btn" id="playBtn" title="播放">
-                <span class="material-symbols-outlined">play_arrow</span>
-            </button>
-            <button class="btn-icon" id="nextBtn" title="下一首">
-                <span class="material-symbols-outlined">skip_next</span>
-            </button>
-            <button class="btn-icon" id="stopBtn" title="停止">
-                <span class="material-symbols-outlined">stop_circle</span>
-            </button>
-        </div>
-    </div>
-
-    <!-- 歌单选择弹出层 -->
-    <div id="playlistSelectBackdrop" class="popup-backdrop" style="display:none" onclick="closePlaylistSelectPanel()"></div>
-    <div id="playlistSelectPanel" class="popup-panel playlist-select-panel">
-        <div class="search-bar" id="playlistSearchBar">
-            <span class="material-symbols-outlined">search</span>
-            <input type="text" id="playlistSearchInput" placeholder="搜索歌单..." autocomplete="off" aria-label="搜索歌单">
-        </div>
-        <div id="playlistSelectList">
-            <div class="empty-state" style="padding:24px;font-size:14px">暂无歌单</div>
-        </div>
-    </div>
-
-    <!-- 设备选择弹出层 -->
-    <div id="deviceSelectBackdrop" class="popup-backdrop" style="display:none" onclick="closeDeviceSelectPanel()"></div>
-    <div id="deviceSelectPanel" class="popup-panel device-select-panel">
-        <div id="deviceSelectList">
-            <div class="empty-state" style="padding:24px;font-size:14px">暂无可用设备</div>
-        </div>
-    </div>
-
-    <!-- 音量控制弹出层 -->
-    <div id="volumeBackdrop" class="popup-backdrop" style="display:none" onclick="closeVolumePanel()"></div>
-    <div id="volumePanel" class="popup-panel volume-panel">
-        <span class="volume-percent" id="volumePercent">50%</span>
-        <div class="volume-slider-wrap">
-            <input type="range" id="volumeSlider" min="0" max="100" value="50" aria-label="音量">
-        </div>
-        <button class="mute-btn" id="muteBtn" onclick="toggleMute()" aria-label="静音">
-            <span class="material-symbols-outlined" id="muteBtnIcon">volume_up</span>
-        </button>
-    </div>
-
-    <!-- 播放模式弹出层 -->
-    <div id="playModeBackdrop" class="popup-backdrop" style="display:none" onclick="closePlayModePanel()"></div>
-    <div id="playModePanel" class="popup-panel play-mode-panel">
-        <div class="play-mode-item" data-mode="order" onclick="selectPlayMode('order')">
-            <span class="material-symbols-outlined">format_list_numbered</span>
-            <span>顺序播放</span>
-        </div>
-        <div class="play-mode-item" data-mode="loop" onclick="selectPlayMode('loop')">
-            <span class="material-symbols-outlined">repeat</span>
-            <span>列表循环</span>
-        </div>
-        <div class="play-mode-item" data-mode="single" onclick="selectPlayMode('single')">
-            <span class="material-symbols-outlined">repeat_one</span>
-            <span>单曲循环</span>
-        </div>
-        <div class="play-mode-item" data-mode="random" onclick="selectPlayMode('random')">
-            <span class="material-symbols-outlined">shuffle</span>
-            <span>随机播放</span>
-        </div>
-        <div class="play-mode-item" data-mode="single-once" onclick="selectPlayMode('single-once')">
-            <span class="material-symbols-outlined">looks_one</span>
-            <span>单曲播放</span>
-        </div>
-    </div>
-
-    <!-- Snackbar -->
-    <div id="snackbar" class="snackbar"></div>
-
-    <!-- Dialog -->
-    <div id="dialogOverlay" class="dialog-overlay" role="dialog" aria-modal="true">
-        <div class="dialog">
-            <div class="dialog-title" id="dialogTitle">确认</div>
-            <div class="dialog-content" id="dialogContent">确定要执行此操作吗？</div>
-            <div class="dialog-actions">
-                <button class="btn-text" id="dialogCancelBtn">取消</button>
-                <button class="btn-filled" id="dialogConfirmBtn">确定</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 定时任务表单 Overlay -->
-    <div id="scheduleFormOverlay" class="schedule-form-overlay" role="dialog" aria-modal="true">
-        <div class="schedule-form-container">
-            <div class="schedule-form-header">
-                <span class="material-symbols-outlined">schedule</span>
-                <span id="scheduleFormTitle">添加定时任务</span>
-                <button class="btn-icon" id="scheduleFormCancelBtn" style="margin-left:auto">
-                    <span class="material-symbols-outlined">close</span>
-                </button>
-            </div>
-            <div class="schedule-form-body">
-                <!-- 任务名称 -->
-                <div class="form-group">
-                    <label class="form-label">任务名称</label>
-                    <input type="text" class="text-field" id="scheduleName" placeholder="例如：早上播放音乐" aria-label="任务名称">
-                </div>
-
-                <!-- 动作类型 -->
-                <div class="form-group" style="margin-top:12px">
-                    <label class="form-label">动作类型</label>
-                    <select class="text-field" id="scheduleAction" aria-label="动作类型">
-                        <option value="play_playlist">播放歌单</option>
-                        <option value="play_playlist_from">播放歌单（指定位置）</option>
-                        <option value="stop">停止播放</option>
-                        <option value="set_play_mode">设置播放模式</option>
-                        <option value="set_volume">设置音量</option>
-                        <option value="enable_monitor">开启对话监听</option>
-                        <option value="disable_monitor">关闭对话监听</option>
-                    </select>
-                </div>
-
-                <!-- 动作参数 -->
-                <div class="schedule-param-group" id="paramPlaylist" style="margin-top:12px">
-                    <label class="form-label">选择歌单</label>
-                    <select class="text-field" id="schedulePlaylistSelect" aria-label="选择歌单">
-                        <option value="">-- 请选择歌单 --</option>
-                    </select>
-                </div>
-                <div class="schedule-param-group" id="paramStartIndex" style="margin-top:12px;display:none">
-                    <label class="form-label">选择起始歌曲</label>
-                    <select class="text-field" id="scheduleSongSelect" aria-label="选择起始歌曲">
-                        <option value="">-- 从第一首开始 --</option>
-                    </select>
-                    <div style="font-size:12px;color:var(--md-on-surface-variant);margin-top:4px">留空则从第一首开始播放</div>
-                </div>
-                <div class="schedule-param-group" id="paramPlayMode" style="margin-top:12px;display:none">
-                    <label class="form-label">播放模式</label>
-                    <select class="text-field" id="schedulePlayMode" aria-label="播放模式">
-                        <option value="order">顺序播放</option>
-                        <option value="loop">列表循环</option>
-                        <option value="single">单曲循环</option>
-                        <option value="single-once">单曲播放</option>
-                        <option value="random">随机播放</option>
-                    </select>
-                </div>
-                <div class="schedule-param-group" id="paramVolume" style="margin-top:12px;display:none">
-                    <label class="form-label">音量 <span id="scheduleVolumeLabel">50%</span></label>
-                    <input type="range" id="scheduleVolume" min="0" max="100" value="50" style="width:100%" aria-label="定时任务音量">
-                </div>
-
-                <!-- 调度类型 -->
-                <div class="form-group" style="margin-top:16px">
-                    <label class="form-label">调度类型</label>
-                    <select class="text-field" id="scheduleType" aria-label="调度类型">
-                        <option value="weekly">每周</option>
-                        <option value="monthly">每月</option>
-                    </select>
-                </div>
-
-                <!-- 时间 -->
-                <div class="form-group" style="margin-top:12px">
-                    <label class="form-label">执行时间</label>
-                    <input type="time" class="text-field" id="scheduleTime" value="08:00" aria-label="执行时间">
-                </div>
-
-                <!-- 星期选择 -->
-                <div id="scheduleWeekdayGroup" style="margin-top:12px">
-                    <label class="form-label">选择星期</label>
-                    <div class="schedule-day-grid">
-                        <label class="schedule-day-chip"><input type="checkbox" class="weekday-checkbox" value="1"><span>一</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="weekday-checkbox" value="2"><span>二</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="weekday-checkbox" value="3"><span>三</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="weekday-checkbox" value="4"><span>四</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="weekday-checkbox" value="5"><span>五</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="weekday-checkbox" value="6"><span>六</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="weekday-checkbox" value="0"><span>日</span></label>
-                    </div>
-                    <div style="margin-top:8px;display:flex;gap:8px">
-                        <button class="btn-text btn-sm" id="scheduleDailyShortcut">每天</button>
-                        <button class="btn-text btn-sm" id="scheduleWorkdayShortcut">工作日</button>
-                    </div>
-                    <div class="form-group" style="margin-top:12px">
-                        <label class="form-label">节假日模式</label>
-                        <select class="text-field" id="scheduleHolidayMode" aria-label="节假日模式">
-                            <option value="ignore">忽略节假日</option>
-                            <option value="only_holiday">仅法定节假日触发</option>
-                            <option value="exclude_holiday">真·工作日(跳过节假日,含调休补班)</option>
-                        </select>
-                        <div style="font-size:12px;color:var(--md-on-surface-variant);margin-top:4px">
-                            数据来源:NateScarlet/holiday-cn (打包时随插件嵌入)
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 月日选择 -->
-                <div id="scheduleMonthdayGroup" style="margin-top:12px;display:none">
-                    <label class="form-label">选择日期</label>
-                    <div class="schedule-monthday-grid">
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="1"><span>1</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="2"><span>2</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="3"><span>3</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="4"><span>4</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="5"><span>5</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="6"><span>6</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="7"><span>7</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="8"><span>8</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="9"><span>9</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="10"><span>10</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="11"><span>11</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="12"><span>12</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="13"><span>13</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="14"><span>14</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="15"><span>15</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="16"><span>16</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="17"><span>17</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="18"><span>18</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="19"><span>19</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="20"><span>20</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="21"><span>21</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="22"><span>22</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="23"><span>23</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="24"><span>24</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="25"><span>25</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="26"><span>26</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="27"><span>27</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="28"><span>28</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="29"><span>29</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="30"><span>30</span></label>
-                        <label class="schedule-day-chip"><input type="checkbox" class="monthday-checkbox" value="31"><span>31</span></label>
-                    </div>
-                </div>
-
-                <!-- 目标设备 -->
-                <div class="form-group" id="scheduleTargetGroup" style="margin-top:16px">
-                    <label class="form-label">目标设备</label>
-                    <label class="schedule-target-option">
-                        <input type="checkbox" id="scheduleTargetAll" aria-label="所有受管理设备">
-                        <span>所有受管理设备</span>
+                <form class="control-grid compact" data-role="songlist-form">
+                    <label>
+                        <span>平台</span>
+                        <select name="source_id" data-role="songlist-platform"></select>
                     </label>
-                    <div id="scheduleDeviceListContainer" style="margin-top:8px">
-                        <div id="scheduleDeviceList" class="schedule-device-list"></div>
-                        <div id="scheduleDeviceHint" style="font-size:12px;color:var(--md-on-surface-variant);margin-top:4px">
-                            请至少选择一个设备
+                    <label class="wide-field">
+                        <span>关键词</span>
+                        <input name="keyword" type="search" placeholder="歌单名" autocomplete="off">
+                    </label>
+                    <button class="primary-button" type="submit" name="mode" value="search">搜索</button>
+                    <button class="ghost-button" type="submit" name="mode" value="recommended">推荐</button>
+                </form>
+                <div class="split-view">
+                    <section class="surface-section">
+                        <div class="section-bar">
+                            <h2>列表</h2>
+                            <span data-role="songlist-total">0</span>
                         </div>
+                        <div class="list-stack" data-role="songlist-list"></div>
+                    </section>
+                    <section class="surface-section">
+                        <div class="section-bar">
+                            <h2 data-role="songlist-title">详情</h2>
+                        </div>
+                        <div class="list-stack" data-role="songlist-detail"></div>
+                    </section>
+                </div>
+            </section>
+
+            <section class="tab-panel" id="tab-rankings">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Discovery</p>
+                        <h1>排行榜</h1>
                     </div>
                 </div>
-            </div>
-            <div class="schedule-form-footer">
-                <button class="btn-text" onclick="document.getElementById('scheduleFormOverlay').classList.remove('active')">取消</button>
-                <button class="btn-filled" id="scheduleFormSaveBtn">
-                    <span class="material-symbols-outlined" style="font-size:18px">save</span>
-                    保存
-                </button>
-            </div>
-        </div>
+                <div class="control-grid compact">
+                    <label>
+                        <span>平台</span>
+                        <select data-role="ranking-platform"></select>
+                    </label>
+                    <button class="primary-button" type="button" data-action="load-rankings">加载榜单</button>
+                </div>
+                <div class="split-view">
+                    <section class="surface-section">
+                        <div class="section-bar">
+                            <h2>榜单</h2>
+                        </div>
+                        <div class="list-stack" data-role="ranking-list"></div>
+                    </section>
+                    <section class="surface-section">
+                        <div class="section-bar">
+                            <h2 data-role="ranking-title">歌曲</h2>
+                        </div>
+                        <div class="list-stack" data-role="ranking-songs"></div>
+                    </section>
+                </div>
+            </section>
+
+            <section class="tab-panel" id="tab-sources">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">LX Runtime</p>
+                        <h1>音源</h1>
+                    </div>
+                    <label class="file-button">
+                        <input type="file" data-role="source-file" accept=".js,.zip,application/javascript,application/zip">
+                        <span>导入文件</span>
+                    </label>
+                </div>
+                <section class="surface-section">
+                    <div class="section-bar">
+                        <h2>已导入</h2>
+                        <button class="ghost-button" type="button" data-action="refresh-sources">刷新</button>
+                    </div>
+                    <div class="list-stack" data-role="source-list"></div>
+                </section>
+            </section>
+
+            <section class="tab-panel" id="tab-automation">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Automation</p>
+                        <h1>自动化</h1>
+                    </div>
+                    <button class="ghost-button" type="button" data-action="refresh-automation">刷新</button>
+                </div>
+                <div class="two-column">
+                    <section class="surface-section">
+                        <div class="section-bar">
+                            <h2>语音口令</h2>
+                            <span data-role="voice-enabled">未加载</span>
+                        </div>
+                        <textarea data-role="voice-json" spellcheck="false"></textarea>
+                        <div class="inline-actions">
+                            <button class="primary-button" type="button" data-action="save-voice">保存口令</button>
+                            <button class="ghost-button" type="button" data-action="load-voice">重新加载</button>
+                        </div>
+                    </section>
+                    <section class="surface-section">
+                        <div class="section-bar">
+                            <h2>索引</h2>
+                            <span data-role="indexing-state">未加载</span>
+                        </div>
+                        <div class="metric-grid">
+                            <div><span>歌单</span><strong data-role="index-playlists">0</strong></div>
+                            <div><span>歌曲</span><strong data-role="index-songs">0</strong></div>
+                            <div><span>时间</span><strong data-role="index-updated">-</strong></div>
+                        </div>
+                        <button class="primary-button" type="button" data-action="refresh-index">刷新索引</button>
+                    </section>
+                </div>
+
+                <section class="surface-section">
+                    <div class="section-bar">
+                        <h2>定时任务</h2>
+                        <span data-role="schedules-enabled">未加载</span>
+                    </div>
+                    <form class="control-grid" data-role="schedule-form">
+                        <label>
+                            <span>ID</span>
+                            <input name="id" placeholder="新增可留空">
+                        </label>
+                        <label>
+                            <span>名称</span>
+                            <input name="name" required>
+                        </label>
+                        <label>
+                            <span>动作</span>
+                            <select name="action">
+                                <option value="play_playlist">播放歌单</option>
+                                <option value="play_playlist_from">播放歌单起点</option>
+                                <option value="set_volume">设置音量</option>
+                                <option value="set_play_mode">设置模式</option>
+                                <option value="stop">停止</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>类型</span>
+                            <select name="schedule_type">
+                                <option value="weekly">每周</option>
+                                <option value="monthly">每月</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>时间</span>
+                            <input name="time" type="time" value="08:00">
+                        </label>
+                        <label>
+                            <span>星期</span>
+                            <input name="weekdays" placeholder="1,2,3">
+                        </label>
+                        <label>
+                            <span>日期</span>
+                            <input name="monthdays" placeholder="1,15">
+                        </label>
+                        <label>
+                            <span>歌单</span>
+                            <input name="playlist_name">
+                        </label>
+                        <label>
+                            <span>音量</span>
+                            <input name="volume" type="number" min="0" max="100">
+                        </label>
+                        <label>
+                            <span>模式</span>
+                            <select name="play_mode">
+                                <option value="">保持</option>
+                                <option value="order">顺序</option>
+                                <option value="repeat">循环</option>
+                                <option value="random">随机</option>
+                                <option value="single">单曲</option>
+                            </select>
+                        </label>
+                        <label class="toggle-line">
+                            <input name="enabled" type="checkbox" checked>
+                            <span>启用</span>
+                        </label>
+                        <label class="toggle-line">
+                            <input name="all_managed" type="checkbox" checked>
+                            <span>所有托管设备</span>
+                        </label>
+                        <button class="primary-button" type="submit">保存任务</button>
+                    </form>
+                    <div class="list-stack" data-role="schedule-list"></div>
+                </section>
+            </section>
+
+            <section class="tab-panel" id="tab-settings">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">System</p>
+                        <h1>设置</h1>
+                    </div>
+                    <button class="ghost-button" type="button" data-action="load-config">加载</button>
+                </div>
+                <form class="surface-section settings-form" data-role="config-form">
+                    <div class="control-grid">
+                        <label class="wide-field">
+                            <span>服务器地址</span>
+                            <input name="server_host" placeholder="http://192.168.x.x:58091">
+                        </label>
+                        <label>
+                            <span>时区</span>
+                            <input name="timezone" placeholder="Asia/Shanghai">
+                        </label>
+                        <label class="wide-field">
+                            <span>外部搜索 URL</span>
+                            <input name="external_search_url" type="url" placeholder="https://">
+                        </label>
+                        <label class="wide-field">
+                            <span>外部搜索 Token</span>
+                            <input name="external_search_token">
+                        </label>
+                        <label>
+                            <span>额外型号</span>
+                            <input name="extra_music_api_models" placeholder="MODEL_A,MODEL_B">
+                        </label>
+                        <label class="wide-field">
+                            <span>打断提示</span>
+                            <input name="interrupt_tts_hint_text">
+                        </label>
+                    </div>
+                    <div class="toggle-grid">
+                        <label class="toggle-line"><input name="conversation_monitor_enabled" type="checkbox"><span>对话监听</span></label>
+                        <label class="toggle-line"><input name="voice_command_enabled" type="checkbox"><span>语音口令</span></label>
+                        <label class="toggle-line"><input name="scheduled_tasks_enabled" type="checkbox"><span>定时任务</span></label>
+                        <label class="toggle-line"><input name="force_mp3" type="checkbox"><span>强制 MP3</span></label>
+                        <label class="toggle-line"><input name="external_search_enabled" type="checkbox"><span>外部搜索</span></label>
+                        <label class="toggle-line"><input name="indicator_light_enabled" type="checkbox"><span>保留灯效</span></label>
+                        <label class="toggle-line"><input name="interrupt_tts_hint_enabled" type="checkbox"><span>搜索提示</span></label>
+                    </div>
+                    <fieldset>
+                        <legend>AI</legend>
+                        <div class="control-grid">
+                            <label class="toggle-line"><input name="ai_enabled" type="checkbox"><span>启用</span></label>
+                            <label class="wide-field"><span>API URL</span><input name="ai_api_url" type="url"></label>
+                            <label><span>Model</span><input name="ai_model"></label>
+                            <label><span>Timeout</span><input name="ai_timeout" type="number" min="1" max="120"></label>
+                            <label class="wide-field"><span>API Key</span><input name="ai_api_key" type="password"></label>
+                        </div>
+                    </fieldset>
+                    <div class="inline-actions">
+                        <button class="primary-button" type="submit">保存设置</button>
+                        <span data-role="config-state">未加载</span>
+                    </div>
+                </form>
+            </section>
+
+            <footer class="mini-player" id="miniPlayer"></footer>
+        </main>
+        <nav class="bottom-tabs" id="bottomTabs"></nav>
     </div>
-
-    <!-- 全屏播放器 -->
-    <div class="fullscreen-player" id="fullscreenPlayer" role="dialog" aria-modal="true">
-        <div class="fp-bg-image" id="fpBgImage"></div>
-        <div class="fp-bg-overlay"></div>
-        <div class="fp-content">
-            <div class="fp-topbar">
-                <button class="btn-icon fp-close-btn" onclick="closeFullscreenPlayer()">
-                    <span class="material-symbols-outlined">keyboard_arrow_down</span>
-                </button>
-                <span class="fp-topbar-title" id="fpTopbarTitle">正在播放</span>
-                <button class="btn-icon fp-close-btn" id="fpVolumeBtn" title="音量">
-                    <span class="material-symbols-outlined">volume_up</span>
-                </button>
-            </div>
-            <div class="fp-main">
-                <div class="fp-pages" id="fpPages">
-                    <div class="fp-page fp-cover-page">
-                        <div class="fp-cover-wrap" id="fpCoverWrap">
-                            <img class="fp-cover-img" id="fpCoverImg" alt="封面">
-                            <span class="material-symbols-outlined fp-cover-placeholder" id="fpCoverPlaceholder">music_note</span>
-                        </div>
-                    </div>
-                    <div class="fp-page fp-lyrics-page">
-                        <div class="fp-lyrics-container" id="fpLyricsContainer">
-                            <div class="fp-lyrics-empty">暂无歌词</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="fp-page-indicator" id="fpPageIndicator">
-                    <span class="fp-dot active"></span>
-                    <span class="fp-dot"></span>
-                </div>
-            </div>
-            <div class="fp-song-info">
-                <div class="fp-song-title" id="fpSongTitle">暂无播放</div>
-                <div class="fp-song-artist" id="fpSongArtist">-</div>
-            </div>
-            <div class="fp-progress">
-                <span class="fp-time" id="fpCurrentTime">0:00</span>
-                <div class="fp-progress-track" id="fpProgressTrack">
-                    <div class="fp-progress-fill" id="fpProgressFill"></div>
-                    <div class="fp-progress-thumb" id="fpProgressThumb"></div>
-                </div>
-                <span class="fp-time" id="fpTotalTime">0:00</span>
-            </div>
-            <div class="fp-controls">
-                <button class="btn-icon" id="fpPlayModeBtn" title="播放模式">
-                    <span class="material-symbols-outlined">repeat</span>
-                </button>
-                <button class="btn-icon" id="fpPrevBtn" title="上一首">
-                    <span class="material-symbols-outlined">skip_previous</span>
-                </button>
-                <button class="btn-icon fp-play-btn" id="fpPlayBtn" title="播放">
-                    <span class="material-symbols-outlined">play_arrow</span>
-                </button>
-                <button class="btn-icon" id="fpNextBtn" title="下一首">
-                    <span class="material-symbols-outlined">skip_next</span>
-                </button>
-                <button class="btn-icon" id="fpStopBtn" title="停止">
-                    <span class="material-symbols-outlined">stop_circle</span>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-
     <script type="module" src="static/js/app.js"></script>
 </body>
 </html>
