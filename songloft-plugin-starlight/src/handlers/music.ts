@@ -181,6 +181,9 @@ export function registerMusicHandlers(
       if (!platform) {
         throw new StarlightError('BAD_REQUEST', 'source_data.platform is required');
       }
+      if (!platforms.get(platform)) {
+        throw new StarlightError('MUSIC_PLATFORM_UNSUPPORTED', '不支持的音乐平台', false);
+      }
 
       const url = await runtimes.getMusicUrl(platform, quality, sourceData.songInfo as LxSongInfo);
       if (!url) {

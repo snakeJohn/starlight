@@ -224,6 +224,21 @@ describe('registerMusicHandlers', () => {
     expect(parseResponseBody(invalid).error.code).toBe('BAD_REQUEST');
   });
 
+  test('URL route rejects unsupported platforms before resolving through runtime', async () => {
+    const { router, runtimes } = createHarness();
+    const sourceData = {
+      platform: 'missing',
+      quality: '320k',
+      songInfo: { source: 'missing', name: 'Song', singer: 'Artist', album: '', duration: 1 },
+    };
+
+    const response = await router.handle(request('POST', '/api/music/url', { source_data: sourceData }));
+
+    expect(response.statusCode).toBe(400);
+    expect(parseResponseBody(response).error.code).toBe('MUSIC_PLATFORM_UNSUPPORTED');
+    expect(runtimes.getMusicUrl).not.toHaveBeenCalled();
+  });
+
   test('songlist and leaderboard routes delegate to provider methods', async () => {
     const { router, provider } = createHarness();
 
