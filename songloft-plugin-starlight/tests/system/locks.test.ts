@@ -31,4 +31,17 @@ describe('AsyncLockRegistry', () => {
     releaseAgain();
     expect(locks.isLocked('index-refresh')).toBe(false);
   });
+
+  test('stale release does not clear a newer lock after clear and reacquire', () => {
+    const locks = new AsyncLockRegistry();
+
+    const r1 = locks.acquire('x', 'SCHEDULE_LOCKED');
+    locks.clear();
+    const r2 = locks.acquire('x', 'SCHEDULE_LOCKED');
+    r1();
+
+    expect(locks.isLocked('x')).toBe(true);
+    r2();
+    expect(locks.isLocked('x')).toBe(false);
+  });
 });

@@ -1,28 +1,60 @@
 const SECRET_KEYS = [
   'password',
-  'pass_token',
-  'service_token',
+  'passtoken',
+  'servicetoken',
   'ssecurity',
-  'api_key',
+  'apikey',
   'cookie',
   'authorization',
 ] as const;
 
-function isSecretKey(key: string): boolean {
-  const normalized = key.toLowerCase();
-  return SECRET_KEYS.some((secretKey) => normalized === secretKey || normalized.includes(secretKey));
+const SECRET_KEY_FRAGMENTS = [
+  'token',
+  'secret',
+  'password',
+  'cookie',
+  'authorization',
+  'apikey',
+  'ssecurity',
+] as const;
+
+type PlainRecord = Record<string, unknown>;
+
+function normalizeKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function maskValue(value: unknown): unknown {
-  if (typeof value === 'string') {
-    return maskSecret(value);
+function isSecretKey(key: string): boolean {
+  const normalized = normalizeKey(key);
+  return (
+    SECRET_KEYS.some((secretKey) => normalized === secretKey) ||
+    SECRET_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment))
+  );
+}
+
+function isPlainRecord(value: unknown): value is PlainRecord {
+  if (typeof value !== 'object' || value == null || Array.isArray(value)) {
+    return false;
   }
 
-  if (value == null) {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function maskValue(value: unknown, forceMask: boolean): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => maskValue(item, forceMask));
+  }
+
+  if (isPlainRecord(value)) {
+    return maskPlainRecord(value, forceMask);
+  }
+
+  if (!forceMask || value == null) {
     return value;
   }
 
-  return maskSecret(String(value));
+  return maskSecret(typeof value === 'string' ? value : String(value));
 }
 
 export function maskSecret(secret: string): string {
@@ -36,12 +68,16 @@ export function maskSecret(secret: string): string {
   return `${visiblePrefix}${'*'.repeat(maskedLength)}${visibleSuffix}`;
 }
 
-export function maskRecord(record: Record<string, unknown>): Record<string, unknown> {
-  const masked: Record<string, unknown> = {};
+function maskPlainRecord(record: PlainRecord, forceMask = false): PlainRecord {
+  const masked: PlainRecord = {};
 
   for (const [key, value] of Object.entries(record)) {
-    masked[key] = isSecretKey(key) ? maskValue(value) : value;
+    masked[key] = maskValue(value, forceMask || isSecretKey(key));
   }
 
   return masked;
+}
+
+export function maskRecord(record: Record<string, unknown>): Record<string, unknown> {
+  return maskPlainRecord(record);
 }

@@ -13,19 +13,19 @@ function decodeUtf8(bytes: Uint8Array): string {
   return decodeURIComponent(encoded);
 }
 
-export function parseJsonBody(req: JsonBodyRequest): unknown {
+export function parseJsonBody<T = Record<string, unknown>>(req: JsonBodyRequest): T {
   const body = req.body;
   if (body == null) {
-    return {};
+    return {} as T;
   }
 
   try {
     const text = typeof body === 'string' ? body : decodeUtf8(body);
     if (text.trim() === '') {
-      return {};
+      return {} as T;
     }
 
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text) as T;
   } catch {
     throw new StarlightError('BAD_REQUEST', '请求体不是合法 JSON', false);
   }
