@@ -133,6 +133,10 @@ function installShim(): { shimGlobal: ShimGlobal; restore: () => void } {
   };
 }
 
+function parseEmittedData(event: { data: string }): unknown {
+  return JSON.parse(event.data) as unknown;
+}
+
 function sourceMeta(id: string, enabled: boolean): MusicSourceMeta {
   return {
     id,
@@ -337,16 +341,52 @@ describe('LX_SHIM', () => {
       shimGlobal.lx?._dispatch('dispatch-1', 'request', {});
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(emittedEvents).toEqual([
-        {
-          name: 'dispatchError',
-          data: JSON.stringify({
-            id: 'dispatch-1',
-            event: 'request',
-            error: 'resolver failed',
-          }),
-        },
-      ]);
+      expect(emittedEvents).toHaveLength(1);
+      expect(emittedEvents[0].name).toBe('dispatchError');
+      expect(parseEmittedData(emittedEvents[0])).toStrictEqual({
+        id: 'dispatch-1',
+        error: 'resolver failed',
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  test('_dispatch emits dispatchResult with only id and result', async () => {
+    const { shimGlobal, restore } = installShim();
+    const emittedEvents: Array<{ name: string; data: string }> = [];
+    shimGlobal.__songloftEmitEvent = (name, data) => emittedEvents.push({ name, data });
+    shimGlobal.lx?.on('request', (payload) => ({ url: `https://cdn.invalid/${String(payload)}.mp3` }));
+
+    try {
+      shimGlobal.lx?._dispatch('dispatch-2', 'request', 'song');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(emittedEvents).toHaveLength(1);
+      expect(emittedEvents[0].name).toBe('dispatchResult');
+      expect(parseEmittedData(emittedEvents[0])).toStrictEqual({
+        id: 'dispatch-2',
+        result: { url: 'https://cdn.invalid/song.mp3' },
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  test('_dispatch missing handler emits dispatchError with only id and error', () => {
+    const { shimGlobal, restore } = installShim();
+    const emittedEvents: Array<{ name: string; data: string }> = [];
+    shimGlobal.__songloftEmitEvent = (name, data) => emittedEvents.push({ name, data });
+
+    try {
+      shimGlobal.lx?._dispatch('dispatch-3', 'missing', {});
+
+      expect(emittedEvents).toHaveLength(1);
+      expect(emittedEvents[0].name).toBe('dispatchError');
+      expect(parseEmittedData(emittedEvents[0])).toStrictEqual({
+        id: 'dispatch-3',
+        error: 'No listener registered for event: missing',
+      });
     } finally {
       restore();
     }

@@ -83,7 +83,6 @@ export const LX_SHIM = String.raw`
     if (typeof handler !== 'function') {
       emit('dispatchError', {
         id: id,
-        event: event,
         error: 'No listener registered for event: ' + event,
       });
       return;
@@ -96,14 +95,12 @@ export const LX_SHIM = String.raw`
       .then(function (result) {
         emit('dispatchResult', {
           id: id,
-          event: event,
           result: result === undefined ? null : result,
         });
       })
       .catch(function (error) {
         emit('dispatchError', {
           id: id,
-          event: event,
           error: String(error && error.message || error),
         });
       });
