@@ -31,6 +31,7 @@ import { registerVoiceCommandHandlers } from './handlers/voice_command';
 import { registerIndexingHandlers } from './handlers/indexing';
 import { registerMusicHandlers } from './handlers/music';
 import { registerBridgeHandlers } from './handlers/bridge';
+import { registerHealthHandlers } from './handlers/health';
 import { setHostBaseUrl } from './utils/http';
 
 const router = createRouter();
@@ -112,6 +113,7 @@ async function onInit(): Promise<void> {
   registerIndexingHandlers(miotRouter, indexingManager);
   registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry);
   registerBridgeHandlers(router, bridgeService);
+  registerHealthHandlers(router, sourceManager, runtimeManager);
 
   // 自动登录 + 启动后台服务（异步，不阻塞插件初始化）
   authService.autoLoginAll().catch(e => {
