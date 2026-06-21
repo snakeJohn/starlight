@@ -4,11 +4,18 @@ import type { LxSongInfo, MusicPlatform, MusicQuality } from './types';
 
 export class RuntimeManager {
   private runtimes: SourceRuntime[] = [];
+  private reloadQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly sourceManager: SourceManager) {}
 
   async loadEnabledSources(): Promise<void> {
-    await this.close();
+    const reload = this.reloadQueue.then(() => this.reloadEnabledSources());
+    this.reloadQueue = reload.catch(() => undefined);
+    return reload;
+  }
+
+  private async reloadEnabledSources(): Promise<void> {
+    await this.closeLoadedRuntimes();
 
     for (const source of this.sourceManager.listSources()) {
       if (!source.enabled) {
@@ -53,15 +60,21 @@ export class RuntimeManager {
   }
 
   async close(): Promise<void> {
+    await this.closeLoadedRuntimes();
+  }
+
+  private async closeLoadedRuntimes(): Promise<void> {
     const runtimes = this.runtimes;
     this.runtimes = [];
 
-    for (const runtime of runtimes) {
+    const destroys = runtimes.map(async (runtime) => {
       try {
         await runtime.destroy();
       } catch (error) {
         songloft.log.warn(`Failed to close music source runtime: ${String(error)}`);
       }
-    }
+    });
+
+    await Promise.all(destroys);
   }
 }

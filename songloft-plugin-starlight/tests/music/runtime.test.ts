@@ -173,6 +173,12 @@ function fakeSourceManager(
   } as unknown as SourceManager;
 }
 
+async function flushMicrotasks(turns = 5): Promise<void> {
+  for (let index = 0; index < turns; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 async function createRuntimeWithDispatch(
   dispatchResult: unknown,
 ): Promise<{ runtime: SourceRuntime; dispatches: Array<{ id: string; event: string; payload: unknown }> }> {
@@ -588,6 +594,47 @@ describe('RuntimeManager', () => {
     expect(create.mock.calls[1][0]).toBe(dispatches[0].envName);
   });
 
+  test('concurrent reloads do not recreate the same env until old destroy settles', async () => {
+    const managerSource = fakeSourceManager(() => [sourceMeta('same-source', true)], {
+      'same-source': 'script',
+    });
+    const dispatches: Array<{ envName: string; code: string }> = [];
+    const dispatchControl: { release?: (url: string) => void } = {};
+    const { create, destroy } = installJsenvMock((name, code, _timeoutMs, waitEvents) => {
+      if (waitEvents.includes('inited')) {
+        return result([initedEvent({ kw: {} })]);
+      }
+
+      dispatches.push({ envName: name, code });
+      return new Promise<JsenvResult>((resolve) => {
+        dispatchControl.release = (url) => resolve(result([dispatchResultEvent(code, url)]));
+      });
+    });
+    const manager = new RuntimeManager(managerSource);
+    await manager.loadEnabledSources();
+
+    const oldLookup = manager.getMusicUrl('kw', '320k', songInfo);
+    await flushMicrotasks();
+    expect(dispatches).toHaveLength(1);
+
+    const firstReload = manager.loadEnabledSources();
+    await flushMicrotasks();
+    const secondReload = manager.loadEnabledSources();
+    await flushMicrotasks();
+
+    expect(destroy).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
+
+    dispatchControl.release?.('https://cdn.invalid/old.mp3');
+    await expect(oldLookup).resolves.toBe('https://cdn.invalid/old.mp3');
+    await Promise.all([firstReload, secondReload]);
+
+    expect(destroy).toHaveBeenCalledWith(dispatches[0].envName);
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(create.mock.calls[1][0]).toBe(dispatches[0].envName);
+    expect(create.mock.calls[2][0]).toBe(dispatches[0].envName);
+  });
+
   test('loadEnabledSources continues when one enabled source script fails to load', async () => {
     const getScript = vi.fn(async (id: string) => {
       if (id === 'broken') {
@@ -682,5 +729,42 @@ describe('RuntimeManager', () => {
 
     expect(destroy).toHaveBeenCalledWith(expect.stringMatching(/^starlight_lx_enabled-a(?:_[a-z0-9]+)?$/));
     expect(manager.count()).toBe(0);
+  });
+
+  test('close starts destroying every loaded runtime before waiting for the first destroy to settle', async () => {
+    const managerSource = fakeSourceManager(
+      () => [sourceMeta('enabled-a', true), sourceMeta('enabled-b', true)],
+      {
+        'enabled-a': 'script-a',
+        'enabled-b': 'script-b',
+      },
+    );
+    const { destroy } = installJsenvMock((_name, code, _timeoutMs, waitEvents) => {
+      expect(waitEvents).toEqual(['inited']);
+      return result([initedEvent(code === 'script-a' ? { kw: {} } : { kg: {} })]);
+    });
+    const manager = new RuntimeManager(managerSource);
+    await manager.loadEnabledSources();
+
+    let releaseFirstDestroy = () => {};
+    destroy.mockImplementation((name: string) => {
+      if (name.includes('enabled-a')) {
+        return new Promise<undefined>((resolve) => {
+          releaseFirstDestroy = () => resolve(undefined);
+        });
+      }
+
+      return Promise.resolve(undefined);
+    });
+
+    const close = manager.close();
+    await flushMicrotasks();
+
+    expect(destroy).toHaveBeenCalledWith(expect.stringMatching(/^starlight_lx_enabled-a(?:_[a-z0-9]+)?$/));
+    expect(destroy).toHaveBeenCalledWith(expect.stringMatching(/^starlight_lx_enabled-b(?:_[a-z0-9]+)?$/));
+    expect(manager.count()).toBe(0);
+
+    releaseFirstDestroy();
+    await expect(close).resolves.toBeUndefined();
   });
 });
