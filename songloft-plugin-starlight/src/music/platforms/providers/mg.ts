@@ -2,6 +2,7 @@ import { fetchJson } from '../http';
 import type { LeaderboardBoard, MusicPlatformProvider, SongListSummary } from '../types';
 import { normalizeSong, normalizeSongListSummary, numberValue, stringValue } from '../types';
 import type { SearchResultSong } from '../../types';
+import { md5 as md5Hash } from '../../../utils/crypto';
 
 const BOARDS: Array<LeaderboardBoard & { bangid: string }> = [
   { id: 'mg__27553319', name: '新歌榜', bangid: '27553319' },
@@ -12,15 +13,11 @@ const BOARDS: Array<LeaderboardBoard & { bangid: string }> = [
   { id: 'mg__23189399', name: '内地榜', bangid: '23189399' },
 ];
 
-function md5(value: string): string {
-  return typeof __go_crypto_md5 === 'function' ? __go_crypto_md5(value) : '';
-}
-
 function createSignature(time: string, keyword: string): { sign: string; deviceId: string } {
   const deviceId = '963B7AA0D21511ED807EE5846EC87D20';
   const signatureMd5 = '6cdc72a439cef99a3418d2a78aa28c73';
   return {
-    sign: md5(`${keyword}${signatureMd5}yyapp2d16148780a1dcc7408e06336b98cfd50${deviceId}${time}`),
+    sign: md5Hash(`${keyword}${signatureMd5}yyapp2d16148780a1dcc7408e06336b98cfd50${deviceId}${time}`),
     deviceId,
   };
 }

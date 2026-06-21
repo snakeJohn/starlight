@@ -63,13 +63,25 @@ function boolField(value: unknown): boolean {
   return value === true || value === 'true';
 }
 
-function positiveInt(value: unknown, fallback: number): number {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
+function paginationInt(value: unknown, name: 'page' | 'page_size', fallback: number, max?: number): number {
+  if (value === undefined) {
     return fallback;
   }
 
-  return Math.floor(numeric);
+  const numeric = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (typeof numeric !== 'number' || !Number.isInteger(numeric) || numeric <= 0 || (max !== undefined && numeric > max)) {
+    throw new StarlightError('BAD_REQUEST', `${name} must be an integer between 1 and ${max ?? 'unlimited'}`);
+  }
+
+  return numeric;
+}
+
+function page(value: unknown): number {
+  return paginationInt(value, 'page', 1);
+}
+
+function pageSize(value: unknown): number {
+  return paginationInt(value, 'page_size', 30, 100);
 }
 
 function query(req: HTTPRequest): Record<string, string> {
@@ -153,7 +165,7 @@ export function registerMusicHandlers(
     handle(async () => {
       const body = parseJsonBody<SearchBody>(req);
       const provider = providerFor(platforms, body.source_id);
-      return provider.search(requireKeyword(body.keyword), positiveInt(body.page, 1), positiveInt(body.page_size, 30));
+      return provider.search(requireKeyword(body.keyword), page(body.page), pageSize(body.page_size));
     }));
 
   router.post('/api/music/url', async (req) =>
@@ -182,21 +194,21 @@ export function registerMusicHandlers(
     handle(() => {
       const params = query(req);
       const provider = providerFor(platforms, params.source_id);
-      return provider.recommendedSongLists(positiveInt(params.page, 1), positiveInt(params.page_size, 30));
+      return provider.recommendedSongLists(page(params.page), pageSize(params.page_size));
     }));
 
   router.post('/api/music/songlist/search', async (req) =>
     handle(() => {
       const body = parseJsonBody<SearchBody>(req);
       const provider = providerFor(platforms, body.source_id);
-      return provider.songListSearch(requireKeyword(body.keyword), positiveInt(body.page, 1), positiveInt(body.page_size, 30));
+      return provider.songListSearch(requireKeyword(body.keyword), page(body.page), pageSize(body.page_size));
     }));
 
   router.get('/api/music/songlist/detail', async (req) =>
     handle(() => {
       const params = query(req);
       const provider = providerFor(platforms, params.source_id);
-      return provider.songListDetail(requireId(params.id), positiveInt(params.page, 1), positiveInt(params.page_size, 30));
+      return provider.songListDetail(requireId(params.id), page(params.page), pageSize(params.page_size));
     }));
 
   router.get('/api/music/leaderboard/boards', async (req) =>
@@ -210,7 +222,7 @@ export function registerMusicHandlers(
     handle(() => {
       const params = query(req);
       const provider = providerFor(platforms, params.source_id);
-      return provider.leaderboardList(requireId(params.id), positiveInt(params.page, 1), positiveInt(params.page_size, 30));
+      return provider.leaderboardList(requireId(params.id), page(params.page), pageSize(params.page_size));
     }));
 
   router.post('/api/music/lyric', async () => handle(() => ({ lyric: '' })));

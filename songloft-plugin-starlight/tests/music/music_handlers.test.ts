@@ -165,6 +165,46 @@ describe('registerMusicHandlers', () => {
     expect(parseResponseBody(missingKeyword).error.code).toBe('BAD_REQUEST');
   });
 
+  test('search rejects invalid pagination values', async () => {
+    const invalidBodies = [
+      { keyword: 'hello', source_id: 'kw', page: 0 },
+      { keyword: 'hello', source_id: 'kw', page: -1 },
+      { keyword: 'hello', source_id: 'kw', page: 1.5 },
+      { keyword: 'hello', source_id: 'kw', page: 'abc' },
+      { keyword: 'hello', source_id: 'kw', page_size: 0 },
+      { keyword: 'hello', source_id: 'kw', page_size: -1 },
+      { keyword: 'hello', source_id: 'kw', page_size: 1.5 },
+      { keyword: 'hello', source_id: 'kw', page_size: 'abc' },
+      { keyword: 'hello', source_id: 'kw', page_size: 101 },
+    ];
+
+    for (const body of invalidBodies) {
+      const { router, provider } = createHarness();
+
+      const response = await router.handle(request('POST', '/api/music/search', body));
+
+      expect(response.statusCode).toBe(400);
+      expect(parseResponseBody(response)).toMatchObject({
+        success: false,
+        data: null,
+        error: { code: 'BAD_REQUEST' },
+      });
+      expect(provider.search).not.toHaveBeenCalled();
+    }
+  });
+
+  test('search uses pagination defaults and accepts maximum page size', async () => {
+    const { router, provider } = createHarness();
+
+    const defaults = await router.handle(request('POST', '/api/music/search', { keyword: 'hello', source_id: 'kw' }));
+    expect(defaults.statusCode).toBe(200);
+    expect(provider.search).toHaveBeenCalledWith('hello', 1, 30);
+
+    const maxPageSize = await router.handle(request('POST', '/api/music/search', { keyword: 'hello', source_id: 'kw', page: 9, page_size: 100 }));
+    expect(maxPageSize.statusCode).toBe(200);
+    expect(provider.search).toHaveBeenLastCalledWith('hello', 9, 100);
+  });
+
   test('URL route validates source_data and resolves through runtime', async () => {
     const { router, runtimes } = createHarness();
     const sourceData = {
@@ -201,6 +241,16 @@ describe('registerMusicHandlers', () => {
 
     await router.handle(request('GET', '/api/music/leaderboard/list', undefined, 'source_id=kw&id=kw__16&page=6&page_size=10'));
     expect(provider.leaderboardList).toHaveBeenCalledWith('kw__16', 6, 10);
+  });
+
+  test('query pagination routes reject invalid page size', async () => {
+    const { router, provider } = createHarness();
+
+    const response = await router.handle(request('GET', '/api/music/songlist/list', undefined, 'source_id=kw&page=1&page_size=101'));
+
+    expect(response.statusCode).toBe(400);
+    expect(parseResponseBody(response).error.code).toBe('BAD_REQUEST');
+    expect(provider.recommendedSongLists).not.toHaveBeenCalled();
   });
 
   test('unsupported providers return a structured platform error', async () => {
