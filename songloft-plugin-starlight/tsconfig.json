@@ -11,5 +11,5 @@
     "types": ["@songloft/plugin-sdk"],
     "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src", "tests", "vitest.config.ts"]
 }
