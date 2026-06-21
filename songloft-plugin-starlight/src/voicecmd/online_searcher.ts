@@ -7,6 +7,7 @@ import { MinaService } from '../service/service';
 import { getHostBaseUrl } from '../utils/http';
 import { URLBuilder } from '../player/url_builder';
 import { ConfigManager } from '../config/manager';
+import type { BridgeService } from '../bridge/service';
 
 // 外部搜索 API 请求体
 interface SearchOneRequest {
@@ -79,7 +80,7 @@ export class OnlineSearcher {
   private readonly searchTimeoutMs = 6000;
   private configManager: ConfigManager;
 
-  constructor(configManager: ConfigManager) {
+  constructor(configManager: ConfigManager, private readonly bridgeService?: BridgeService) {
     this.configManager = configManager;
   }
 
@@ -88,7 +89,7 @@ export class OnlineSearcher {
    */
   async isExternalSearchConfigured(): Promise<boolean> {
     const config = await this.configManager.getConfig();
-    return config.external_search_enabled && !!config.external_search_url && config.external_search_url.trim() !== '';
+    return config.external_search_enabled && (!!this.bridgeService || (!!config.external_search_url && config.external_search_url.trim() !== ''));
   }
 
   /**
@@ -145,6 +146,21 @@ export class OnlineSearcher {
     deviceId: string,
     minaService: MinaService,
   ): Promise<boolean> {
+    if (this.bridgeService) {
+      try {
+        const result = await this.bridgeService.externalSearch(keyword);
+        if (!result) {
+          return false;
+        }
+
+        const played = await this.bridgeService.playOnSpeaker(accountId, deviceId, result);
+        return Boolean(played.url);
+      } catch (e) {
+        songloft.log.warn('[OnlineSearcher] Bridge search/play error: ' + String(e));
+        return false;
+      }
+    }
+
     const reqBody: SearchOneRequest = {
       keyword,
       hint: hint || undefined,

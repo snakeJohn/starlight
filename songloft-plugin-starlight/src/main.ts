@@ -16,6 +16,7 @@ import { SourceStore } from './music/source_store';
 import { SourceManager } from './music/source_manager';
 import { RuntimeManager } from './music/runtime_manager';
 import { PlatformRegistry } from './music/platforms/registry';
+import { BridgeService } from './bridge/service';
 import { prefixRouter } from './router/prefix';
 
 // 导入所有handler注册函数
@@ -29,6 +30,7 @@ import { registerScheduleHandlers } from './handlers/schedule';
 import { registerVoiceCommandHandlers } from './handlers/voice_command';
 import { registerIndexingHandlers } from './handlers/indexing';
 import { registerMusicHandlers } from './handlers/music';
+import { registerBridgeHandlers } from './handlers/bridge';
 import { setHostBaseUrl } from './utils/http';
 
 const router = createRouter();
@@ -46,6 +48,7 @@ let indexingManager: IndexingManager;
 let sourceManager: SourceManager;
 let runtimeManager: RuntimeManager;
 let platformRegistry: PlatformRegistry;
+let bridgeService: BridgeService;
 
 async function onInit(): Promise<void> {
   songloft.log.info('Starlight 插件初始化...');
@@ -67,17 +70,26 @@ async function onInit(): Promise<void> {
     songloft.log.info('宿主 API 基础 URL 已设置: ' + pluginConfig.server_host);
   }
 
-  conversationMonitor = new ConversationMonitor(accountManager, configManager);
-  voiceEngine = new VoiceEngine(configManager, accountManager, minaService, playlistManagerMap, indexingManager, new AIAnalyzer());
-
-  const executor = new TaskExecutor(configManager, accountManager, minaService, playlistManagerMap, indexingManager, conversationMonitor);
-  scheduler = new Scheduler(configManager, executor);
-
   sourceManager = new SourceManager(new SourceStore());
   await sourceManager.init();
   runtimeManager = new RuntimeManager(sourceManager);
   await runtimeManager.loadEnabledSources();
   platformRegistry = new PlatformRegistry();
+  bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService);
+
+  conversationMonitor = new ConversationMonitor(accountManager, configManager);
+  voiceEngine = new VoiceEngine(
+    configManager,
+    accountManager,
+    minaService,
+    playlistManagerMap,
+    indexingManager,
+    new AIAnalyzer(),
+    bridgeService,
+  );
+
+  const executor = new TaskExecutor(configManager, accountManager, minaService, playlistManagerMap, indexingManager, conversationMonitor);
+  scheduler = new Scheduler(configManager, executor);
 
   // 如果配置中没有语音口令配置，写入默认配置
   const existingCommands = await configManager.getVoiceCommands();
@@ -99,6 +111,7 @@ async function onInit(): Promise<void> {
   registerVoiceCommandHandlers(miotRouter, configManager);
   registerIndexingHandlers(miotRouter, indexingManager);
   registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry);
+  registerBridgeHandlers(router, bridgeService);
 
   // 自动登录 + 启动后台服务（异步，不阻塞插件初始化）
   authService.autoLoginAll().catch(e => {

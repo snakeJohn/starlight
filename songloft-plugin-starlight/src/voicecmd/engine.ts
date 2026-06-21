@@ -14,6 +14,7 @@ import { AIAnalyzer } from './ai_analyzer';
 import { OnlineSearcher } from './online_searcher';
 import { updateDeviceStatusCache } from '../handlers/playlist';
 import type { ConversationMessage, VoiceCommand, PlayMode, AIAnalysisResult } from '../types';
+import type { BridgeService } from '../bridge/service';
 
 // ===== 类型定义 =====
 
@@ -83,6 +84,7 @@ export class VoiceEngine {
     playlistManagerMap: PlaylistManagerMap,
     indexingManager: IndexingManager,
     aiAnalyzer?: AIAnalyzer,
+    bridgeService?: BridgeService,
   ) {
     this.configManager = configManager;
     this.accountManager = accountManager;
@@ -90,7 +92,7 @@ export class VoiceEngine {
     this.playlistManagerMap = playlistManagerMap;
     this.indexingManager = indexingManager;
     this.aiAnalyzer = aiAnalyzer || new AIAnalyzer();
-    this.onlineSearcher = new OnlineSearcher(configManager);
+    this.onlineSearcher = new OnlineSearcher(configManager, bridgeService);
   }
 
   // ===== 公开方法 =====
