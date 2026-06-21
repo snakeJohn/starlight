@@ -12,6 +12,10 @@ import { VoiceEngine } from './voicecmd/engine';
 import { AIAnalyzer } from './voicecmd/ai_analyzer';
 import { getDefaultVoiceCommands } from './voicecmd/engine';
 import { IndexingManager } from './indexing/manager';
+import { SourceStore } from './music/source_store';
+import { SourceManager } from './music/source_manager';
+import { RuntimeManager } from './music/runtime_manager';
+import { PlatformRegistry } from './music/platforms/registry';
 import { prefixRouter } from './router/prefix';
 
 // 导入所有handler注册函数
@@ -24,6 +28,7 @@ import { registerConversationHandlers } from './handlers/conversation';
 import { registerScheduleHandlers } from './handlers/schedule';
 import { registerVoiceCommandHandlers } from './handlers/voice_command';
 import { registerIndexingHandlers } from './handlers/indexing';
+import { registerMusicHandlers } from './handlers/music';
 import { setHostBaseUrl } from './utils/http';
 
 const router = createRouter();
@@ -38,6 +43,9 @@ let scheduler: Scheduler;
 let conversationMonitor: ConversationMonitor;
 let voiceEngine: VoiceEngine;
 let indexingManager: IndexingManager;
+let sourceManager: SourceManager;
+let runtimeManager: RuntimeManager;
+let platformRegistry: PlatformRegistry;
 
 async function onInit(): Promise<void> {
   songloft.log.info('Starlight 插件初始化...');
@@ -65,6 +73,12 @@ async function onInit(): Promise<void> {
   const executor = new TaskExecutor(configManager, accountManager, minaService, playlistManagerMap, indexingManager, conversationMonitor);
   scheduler = new Scheduler(configManager, executor);
 
+  sourceManager = new SourceManager(new SourceStore());
+  await sourceManager.init();
+  runtimeManager = new RuntimeManager(sourceManager);
+  await runtimeManager.loadEnabledSources();
+  platformRegistry = new PlatformRegistry();
+
   // 如果配置中没有语音口令配置，写入默认配置
   const existingCommands = await configManager.getVoiceCommands();
   if (!existingCommands || existingCommands.length === 0) {
@@ -84,6 +98,7 @@ async function onInit(): Promise<void> {
   registerScheduleHandlers(miotRouter, scheduler, configManager);
   registerVoiceCommandHandlers(miotRouter, configManager);
   registerIndexingHandlers(miotRouter, indexingManager);
+  registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry);
 
   // 自动登录 + 启动后台服务（异步，不阻塞插件初始化）
   authService.autoLoginAll().catch(e => {
@@ -121,6 +136,7 @@ async function onDeinit(): Promise<void> {
   conversationMonitor?.stop();
   playlistManagerMap?.cleanup();
   authService?.cleanup();
+  await runtimeManager?.close();
   songloft.log.info('Starlight 插件已停止');
 }
 
