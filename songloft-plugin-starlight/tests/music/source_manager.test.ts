@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import type { MusicSourceMeta } from '../../src/music/types';
 import { SourceManager } from '../../src/music/source_manager';
 import { SourceStore } from '../../src/music/source_store';
 import { StarlightError } from '../../src/system/errors';
@@ -21,6 +22,40 @@ const repositoryScript = String.raw`/**
  */
 lx.send('inited', { status: true });
 `;
+
+const rollbackScript = String.raw`/*!
+ * @name Rollback Source
+ * @version 1.0.0
+ * @author Test Author
+ */
+lx.send('inited', { status: true });
+`;
+
+const chineseNameScript = String.raw`/*!
+ * @name 星海音乐源
+ * @version 1.0.0
+ * @author Test Author
+ */
+lx.send('inited', { status: true });
+`;
+
+class FailingSaveIndexStore extends SourceStore {
+  shouldFailSaveIndex = false;
+  readonly deletedScriptIds: string[] = [];
+
+  override async saveIndex(sources: MusicSourceMeta[]): Promise<void> {
+    if (this.shouldFailSaveIndex) {
+      throw new Error('saveIndex failed');
+    }
+
+    await super.saveIndex(sources);
+  }
+
+  override async deleteScript(id: string): Promise<void> {
+    this.deletedScriptIds.push(id);
+    await super.deleteScript(id);
+  }
+}
 
 async function createInitializedManager(store = new SourceStore()): Promise<SourceManager> {
   const manager = new SourceManager(store);
@@ -101,6 +136,17 @@ describe('SourceManager', () => {
     expect(manager.listSources()).toHaveLength(2);
   });
 
+  test('Chinese source names produce readable unique IDs', async () => {
+    const manager = await createInitializedManager();
+
+    const first = await manager.importFromJS('star-sea.js', chineseNameScript);
+    const second = await manager.importFromJS('star-sea-copy.js', chineseNameScript);
+
+    expect(first.id).toContain('星海音乐源');
+    expect(second.id).toContain('星海音乐源');
+    expect(second.id).not.toBe(first.id);
+  });
+
   test('empty script throws source import invalid error', async () => {
     const manager = await createInitializedManager();
 
@@ -131,6 +177,46 @@ describe('SourceManager', () => {
     const reloaded = await createInitializedManager(store);
 
     expect(reloaded.listSources()).toEqual([meta]);
+  });
+
+  test('failed import keeps in-memory sources unchanged and rolls back saved script', async () => {
+    const store = new FailingSaveIndexStore();
+    const manager = await createInitializedManager(store);
+    const existing = await manager.importFromJS('test-source.js', sourceScript);
+    store.shouldFailSaveIndex = true;
+
+    await expect(manager.importFromJS('rollback.js', rollbackScript)).rejects.toThrow('saveIndex failed');
+
+    expect(manager.listSources()).toEqual([existing]);
+    await expect(store.loadScript('rollback-source')).resolves.toBeNull();
+    expect(store.deletedScriptIds).toContain('rollback-source');
+  });
+
+  test('failed enabled toggle leaves in-memory source state unchanged', async () => {
+    const store = new FailingSaveIndexStore();
+    const manager = await createInitializedManager(store);
+    const meta = await manager.importFromJS('test-source.js', sourceScript);
+    await manager.setEnabled(meta.id, true);
+    store.shouldFailSaveIndex = true;
+
+    await expect(manager.setEnabled(meta.id, false)).rejects.toThrow('saveIndex failed');
+
+    expect(manager.listSources()).toEqual([
+      expect.objectContaining({ id: meta.id, enabled: true }),
+    ]);
+  });
+
+  test('failed delete leaves in-memory source and script unchanged', async () => {
+    const store = new FailingSaveIndexStore();
+    const manager = await createInitializedManager(store);
+    const meta = await manager.importFromJS('test-source.js', sourceScript);
+    store.shouldFailSaveIndex = true;
+
+    await expect(manager.deleteSource(meta.id)).rejects.toThrow('saveIndex failed');
+
+    expect(manager.listSources()).toEqual([meta]);
+    await expect(store.loadScript(meta.id)).resolves.toBe(sourceScript);
+    expect(store.deletedScriptIds).not.toContain(meta.id);
   });
 });
 

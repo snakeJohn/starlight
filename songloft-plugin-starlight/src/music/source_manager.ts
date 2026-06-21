@@ -51,7 +51,8 @@ function readableId(value: string): string {
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^\p{L}\p{N}_-]+/gu, '-')
+    .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
 
   return id || 'source';
@@ -100,40 +101,49 @@ export class SourceManager {
     };
 
     await this.store.saveScript(id, script);
-    this.sources.push(meta);
-    await this.store.saveIndex(this.sources);
+    const nextSources = [...this.sources, meta];
+    try {
+      await this.store.saveIndex(nextSources);
+    } catch (error) {
+      await this.rollbackScript(id);
+      throw error;
+    }
+
+    this.sources = nextSources.map(cloneMeta);
 
     return cloneMeta(meta);
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<void> {
-    const source = this.findSource(id);
-    source.enabled = enabled;
-    await this.store.saveIndex(this.sources);
+    const index = this.findSourceIndex(id);
+    const nextSources = this.sources.map((source, sourceIndex) =>
+      sourceIndex === index ? { ...cloneMeta(source), enabled } : cloneMeta(source),
+    );
+
+    await this.store.saveIndex(nextSources);
+    this.sources = nextSources;
   }
 
   async deleteSource(id: string): Promise<void> {
-    const index = this.sources.findIndex((source) => source.id === id);
-    if (index === -1) {
-      throw this.sourceMissingError(id);
-    }
+    const index = this.findSourceIndex(id);
+    const nextSources = this.sources.filter((_, sourceIndex) => sourceIndex !== index).map(cloneMeta);
 
-    this.sources.splice(index, 1);
+    await this.store.saveIndex(nextSources);
     await this.store.deleteScript(id);
-    await this.store.saveIndex(this.sources);
+    this.sources = nextSources;
   }
 
   async getScript(id: string): Promise<string | null> {
     return this.store.loadScript(id);
   }
 
-  private findSource(id: string): MusicSourceMeta {
-    const source = this.sources.find((candidate) => candidate.id === id);
-    if (!source) {
+  private findSourceIndex(id: string): number {
+    const index = this.sources.findIndex((candidate) => candidate.id === id);
+    if (index === -1) {
       throw this.sourceMissingError(id);
     }
 
-    return source;
+    return index;
   }
 
   private uniqueId(baseId: string): string {
@@ -154,5 +164,13 @@ export class SourceManager {
 
   private sourceMissingError(id: string): StarlightError {
     return new StarlightError('SOURCE_NOT_ENABLED', `Music source is not enabled or does not exist: ${id}`, false, { id });
+  }
+
+  private async rollbackScript(id: string): Promise<void> {
+    try {
+      await this.store.deleteScript(id);
+    } catch {
+      // Preserve the original import failure; rollback is best effort.
+    }
   }
 }
