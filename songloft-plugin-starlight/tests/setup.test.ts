@@ -14,10 +14,19 @@ interface TestSongloftGlobal {
 
 const getSongloft = (): TestSongloftGlobal => (globalThis as typeof globalThis & { songloft: TestSongloftGlobal }).songloft;
 
+const collectionFetchResult = globalThis.fetch('data:text/plain,collection').then(
+  () => 'resolved',
+  (error: unknown) => (error instanceof Error ? error.message : String(error)),
+);
+
 test('installs the Songloft global test token', async () => {
   const songloft = getSongloft();
 
   await expect(songloft.plugin.getToken()).resolves.toBe('test-plugin-token');
+});
+
+test('blocks fetch during test collection', async () => {
+  await expect(collectionFetchResult).resolves.toBe('Unexpected fetch call. Mock globalThis.fetch in this test.');
 });
 
 test('returns null for missing storage keys', async () => {
