@@ -1,0 +1,307 @@
+// MIoT 智能音箱插件 - 在线歌曲搜索器
+// 当本地索引找不到歌曲时，调用用户配置的外部搜索 API 搜索并推送到音箱
+
+/// <reference types="@songloft/plugin-sdk" />
+
+import { MinaService } from '../service/service';
+import { getHostBaseUrl } from '../utils/http';
+import { URLBuilder } from '../player/url_builder';
+import { ConfigManager } from '../config/manager';
+
+// 外部搜索 API 请求体
+interface SearchOneRequest {
+  keyword: string;
+  hint?: { title?: string; artist?: string; duration?: number };
+  quality?: string;
+}
+
+// 外部搜索 API 成功响应 data
+// source_data 为可选，外部接口不一定返回
+interface SearchOneData {
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  cover_url: string;
+  url: string;
+  source_data?: LxSourceData;
+}
+
+interface LxSourceData {
+  platform: string;
+  quality: string;
+  songInfo: Record<string, unknown>;
+}
+
+// 外部搜索 API 响应
+interface SearchOneResponse {
+  code: number;
+  msg: string;
+  data: SearchOneData | null;
+}
+
+// songloft /api/v1/songs/remote 请求体
+interface RemoteSongItem {
+  title: string;
+  artist: string;
+  album: string;
+  cover_url: string;
+  duration: number;
+  url: string;               // 绝对 URL，lxmusic topone 已返回
+  plugin_entry_path: string; // 空字符串表示直接用 url 字段
+  source_data: string;
+  dedup_key: string;
+}
+
+// songloft /api/v1/songs/remote 响应
+interface RemoteSongsResponse {
+  count: number;
+  songs: Array<{
+    id: number;
+    type: string;
+    title: string;
+    artist: string;
+    album: string;
+    duration: number;
+    url: string;
+    cover_url: string;
+    plugin_entry_path: string;
+    source_data: string;
+    dedup_key: string;
+  }>;
+}
+
+/**
+ * 在线歌曲搜索器
+ * 封装对用户配置的外部搜索 API 的调用，支持洛雪音乐等兼容接口
+ */
+export class OnlineSearcher {
+  private readonly searchTimeoutMs = 6000;
+  private configManager: ConfigManager;
+
+  constructor(configManager: ConfigManager) {
+    this.configManager = configManager;
+  }
+
+  /**
+   * 检查是否配置了外部搜索 API
+   */
+  async isExternalSearchConfigured(): Promise<boolean> {
+    const config = await this.configManager.getConfig();
+    return config.external_search_enabled && !!config.external_search_url && config.external_search_url.trim() !== '';
+  }
+
+  /**
+   * 获取外部搜索 API 的完整地址
+   * 支持两种输入：
+   * 1. 完整 URL（以 http:// 或 https:// 开头）直接返回
+   * 2. 相对路径（以 / 开头）拼接服务器地址
+   */
+  private async getSearchBaseUrl(): Promise<string> {
+    const config = await this.configManager.getConfig();
+    const searchUrl = config.external_search_url?.trim() || '';
+
+    if (!searchUrl) {
+      return '';
+    }
+
+    if (searchUrl.startsWith('http://') || searchUrl.startsWith('https://')) {
+      return searchUrl;
+    }
+
+    // 相对路径，拼接服务器地址
+    const host = getHostBaseUrl();
+    return host + searchUrl;
+  }
+
+  /**
+   * 获取认证 Token
+   * 用户配置的 token 优先，否则使用插件 token
+   */
+  private async getAuthToken(): Promise<string> {
+    const config = await this.configManager.getConfig();
+    const userToken = config.external_search_token?.trim();
+    if (userToken) {
+      return userToken;
+    }
+    const pluginToken = await songloft.plugin.getToken();
+    return `Bearer ${pluginToken}`;
+  }
+
+  /**
+   * 在线搜索歌曲并推送到音箱播放，同时导入到本地数据库
+   *
+   * @param keyword       搜索关键词
+   * @param hint         可选的歌曲提示（title/artist/duration）
+   * @param accountId    小米账号ID
+   * @param deviceId     设备ID
+   * @param minaService  MinaService 实例（用于推送URL）
+   * @returns 是否成功推送播放
+   */
+  async searchAndPlay(
+    keyword: string,
+    hint: { title: string; artist?: string; duration?: number } | null,
+    accountId: string,
+    deviceId: string,
+    minaService: MinaService,
+  ): Promise<boolean> {
+    const reqBody: SearchOneRequest = {
+      keyword,
+      hint: hint || undefined,
+      quality: '320k',
+    };
+
+    let resp: SearchOneResponse | null = null;
+
+    // 带超时的 fetch（用 Promise.race 替代 AbortController，兼容 QuickJS）
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('AbortError')), this.searchTimeoutMs);
+    });
+
+    try {
+      const baseUrl = await this.getSearchBaseUrl();
+      const authToken = await this.getAuthToken();
+      const fetchPromise = fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: authToken },
+        body: JSON.stringify(reqBody),
+      });
+      const fetchResp = await Promise.race([fetchPromise, timeoutPromise]);
+
+      const text = await fetchResp.text();
+      try {
+        resp = JSON.parse(text) as SearchOneResponse;
+      } catch {
+        songloft.log.warn('[OnlineSearcher] Failed to parse search/topone response: ' + text);
+        return false;
+      }
+    } catch (e: any) {
+      if (e.message === 'AbortError') {
+        songloft.log.warn('[OnlineSearcher] Search/topone timeout (>6s) for keyword: ' + keyword);
+      } else {
+        songloft.log.warn('[OnlineSearcher] Search/topone fetch error: ' + String(e));
+      }
+      return false;
+    }
+
+    // 解析响应
+    if (!resp || resp.code !== 0 || !resp.data) {
+      songloft.log.warn('[OnlineSearcher] Search/topone returned code=' + (resp?.code ?? 'null') + ' for keyword: ' + keyword);
+      return false;
+    }
+
+    const song = resp.data;
+    // 同步导入到 songloft 数据库，直接拿到 songloft 分配的 id 和 url
+    const imported = await this.importSong(song);
+    if (!imported) {
+      songloft.log.error('[OnlineSearcher] Failed to import song, cannot play: ' + song.title);
+      return false;
+    }
+
+    // 用返回的 url 构造完整播放 URL（相对路径，URLBuilder 会拼接 server_host 和 token）
+    const playUrl = await URLBuilder.buildSongURL({ id: imported.id, url: imported.url});
+    if (!playUrl) {
+      songloft.log.error('[OnlineSearcher] Failed to build URL for song id=' + imported.id);
+      return false;
+    }
+
+    // 推送 URL 到音箱
+    const played = await minaService.playURL(accountId, deviceId, playUrl);
+    if (!played) {
+      songloft.log.error('[OnlineSearcher] Failed to push URL to device: ' + playUrl);
+      return false;
+    }
+    songloft.log.info('[OnlineSearcher] Playing online song: ' + song.title + ' - ' + song.artist + ' url=' + playUrl);
+    return true;
+  }
+
+  /**
+   * 导入歌曲到 songloft 数据库
+   * @returns 导入成功后包含歌曲 id 和 url 的对象，失败返回 null
+   */
+  private async importSong(song: SearchOneData): Promise<{ id: number; url: string } | null> {
+    // 构造 dedup_key 用于去重（source_data 可能缺失，降级处理）
+    const sd = song.source_data;
+    const songInfo = sd?.songInfo || {};
+    const platform = sd?.platform || 'external';
+    const musicId = String(songInfo.musicId || songInfo.hash || '');
+    const dedupKey = musicId ? `${platform}_${musicId}` : '';
+
+    // 构造 source_data（存储搜索来源的原始信息），缺失时用空对象
+    const sourceData = sd
+      ? JSON.stringify({
+          platform: sd.platform,
+          quality: sd.quality,
+          musicId: musicId,
+          hash: String(songInfo.hash || ''),
+          songmid: String(songInfo.songmid || ''),
+        })
+      : '';
+
+    const remoteItem: RemoteSongItem = {
+      title: song.title,
+      artist: song.artist,
+      album: song.album || '',
+      cover_url: song.cover_url || '',
+      duration: song.duration || 0,
+      url: song.url || '',  // lxmusic topone 已返回绝对 URL，后端直接代理
+      plugin_entry_path: '', // 空表示直接用 url 字段，不走插件回调
+      source_data: sourceData,
+      dedup_key: dedupKey,
+    };
+
+    try {
+      const pluginToken = await songloft.plugin.getToken();
+      const serverHost = getHostBaseUrl();
+      const fetchResp = await fetch(serverHost + '/api/v1/songs/remote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pluginToken}` },
+        body: JSON.stringify([remoteItem]),
+      });
+      const text = await fetchResp.text();
+      let result: RemoteSongsResponse;
+      try {
+        result = JSON.parse(text) as RemoteSongsResponse;
+      } catch {
+        songloft.log.warn('[OnlineSearcher] Failed to parse remote songs response: ' + text);
+        // 导入失败（可能是 UNIQUE 约束冲突），尝试查找已存在的歌曲
+        return await this.findExistingSong(song.title, song.artist);
+      }
+
+      if (!result.songs || result.songs.length === 0) {
+        songloft.log.warn('[OnlineSearcher] Remote import returned no songs: ' + text);
+        // 导入失败，尝试查找已存在的歌曲
+        return await this.findExistingSong(song.title, song.artist);
+      }
+
+      const imported = result.songs[0];
+      songloft.log.info('[OnlineSearcher] Import success: ' + song.title + ' - ' + song.artist + ', songloft id=' + imported.id);
+      return { id: imported.id, url: imported.url };
+    } catch (e: any) {
+      songloft.log.warn('[OnlineSearcher] Remote import fetch error: ' + String(e));
+      return null;
+    }
+  }
+
+  /**
+   * 在 Songloft 数据库中查找已存在的外部导入歌曲
+   * 当 /api/v1/songs/remote 因唯一键约束冲突等无法重复导入时作为回退
+   */
+  private async findExistingSong(title: string, artist: string): Promise<{ id: number; url: string } | null> {
+    try {
+      const allSongs = await songloft.songs.list({ limit: 10000 });
+      const match = allSongs.find(s =>
+        s.title === title &&
+        s.artist === artist &&
+        (s.type === 'remote' || s.url?.startsWith('http'))
+      );
+      if (match && match.id && match.url) {
+        songloft.log.info('[OnlineSearcher] Found existing remote song: ' + title + ' - ' + artist + ', id=' + match.id);
+        return { id: match.id, url: match.url };
+      }
+    } catch (e) {
+      songloft.log.warn('[OnlineSearcher] Failed to search existing songs: ' + String(e));
+    }
+    return null;
+  }
+}

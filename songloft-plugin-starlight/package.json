@@ -1,0 +1,24 @@
+{
+  "name": "songloft-plugin-starlight",
+  "version": "2026.6.21",
+  "description": "Songloft smart speaker and LX Music source bridge plugin",
+  "private": true,
+  "scripts": {
+    "prebuild": "node scripts/fetch-holidays.mjs",
+    "build": "songloft-plugin build",
+    "predev": "node scripts/fetch-holidays.mjs",
+    "dev": "songloft-plugin dev",
+    "validate": "songloft-plugin validate",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "publish:release": "songloft-plugin publish",
+    "fetch:holidays": "node scripts/fetch-holidays.mjs"
+  },
+  "devDependencies": {
+    "@songloft/plugin-builder": "^2.4.3",
+    "@songloft/plugin-sdk": "^2.4.3",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
