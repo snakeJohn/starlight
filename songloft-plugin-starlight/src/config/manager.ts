@@ -15,13 +15,14 @@ import type {
 } from '../types';
 
 // ===== 存储键常量 =====
-const STORAGE_KEY_CONFIG = 'config';
-const STORAGE_KEY_ACCOUNTS = 'accounts';
-const STORAGE_KEY_WEBHOOKS = 'webhooks';
-const STORAGE_KEY_VOICE_COMMANDS = 'voice_commands';
-const STORAGE_KEY_SCHEDULED_TASKS = 'scheduled_tasks';
-const STORAGE_KEY_SCHEDULE_LOGS = 'schedule_logs';
-const STORAGE_KEY_AI_CONFIG = 'ai_config';
+const STORAGE_PREFIX = 'starlight:miot:';
+const STORAGE_KEY_CONFIG = STORAGE_PREFIX + 'config';
+const STORAGE_KEY_ACCOUNTS = STORAGE_PREFIX + 'accounts';
+const STORAGE_KEY_WEBHOOKS = STORAGE_PREFIX + 'webhooks';
+const STORAGE_KEY_VOICE_COMMANDS = STORAGE_PREFIX + 'voice_commands';
+const STORAGE_KEY_SCHEDULED_TASKS = STORAGE_PREFIX + 'scheduled_tasks';
+const STORAGE_KEY_SCHEDULE_LOGS = STORAGE_PREFIX + 'schedule_logs';
+const STORAGE_KEY_AI_CONFIG = STORAGE_PREFIX + 'ai_config';
 
 /** 日志最大条数（环形缓冲） */
 const MAX_SCHEDULE_LOGS = 200;

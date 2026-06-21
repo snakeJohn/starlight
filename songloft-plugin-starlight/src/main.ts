@@ -12,6 +12,7 @@ import { VoiceEngine } from './voicecmd/engine';
 import { AIAnalyzer } from './voicecmd/ai_analyzer';
 import { getDefaultVoiceCommands } from './voicecmd/engine';
 import { IndexingManager } from './indexing/manager';
+import { prefixRouter } from './router/prefix';
 
 // 导入所有handler注册函数
 import { registerAccountHandlers } from './handlers/account';
@@ -39,7 +40,7 @@ let voiceEngine: VoiceEngine;
 let indexingManager: IndexingManager;
 
 async function onInit(): Promise<void> {
-  songloft.log.info('MIoT 智能音箱插件初始化...');
+  songloft.log.info('Starlight 插件初始化...');
 
   // 初始化管理器
   configManager = new ConfigManager();
@@ -73,15 +74,16 @@ async function onInit(): Promise<void> {
   }
 
   // 注册所有路由
-  registerAccountHandlers(router, accountManager, authService);
-  registerAuthHandlers(router, authService, accountManager);
-  registerDeviceHandlers(router, minaService, accountManager);
-  registerPlaylistHandlers(router, playlistManagerMap, minaService, configManager);
-  registerConfigHandlers(router, configManager, conversationMonitor, scheduler, voiceEngine);
-  registerConversationHandlers(router, conversationMonitor, configManager);
-  registerScheduleHandlers(router, scheduler, configManager);
-  registerVoiceCommandHandlers(router, configManager);
-  registerIndexingHandlers(router, indexingManager);
+  const miotRouter = prefixRouter(router, '/api/miot');
+  registerAccountHandlers(miotRouter, accountManager, authService);
+  registerAuthHandlers(miotRouter, authService, accountManager);
+  registerDeviceHandlers(miotRouter, minaService, accountManager);
+  registerPlaylistHandlers(miotRouter, playlistManagerMap, minaService, configManager);
+  registerConfigHandlers(miotRouter, configManager, conversationMonitor, scheduler, voiceEngine);
+  registerConversationHandlers(miotRouter, conversationMonitor, configManager);
+  registerScheduleHandlers(miotRouter, scheduler, configManager);
+  registerVoiceCommandHandlers(miotRouter, configManager);
+  registerIndexingHandlers(miotRouter, indexingManager);
 
   // 自动登录 + 启动后台服务（异步，不阻塞插件初始化）
   authService.autoLoginAll().catch(e => {
@@ -110,16 +112,16 @@ async function onInit(): Promise<void> {
     voiceEngine.setEnabled(true);
   }
 
-  songloft.log.info('MIoT 智能音箱插件初始化完成');
+  songloft.log.info('Starlight 插件初始化完成');
 }
 
 async function onDeinit(): Promise<void> {
-  songloft.log.info('MIoT 智能音箱插件停止...');
+  songloft.log.info('Starlight 插件停止...');
   scheduler?.stop();
   conversationMonitor?.stop();
   playlistManagerMap?.cleanup();
   authService?.cleanup();
-  songloft.log.info('MIoT 智能音箱插件已停止');
+  songloft.log.info('Starlight 插件已停止');
 }
 
 async function onHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
