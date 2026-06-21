@@ -12,7 +12,7 @@ window.TRACELY_CONFIG = {
     host: '',
 };
 
-const PLUGIN_VERSION = '2026.6.9';
+const PLUGIN_VERSION = '2026.6.21';
 
 // ========== 全局变量（当前选中的设备） ==========
 window.currentAccountId = '';
