@@ -1,9 +1,11 @@
+import { type ErrorCode, StarlightError } from './errors';
+
 export class AsyncLockRegistry {
   private readonly locks = new Set<string>();
 
-  acquire(name: string, code = name): () => void {
+  acquire(name: string, code: ErrorCode): () => void {
     if (this.locks.has(name)) {
-      throw new Error(`${code} is already running`);
+      throw new StarlightError(code, `${name} is already running`, true);
     }
 
     this.locks.add(name);
