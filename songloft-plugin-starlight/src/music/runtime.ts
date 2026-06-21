@@ -92,6 +92,7 @@ function stringUrl(value: unknown): string | null {
 export class SourceRuntime {
   private destroyed = false;
   private dispatchQueue: Promise<void> = Promise.resolve();
+  private destroyPromise: Promise<void> | null = null;
 
   private constructor(
     private readonly envName: string,
@@ -141,32 +142,45 @@ export class SourceRuntime {
     quality: MusicQuality | string,
     songInfo: LxSongInfo,
   ): Promise<string | null> {
-    return this.enqueueDispatch(() => this.dispatchMusicUrl(platform, quality, songInfo));
+    return this.enqueueDispatch(() => this.dispatchMusicUrl(platform, quality, songInfo), null);
   }
 
   async destroy(): Promise<void> {
-    if (this.destroyed) {
-      return;
+    if (this.destroyPromise) {
+      return this.destroyPromise;
     }
 
     this.destroyed = true;
-    await songloft.jsenv.destroy(this.envName);
+    this.destroyPromise = this.destroyAfterDispatches();
+    return this.destroyPromise;
   }
 
-  private async enqueueDispatch<T>(task: () => Promise<T>): Promise<T> {
+  private async enqueueDispatch<T>(task: () => Promise<T>, destroyedValue: T): Promise<T> {
+    if (this.destroyed) {
+      return destroyedValue;
+    }
+
     const previous = this.dispatchQueue;
     let release = () => {};
     this.dispatchQueue = new Promise<void>((resolve) => {
       release = resolve;
     });
 
-    await previous;
-
     try {
+      await previous;
+      if (this.destroyed) {
+        return destroyedValue;
+      }
+
       return await task();
     } finally {
       release();
     }
+  }
+
+  private async destroyAfterDispatches(): Promise<void> {
+    await this.dispatchQueue;
+    await songloft.jsenv.destroy(this.envName);
   }
 
   private async dispatchMusicUrl(

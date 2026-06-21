@@ -335,6 +335,41 @@ describe('SourceRuntime', () => {
     }
   });
 
+  test('queued getMusicUrl returns null without dispatching after destroy starts', async () => {
+    const dispatches: Array<{ id: string; event: string; payload: unknown }> = [];
+    const releases: Array<(url: string) => void> = [];
+    installJsenvMock((_name, code, _timeoutMs, waitEvents) => {
+      if (waitEvents.includes('inited')) {
+        return result([initedEvent({ kw: {} })]);
+      }
+
+      const dispatch = dispatchCallFrom(code);
+      dispatches.push(dispatch);
+      return new Promise<JsenvResult>((resolve) => {
+        releases.push((url) => resolve(result([dispatchResultEvent(code, url)])));
+      });
+    });
+    const runtime = await SourceRuntime.create('destroy/queued', syntheticScript);
+
+    const first = runtime.getMusicUrl('kw', '320k', songInfo);
+    await Promise.resolve();
+    expect(dispatches).toHaveLength(1);
+
+    const queued = runtime.getMusicUrl('kw', 'flac', { ...songInfo, musicId: 'queued-id' });
+    await Promise.resolve();
+    expect(dispatches).toHaveLength(1);
+
+    const destroyPromise = runtime.destroy();
+    releases[0]('https://cdn.invalid/first.mp3');
+    await expect(first).resolves.toBe('https://cdn.invalid/first.mp3');
+    await Promise.resolve();
+    releases[1]?.('https://cdn.invalid/queued.flac');
+
+    await expect(queued).resolves.toBeNull();
+    await expect(destroyPromise).resolves.toBeUndefined();
+    expect(dispatches).toHaveLength(1);
+  });
+
   test('create destroys env and throws structured error on script eval failure', async () => {
     const { destroy } = installJsenvMock(() => result([], 'SyntaxError: synthetic failure'));
 
@@ -514,6 +549,43 @@ describe('RuntimeManager', () => {
       expect.stringMatching(/^starlight_lx_enabled-c(?:_[a-z0-9]+)?$/),
       expect.any(String),
     );
+  });
+
+  test('reload waits for in-flight dispatch before recreating the same env', async () => {
+    const managerSource = fakeSourceManager(() => [sourceMeta('same-source', true)], {
+      'same-source': 'script',
+    });
+    const dispatches: Array<{ envName: string; code: string }> = [];
+    const dispatchControl: { release?: (url: string) => void } = {};
+    const { create, destroy } = installJsenvMock((name, code, _timeoutMs, waitEvents) => {
+      if (waitEvents.includes('inited')) {
+        return result([initedEvent({ kw: {} })]);
+      }
+
+      dispatches.push({ envName: name, code });
+      return new Promise<JsenvResult>((resolve) => {
+        dispatchControl.release = (url) => resolve(result([dispatchResultEvent(code, url)]));
+      });
+    });
+    const manager = new RuntimeManager(managerSource);
+    await manager.loadEnabledSources();
+
+    const oldLookup = manager.getMusicUrl('kw', '320k', songInfo);
+    await Promise.resolve();
+    expect(dispatches).toHaveLength(1);
+
+    const reload = manager.loadEnabledSources();
+    await Promise.resolve();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
+
+    dispatchControl.release?.('https://cdn.invalid/old.mp3');
+    await expect(oldLookup).resolves.toBe('https://cdn.invalid/old.mp3');
+    await reload;
+
+    expect(destroy).toHaveBeenCalledWith(dispatches[0].envName);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1][0]).toBe(dispatches[0].envName);
   });
 
   test('loadEnabledSources continues when one enabled source script fails to load', async () => {
