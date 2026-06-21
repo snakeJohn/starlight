@@ -58,10 +58,36 @@ function readableId(value: string): string {
   return id || 'source';
 }
 
-function cloneMeta(meta: MusicSourceMeta): MusicSourceMeta {
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function stringField(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function booleanField(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : false;
+}
+
+function platformList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((platform): platform is string => typeof platform === 'string') : [];
+}
+
+function cloneMeta(meta: unknown): MusicSourceMeta {
+  const source = asRecord(meta);
+
   return {
-    ...meta,
-    supportedPlatforms: [...meta.supportedPlatforms],
+    id: stringField(source.id),
+    name: stringField(source.name),
+    version: stringField(source.version),
+    description: stringField(source.description),
+    author: stringField(source.author),
+    homepage: stringField(source.homepage),
+    filename: stringField(source.filename),
+    importedAt: stringField(source.importedAt),
+    enabled: booleanField(source.enabled),
+    supportedPlatforms: platformList(source.supportedPlatforms),
   };
 }
 
@@ -126,10 +152,17 @@ export class SourceManager {
 
   async deleteSource(id: string): Promise<void> {
     const index = this.findSourceIndex(id);
+    const previousSources = this.sources.map(cloneMeta);
     const nextSources = this.sources.filter((_, sourceIndex) => sourceIndex !== index).map(cloneMeta);
 
     await this.store.saveIndex(nextSources);
-    await this.store.deleteScript(id);
+    try {
+      await this.store.deleteScript(id);
+    } catch (error) {
+      await this.rollbackIndex(previousSources);
+      throw error;
+    }
+
     this.sources = nextSources;
   }
 
@@ -171,6 +204,14 @@ export class SourceManager {
       await this.store.deleteScript(id);
     } catch {
       // Preserve the original import failure; rollback is best effort.
+    }
+  }
+
+  private async rollbackIndex(sources: MusicSourceMeta[]): Promise<void> {
+    try {
+      await this.store.saveIndex(sources);
+    } catch {
+      // Preserve the original delete failure; rollback is best effort.
     }
   }
 }

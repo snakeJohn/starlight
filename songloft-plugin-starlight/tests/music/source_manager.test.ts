@@ -57,6 +57,18 @@ class FailingSaveIndexStore extends SourceStore {
   }
 }
 
+class FailingDeleteScriptStore extends SourceStore {
+  shouldFailDeleteScript = false;
+
+  override async deleteScript(id: string): Promise<void> {
+    if (this.shouldFailDeleteScript) {
+      throw new Error(`deleteScript failed: ${id}`);
+    }
+
+    await super.deleteScript(id);
+  }
+}
+
 async function createInitializedManager(store = new SourceStore()): Promise<SourceManager> {
   const manager = new SourceManager(store);
   await manager.init();
@@ -179,6 +191,37 @@ describe('SourceManager', () => {
     expect(reloaded.listSources()).toEqual([meta]);
   });
 
+  test('normalizes stored metadata and strips unknown fields after init', async () => {
+    await songloft.storage.set(
+      'starlight:music:sources',
+      JSON.stringify([
+        {
+          id: 'legacy-source',
+          name: 'Legacy Source',
+          script: 'secret',
+          enabled: true,
+        },
+      ]),
+    );
+    const manager = await createInitializedManager();
+
+    const [source] = manager.listSources();
+
+    expect(source).toEqual({
+      id: 'legacy-source',
+      name: 'Legacy Source',
+      version: '',
+      description: '',
+      author: '',
+      homepage: '',
+      filename: '',
+      importedAt: '',
+      enabled: true,
+      supportedPlatforms: [],
+    });
+    expect(source).not.toHaveProperty('script');
+  });
+
   test('failed import keeps in-memory sources unchanged and rolls back saved script', async () => {
     const store = new FailingSaveIndexStore();
     const manager = await createInitializedManager(store);
@@ -217,6 +260,19 @@ describe('SourceManager', () => {
     expect(manager.listSources()).toEqual([meta]);
     await expect(store.loadScript(meta.id)).resolves.toBe(sourceScript);
     expect(store.deletedScriptIds).not.toContain(meta.id);
+  });
+
+  test('failed script delete rolls persisted index back and leaves source listed', async () => {
+    const store = new FailingDeleteScriptStore();
+    const manager = await createInitializedManager(store);
+    const meta = await manager.importFromJS('test-source.js', sourceScript);
+    store.shouldFailDeleteScript = true;
+
+    await expect(manager.deleteSource(meta.id)).rejects.toThrow(`deleteScript failed: ${meta.id}`);
+
+    expect(manager.listSources()).toEqual([meta]);
+    await expect(store.loadIndex()).resolves.toEqual([meta]);
+    await expect(store.loadScript(meta.id)).resolves.toBe(sourceScript);
   });
 });
 
