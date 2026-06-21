@@ -11,9 +11,10 @@ Paid source files are excluded from implementation, tests, bundles, and logs.
 
 ```bash
 npm install
-npm run dev         # watch + auto-upload to local Songloft
-npm run build       # produce dist/miot.jsplugin.zip
-npm run validate    # verify plugin.json hashes
+npm run dev         # watch + auto-upload Starlight to local Songloft
+npm run typecheck   # TypeScript check
+npm run build       # produce dist/starlight.jsplugin.zip
+npm run validate    # verify Starlight plugin metadata and hashes
 ```
 
 ## Description
