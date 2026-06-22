@@ -152,7 +152,11 @@ export class DownloadService {
   private async importDownloadRemoteSong(song: SearchResultSong, url: string): Promise<SongloftRemoteSong> {
     const token = await songloft.plugin.getToken();
     const host = await songloft.plugin.getHostUrl();
-    const payload = toRemoteSong(song, url, { pluginEntryPath: 'starlight-download' });
+    const payload = toRemoteSong(song, url, {
+      pluginEntryPath: '',
+      includeSourceData: false,
+      dedupKey: '',
+    });
     const imported = await postRemoteSongs(host, token, [payload]);
     if (!imported.ok) {
       throw new StarlightError('INTERNAL_ERROR', `导入下载歌曲失败: ${imported.status}${imported.body ? ` ${imported.body}` : ''}`, true, {

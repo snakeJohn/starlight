@@ -52,4 +52,30 @@ describe('toRemoteSong', () => {
 
     expect(remote.dedup_key).toBe(`kg:${Object.values(idFields)[0]}`);
   });
+
+  it('can map a resolved URL as a pure external remote song', () => {
+    const remote = toRemoteSong({
+      title: 'Song',
+      artist: 'Singer',
+      album: '',
+      duration: 0,
+      cover_url: '',
+      source_data: {
+        platform: 'kw',
+        quality: 'flac',
+        songInfo: { source: 'kw', name: 'Song', singer: 'Singer', album: '', duration: 0, musicId: '123' },
+      },
+    }, 'https://audio.test/song.flac', {
+      pluginEntryPath: '',
+      includeSourceData: false,
+      dedupKey: '',
+    });
+
+    expect(remote).toMatchObject({
+      url: 'https://audio.test/song.flac',
+      plugin_entry_path: '',
+      source_data: '',
+      dedup_key: '',
+    });
+  });
 });

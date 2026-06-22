@@ -55,7 +55,7 @@ describe('DownloadService', () => {
     });
   });
 
-  it('downloads a song using only the dedicated download runtime and Songloft downloader', async () => {
+  it('downloads a song by importing the resolved download URL as a pure external remote song', async () => {
     const runtime = createRuntime();
     const fetchMock = installRemoteImport(501);
     const downloadMock = vi.fn(async () => ({ path: 'downloads/Singer/Song.flac', status: 'ok' }));
@@ -78,8 +78,9 @@ describe('DownloadService', () => {
       expect.objectContaining({
         title: 'Song',
         url: 'https://download.test/song.flac',
-        plugin_entry_path: 'starlight-download',
-        dedup_key: 'kw:123',
+        plugin_entry_path: '',
+        source_data: '',
+        dedup_key: '',
       }),
     ]);
     expect(downloadMock).toHaveBeenCalledWith(501, {

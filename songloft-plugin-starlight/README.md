@@ -17,6 +17,10 @@ npm run build       # produce dist/starlight.jsplugin.zip
 npm run validate    # verify Starlight plugin metadata and hashes
 ```
 
+## Release Versioning
+
+发布版本号必须使用 `yyyy.mm.dd.hh` 格式,例如 `2026.06.22.20`。`package.json`、`package-lock.json` 和 `plugin.json` 的版本号必须保持一致。
+
 ## Description
 
 智能音箱设备控制示例插件。本仓库仅提供与宿主 SDK 对接的脚手架代码，**不附带任何第三方设备协议实现或账号体系**，使用者需自行负责接入合规性。
