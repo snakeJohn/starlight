@@ -452,52 +452,12 @@
                     <button class="ghost-button" type="button" data-action="load-config">加载</button>
                 </div>
                 <form class="surface-section settings-form" data-role="config-form">
-                    <div class="info-panel" data-role="host-access-info">
-                        <strong>Songloft 访问地址</strong>
-                        <span>小爱音箱访问 Songloft 播放接口用的局域网地址，插件会自动从 Songloft 宿主获取。</span>
-                        <code data-role="host-url">自动获取</code>
-                    </div>
-                    <div class="control-grid">
-                        <label>
-                            <span>时区</span>
-                            <input name="timezone" placeholder="Asia/Shanghai">
-                        </label>
-                        <label class="wide-field">
-                            <span>外部搜索 URL</span>
-                            <input name="external_search_url" type="url" placeholder="https://">
-                        </label>
-                        <label class="wide-field">
-                            <span>外部搜索 Token</span>
-                            <input name="external_search_token">
-                        </label>
-                        <label>
-                            <span>额外型号</span>
-                            <input name="extra_music_api_models" placeholder="MODEL_A,MODEL_B">
-                        </label>
-                        <label class="wide-field">
-                            <span>打断提示</span>
-                            <input name="interrupt_tts_hint_text">
-                        </label>
-                    </div>
                     <div class="toggle-grid">
                         <label class="toggle-line"><input name="conversation_monitor_enabled" type="checkbox"><span>对话监听</span></label>
-                        <label class="toggle-line"><input name="voice_command_enabled" type="checkbox"><span>语音口令</span></label>
+                        <label class="toggle-line"><input name="voice_command_enabled" type="checkbox" disabled><span>语音口令</span></label>
                         <label class="toggle-line"><input name="scheduled_tasks_enabled" type="checkbox"><span>定时任务</span></label>
                         <label class="toggle-line"><input name="force_mp3" type="checkbox"><span>强制 MP3</span></label>
-                        <label class="toggle-line"><input name="external_search_enabled" type="checkbox"><span>外部搜索</span></label>
-                        <label class="toggle-line"><input name="indicator_light_enabled" type="checkbox"><span>保留灯效</span></label>
-                        <label class="toggle-line"><input name="interrupt_tts_hint_enabled" type="checkbox"><span>搜索提示</span></label>
                     </div>
-                    <fieldset>
-                        <legend>AI</legend>
-                        <div class="control-grid">
-                            <label class="toggle-line"><input name="ai_enabled" type="checkbox"><span>启用</span></label>
-                            <label class="wide-field"><span>API URL</span><input name="ai_api_url" type="url"></label>
-                            <label><span>Model</span><input name="ai_model"></label>
-                            <label><span>Timeout</span><input name="ai_timeout" type="number" min="1" max="120"></label>
-                            <label class="wide-field"><span>API Key</span><input name="ai_api_key" type="password"></label>
-                        </div>
-                    </fieldset>
                     <div class="inline-actions">
                         <button class="primary-button" type="submit">保存设置</button>
                         <span data-role="config-state">未加载</span>

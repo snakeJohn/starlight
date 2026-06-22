@@ -1,6 +1,8 @@
 import { api } from './api.js';
 import { $, $$, escapeHtml, toast } from './state.js';
 
+let savedConversationMonitorEnabled = false;
+
 function asArray(value) {
     if (Array.isArray(value)) return value;
     if (Array.isArray(value?.commands)) return value.commands;
@@ -11,6 +13,10 @@ function asArray(value) {
 
 function boolValue(form, name) {
     return Boolean(form.elements[name]?.checked);
+}
+
+function hasField(form, name) {
+    return Boolean(form.elements[name]);
 }
 
 function textValue(form, name) {
@@ -38,6 +44,55 @@ async function putOrPost(path, body) {
         }
         throw error;
     }
+}
+
+function setConfigState(message) {
+    const node = $('[data-role="config-state"]');
+    if (node) node.textContent = message;
+}
+
+function normalizeDeviceId(device) {
+    return device?.device_id || device?.deviceID || device?.did || device?.miotDID || device?.id || '';
+}
+
+function flattenConversationDevices(groups) {
+    const rows = [];
+    const seen = new Set();
+    for (const group of asArray(groups)) {
+        const accountId = group?.account_id || group?.id || group?.account || '';
+        for (const device of asArray(group?.devices)) {
+            const deviceId = normalizeDeviceId(device);
+            const key = `${accountId}:${deviceId}`;
+            if (!accountId || !deviceId || seen.has(key)) continue;
+            seen.add(key);
+            rows.push({ account_id: accountId, device_id: deviceId });
+        }
+    }
+    return rows;
+}
+
+export async function manageAllConversationDevices() {
+    const groups = await api.get('/miot/mina/devices');
+    const devices = flattenConversationDevices(groups);
+    if (devices.length === 0) {
+        throw new Error('未检测到音箱设备，请先在音箱页登录并刷新设备');
+    }
+    await Promise.all(devices.map(device => api.post('/miot/mina/device/managed', {
+        account_id: device.account_id,
+        device_id: device.device_id,
+        managed: true,
+    })));
+    return devices.length;
+}
+
+export function updateVoiceCommandAccess(form, enabled) {
+    const field = form?.elements?.voice_command_enabled;
+    if (!field) return;
+    field.disabled = !enabled;
+    if (!enabled) {
+        field.checked = false;
+    }
+    field.closest?.('.toggle-line')?.classList.toggle('is-muted', !enabled);
 }
 
 const voiceCommandTypes = [
@@ -331,40 +386,89 @@ async function loadConfig() {
     setField(form, 'ai_api_key', ai.api_key);
     const hostNode = $('[data-role="host-url"]');
     if (hostNode) hostNode.textContent = config.songloft_host || config.server_host || '自动获取';
-    $('[data-role="config-state"]').textContent = config.server_host_status ? `访问地址: ${config.server_host_status}` : '已加载';
+    savedConversationMonitorEnabled = !!config.conversation_monitor_enabled;
+    updateVoiceCommandAccess(form, savedConversationMonitorEnabled);
+    setConfigState('已加载');
 }
 
-function configFromForm(form) {
-    return {
-        timezone: textValue(form, 'timezone'),
+export function configFromForm(form) {
+    const payload = {
         conversation_monitor_enabled: boolValue(form, 'conversation_monitor_enabled'),
         voice_command_enabled: boolValue(form, 'voice_command_enabled'),
         scheduled_tasks_enabled: boolValue(form, 'scheduled_tasks_enabled'),
         force_mp3: boolValue(form, 'force_mp3'),
-        external_search_enabled: boolValue(form, 'external_search_enabled'),
-        external_search_url: textValue(form, 'external_search_url'),
-        external_search_token: textValue(form, 'external_search_token'),
-        extra_music_api_models: textValue(form, 'extra_music_api_models')
+    };
+    if (hasField(form, 'timezone')) {
+        payload.timezone = textValue(form, 'timezone');
+    }
+    if (hasField(form, 'extra_music_api_models')) {
+        payload.extra_music_api_models = textValue(form, 'extra_music_api_models')
             .split(',')
             .map(item => item.trim())
-            .filter(Boolean),
-        indicator_light_enabled: boolValue(form, 'indicator_light_enabled'),
-        interrupt_tts_hint_enabled: boolValue(form, 'interrupt_tts_hint_enabled'),
-        interrupt_tts_hint_text: textValue(form, 'interrupt_tts_hint_text'),
-        ai_config: {
+            .filter(Boolean);
+    }
+    if (hasField(form, 'external_search_enabled')) {
+        payload.external_search_enabled = boolValue(form, 'external_search_enabled');
+    }
+    if (hasField(form, 'external_search_url')) {
+        payload.external_search_url = textValue(form, 'external_search_url');
+    }
+    if (hasField(form, 'external_search_token')) {
+        payload.external_search_token = textValue(form, 'external_search_token');
+    }
+    if (hasField(form, 'indicator_light_enabled')) {
+        payload.indicator_light_enabled = boolValue(form, 'indicator_light_enabled');
+    }
+    if (hasField(form, 'interrupt_tts_hint_enabled')) {
+        payload.interrupt_tts_hint_enabled = boolValue(form, 'interrupt_tts_hint_enabled');
+    }
+    if (hasField(form, 'interrupt_tts_hint_text')) {
+        payload.interrupt_tts_hint_text = textValue(form, 'interrupt_tts_hint_text');
+    }
+    if (hasField(form, 'ai_enabled')) {
+        payload.ai_config = {
             enabled: boolValue(form, 'ai_enabled'),
             api_url: textValue(form, 'ai_api_url'),
             api_key: textValue(form, 'ai_api_key'),
             model: textValue(form, 'ai_model'),
             timeout: Number(textValue(form, 'ai_timeout')) || 30,
-        },
-    };
+        };
+    }
+    return payload;
+}
+
+async function prepareConversationMonitorFromCheckbox(input) {
+    const form = input.closest?.('form') || $('[data-role="config-form"]');
+    if (!input.checked) {
+        updateVoiceCommandAccess(form, false);
+        setConfigState('对话监听关闭后，语音口令将不可用');
+        return;
+    }
+
+    input.disabled = true;
+    setConfigState('正在检测并托管音箱设备...');
+    try {
+        const count = await manageAllConversationDevices();
+        updateVoiceCommandAccess(form, savedConversationMonitorEnabled);
+        setConfigState(`已自动托管 ${count} 台音箱，保存设置后可启用语音口令`);
+        toast(`已自动托管 ${count} 台音箱`);
+    } catch (error) {
+        input.checked = false;
+        updateVoiceCommandAccess(form, false);
+        setConfigState(error.message);
+        toast(error.message, 'error');
+    } finally {
+        input.disabled = false;
+    }
 }
 
 async function saveConfig(event) {
     event.preventDefault();
-    const result = await putOrPost('/miot/config', configFromForm(event.currentTarget));
-    $('[data-role="config-state"]').textContent = result?.warning || '已保存';
+    const form = event.currentTarget;
+    const result = await putOrPost('/miot/config', configFromForm(form));
+    savedConversationMonitorEnabled = boolValue(form, 'conversation_monitor_enabled');
+    updateVoiceCommandAccess(form, savedConversationMonitorEnabled);
+    setConfigState(result?.warning || (savedConversationMonitorEnabled ? '已保存，可启用语音口令' : '已保存'));
     toast(result?.warning || '设置已保存', result?.warning ? 'error' : 'success');
 }
 
@@ -382,6 +486,12 @@ function bindAutomation() {
     $('[data-action="load-config"]')?.addEventListener('click', () => loadConfig().catch(error => toast(error.message, 'error')));
     $('[data-role="schedule-form"]')?.addEventListener('submit', event => saveSchedule(event).catch(error => toast(error.message, 'error')));
     $('[data-role="config-form"]')?.addEventListener('submit', event => saveConfig(event).catch(error => toast(error.message, 'error')));
+    $('[name="conversation_monitor_enabled"]')?.addEventListener('change', event => {
+        prepareConversationMonitorFromCheckbox(event.currentTarget).catch(error => {
+            setConfigState(error.message);
+            toast(error.message, 'error');
+        });
+    });
 
     $('[data-role="voice-command-list"]')?.addEventListener('change', event => {
         if (event.target?.name !== 'type') return;

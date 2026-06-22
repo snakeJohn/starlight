@@ -56,11 +56,12 @@ describe('static UI layout copy', () => {
     expect(searchPlaylists).toBeGreaterThan(importPlaylists);
   });
 
-  it('renames server host to the Songloft access address', () => {
+  it('hides the server host configuration from the settings page', () => {
     const html = indexHtml();
 
-    expect(html).toContain('Songloft 访问地址');
-    expect(html).toContain('小爱音箱访问 Songloft 播放接口用的局域网地址');
+    expect(html).not.toContain('Songloft 访问地址');
+    expect(html).not.toContain('小爱音箱访问 Songloft 播放接口用的局域网地址');
+    expect(html).not.toContain('data-role="host-url"');
     expect(html).not.toContain('<span>服务器地址</span>');
     expect(html).not.toContain('name="server_host"');
   });
@@ -127,5 +128,25 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('.automation-layout .metric-grid');
     expect(stylesheet).toContain('grid-template-columns: 1fr');
     expect(stylesheet).toContain('white-space: normal');
+  });
+
+  it('hides advanced settings while keeping voice commands gated by saved conversation monitoring', () => {
+    const html = indexHtml();
+
+    expect(html).toContain('name="conversation_monitor_enabled" type="checkbox"');
+    expect(html).toContain('name="voice_command_enabled" type="checkbox" disabled');
+    expect(html).toContain('name="scheduled_tasks_enabled" type="checkbox"');
+    expect(html).toContain('name="force_mp3" type="checkbox"');
+    expect(html).not.toContain('name="timezone"');
+    expect(html).not.toContain('name="extra_music_api_models"');
+    expect(html).not.toContain('额外型号');
+    expect(html).not.toContain('外部搜索 URL');
+    expect(html).not.toContain('外部搜索 Token');
+    expect(html).not.toContain('打断提示');
+    expect(html).not.toContain('<span>外部搜索</span>');
+    expect(html).not.toContain('<span>保留灯效</span>');
+    expect(html).not.toContain('<span>搜索提示</span>');
+    expect(html).not.toContain('<legend>AI</legend>');
+    expect(html).not.toContain('name="ai_api_key"');
   });
 });
