@@ -192,6 +192,14 @@ async function playOnSpeaker(song) {
     return result;
 }
 
+export async function playSonglistOnSpeaker(songs) {
+    if (!songs?.length) {
+        throw new Error('歌单没有可播放歌曲');
+    }
+    await importSongs(songs);
+    return playOnSpeaker(songs[0]);
+}
+
 function bindSongActions(root, getSong) {
     root.addEventListener('click', async event => {
         const button = event.target.closest('button[data-action]');
@@ -349,7 +357,7 @@ async function loadSongListDetail(item) {
     $('[data-role="songlist-title"]').textContent = songListTitle(item);
     const detail = $('[data-role="songlist-detail"]');
     detail.innerHTML = songs.length
-        ? `${songs.map((song, index) => renderSongRow(song, index)).join('')}<div class="inline-actions"><button class="primary-button" type="button" data-action="import-songlist">导入当前歌单</button></div>`
+        ? `${songs.map((song, index) => renderSongRow(song, index)).join('')}<div class="inline-actions"><button class="primary-button" type="button" data-action="play-songlist">播放整个歌单</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button></div>`
         : '<div class="empty-state">歌单没有可显示歌曲。</div>';
 }
 
@@ -392,11 +400,18 @@ function bindSongLists() {
 
     bindSongActions(detail, index => state.songlistSongs?.[index]);
     detail.addEventListener('click', async event => {
-        if (!event.target.closest('[data-action="import-songlist"]')) return;
+        const playButton = event.target.closest('[data-action="play-songlist"]');
+        const importButton = event.target.closest('[data-action="import-songlist"]');
+        if (!playButton && !importButton) return;
+        const button = playButton || importButton;
+        button.disabled = true;
         try {
-            await importSongs(state.songlistSongs || []);
+            if (playButton) await playSonglistOnSpeaker(state.songlistSongs || []);
+            if (importButton) await importSongs(state.songlistSongs || []);
         } catch (error) {
             toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
         }
     });
 }
