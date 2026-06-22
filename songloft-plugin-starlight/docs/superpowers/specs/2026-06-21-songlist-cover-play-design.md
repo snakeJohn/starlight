@@ -17,6 +17,7 @@ Improve the music discovery UI so songlists, leaderboards, and songs read like u
 - When saving a song into a custom playlist, persist the selected music source alongside the song, for example `稻花香 - 周杰伦（酷我）` or `为龙 - 河图（酷狗）`.
 - Store the full LX `source_data` for every custom playlist song so later URL resolution uses the original source and quality.
 - Support voice-created custom playlists and voice add-song commands.
+- Add the LX Server Web-style playlist import flow: users can choose a platform and paste a playlist link or ID, import it as a custom playlist, preserve the original source/list ID, and refresh it later from the upstream playlist.
 
 ## UI Design
 
@@ -32,6 +33,13 @@ The songlist detail section gains grouped actions above or below the detail song
 On mobile, actions wrap under the media text without causing horizontal overflow.
 
 The songlist tab also includes a custom playlist area. Users can create a playlist by name, pick an existing custom playlist, and add songs from search, songlist detail, or leaderboard detail rows. The visible saved-song label includes the source display name in parentheses and does not expose raw platform IDs.
+
+The custom playlist area includes an import form inspired by LX Server Web:
+
+- Platform selector: 酷我、酷狗、QQ 音乐、咪咕、网易云.
+- Playlist link or ID input.
+- `导入歌单` action that fetches the remote playlist detail, previews basic metadata, then saves it as a custom playlist.
+- Imported network playlists show a `刷新` action when they retain `source` and `sourceListId`.
 
 ## Data Flow
 
@@ -59,6 +67,32 @@ interface CustomPlaylistSong {
 }
 ```
 
+Imported network playlist metadata mirrors the LX Server model:
+
+```ts
+interface CustomPlaylist {
+  id: string;
+  name: string;
+  cover_url: string;
+  source?: MusicPlatform;
+  source_name?: string;
+  sourceListId?: string;
+  imported_at: string;
+  updated_at: string;
+  songs: CustomPlaylistSong[];
+}
+```
+
+The import path calls the existing provider detail endpoint with the pasted link/ID:
+
+```text
+GET /api/music/songlist/detail?source_id=<platform>&id=<encoded link-or-id>&page=1&page_size=100
+```
+
+The platform providers already normalize common playlist links/IDs where supported. The imported playlist is deduped by `source + sourceListId`; importing the same upstream playlist again returns the existing playlist instead of creating a duplicate.
+
+Refresh re-fetches the same upstream detail and replaces the playlist song list while preserving the local playlist id. If the upstream playlist no longer resolves, the existing saved playlist remains unchanged.
+
 ## Voice Custom Playlists
 
 Rules add two new voice command types:
@@ -77,7 +111,9 @@ When AI command analysis is enabled, the analyzer prompt and result schema add `
 - Import failure: show the API error and do not start playback.
 - Playback failure after import: show the playback error; imported songs remain available in Songloft.
 - Duplicate custom playlist names resolve to the existing playlist rather than creating another with the same name.
+- Duplicate imported network playlists resolve to the existing playlist by `source + sourceListId`.
 - Duplicate songs in the same custom playlist are ignored by `platform + stable song id` dedupe.
+- Import/refresh failures leave the previously saved playlist unchanged.
 - Voice add-song failures speak a concise reason, such as `未找到歌曲` or `未找到音源`.
 
 ## Testing
@@ -85,3 +121,5 @@ When AI command analysis is enabled, the analyzer prompt and result schema add `
 Add front-end unit coverage for the pure rendering helpers used by media rows and ID hiding. Add behavior coverage for the whole-songlist helper to prove it calls import first and then speaker playback with the first song. Run the existing full verification suite after implementation.
 
 Add storage/service tests for custom playlist creation, dedupe, source retention, and native-write fallback. Add voice-engine tests for parsing create/add commands and for refreshing the index after a voice-created playlist changes.
+
+Add import tests for link/ID playlist import, `source + sourceListId` dedupe, and refresh failure rollback.

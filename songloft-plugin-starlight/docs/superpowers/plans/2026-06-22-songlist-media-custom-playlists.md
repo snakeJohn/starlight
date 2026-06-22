@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add cover-rich music discovery rows, hidden provider IDs, whole-songlist playback, and custom playlists with source-retaining UI and voice creation/add-song commands.
+**Goal:** Add cover-rich music discovery rows, hidden provider IDs, whole-songlist playback, custom playlists with source-retaining UI and voice creation/add-song commands, plus LX Server Web-style playlist import and refresh.
 
 **Architecture:** Keep platform search/detail endpoints intact. Add focused UI helper exports for media row rendering and playlist actions. Add a custom playlist service that prefers Songloft native playlist writes and falls back to plugin storage, then teach indexing/voice to see fallback playlists.
 
@@ -23,7 +23,7 @@
 
 - Modify `static/js/music.js`: media row rendering, custom playlist UI actions, whole-songlist playback helper exports.
 - Modify `static/css/style.css`: stable media row layout with artwork and wrapping actions.
-- Modify `static/index.html`: custom playlist panel and detail actions.
+- Modify `static/index.html`: custom playlist panel, imported playlist form, refresh actions, and detail actions.
 - Create `src/custom_playlists/types.ts`: custom playlist and song interfaces.
 - Create `src/custom_playlists/store.ts`: storage fallback.
 - Create `src/custom_playlists/service.ts`: native-write-first custom playlist service.
@@ -144,6 +144,8 @@ git commit -m "feat: play whole discovered songlists"
 - `CustomPlaylistService.addSong(playlistName: string, song: SearchResultSong): Promise<CustomPlaylist>`
 - `CustomPlaylistService.rename(id: string, name: string): Promise<CustomPlaylist>`
 - `CustomPlaylistService.delete(id: string): Promise<{ id: string }>`
+- `CustomPlaylistService.importNetworkPlaylist(input: { source: MusicPlatform; sourceListId: string; detail: SongListDetail }): Promise<CustomPlaylist>`
+- `CustomPlaylistService.refreshNetworkPlaylist(id: string, detailLoader: (source: MusicPlatform, sourceListId: string) => Promise<SongListDetail>): Promise<CustomPlaylist>`
 - `CustomPlaylistStore` persists under `starlight:custom_playlists:index`.
 
 - [ ] **Step 1: Write failing service tests**
@@ -154,6 +156,9 @@ Assert:
 - Adding `稻花香` from `kw` stores `source_name: "酷我"` and the full `source_data`.
 - Adding the same song twice dedupes by `platform + stable song id`.
 - When `songloft.playlists.create` or `songloft.playlists.addSongs` is absent/throws, fallback storage still succeeds.
+- Importing a network playlist stores `source`, `source_name`, `sourceListId`, cover, songs, and each song's full `source_data`.
+- Importing the same `source + sourceListId` returns the existing playlist.
+- Refreshing a network playlist replaces songs on success and leaves the old playlist unchanged when the detail loader throws.
 
 - [ ] **Step 2: Run RED**
 
@@ -204,10 +209,12 @@ git commit -m "feat: add custom playlist service"
 - `PUT /api/custom-playlists/:id`
 - `DELETE /api/custom-playlists/:id`
 - `POST /api/custom-playlists/:id/songs`
+- `POST /api/custom-playlists/import`
+- `POST /api/custom-playlists/:id/refresh`
 
 - [ ] **Step 1: Write failing handler tests**
 
-Assert routes validate names/songs and delegate to `CustomPlaylistService`.
+Assert routes validate names/songs and delegate to `CustomPlaylistService`. Also assert `POST /api/custom-playlists/import` validates `source_id` plus playlist link/ID, calls the existing platform detail loader, and stores the imported network playlist.
 
 - [ ] **Step 2: Run RED**
 
@@ -225,7 +232,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Write failing UI tests**
 
-Assert the UI adds an `加入歌单` action for song rows and posts to `/custom-playlists/:id/songs` with the selected custom playlist.
+Assert the UI adds an `加入歌单` action for song rows and posts to `/custom-playlists/:id/songs` with the selected custom playlist. Assert the import form posts platform plus playlist link/ID to `/custom-playlists/import`, and imported playlists render a `刷新` action that posts to `/custom-playlists/:id/refresh`.
 
 - [ ] **Step 6: Run UI RED**
 
@@ -234,7 +241,7 @@ Expected: FAIL because UI controls are missing.
 
 - [ ] **Step 7: Implement minimal UI**
 
-Add a custom playlist panel with create/select/list controls. Add `加入歌单` actions to search/detail/ranking song rows.
+Add a custom playlist panel with create/select/list controls. Add an LX Server Web-style import form with a platform selector, playlist link/ID input, `导入歌单` button, and per-imported-playlist `刷新` button. Add `加入歌单` actions to search/detail/ranking song rows.
 
 - [ ] **Step 8: Run UI GREEN**
 
@@ -373,6 +380,7 @@ Use the existing imported test sources only as test data. Verify:
 - All sources remain not bundled and not default-enabled.
 - Create custom playlist `古风测试`.
 - Add `为龙 - 河图（酷狗）` and `稻花香 - 周杰伦（酷我）` from search results.
+- Import a network playlist by platform plus playlist ID/link, confirm it stores source metadata, then refresh it.
 - Saved list displays source names, not raw platform IDs.
 - Whole-songlist playback imports then plays the first song when a speaker is selected.
 
@@ -387,4 +395,3 @@ git commit -m "test: verify custom playlist acceptance"
 ```
 
 Only commit if Step 3 required committed test/docs changes.
-
