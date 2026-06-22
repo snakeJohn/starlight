@@ -1,6 +1,9 @@
 // MIoT 智能音箱插件 - 索引管理模块
 // 从 Songloft 主程序API获取歌曲/歌单数据，建立内存索引，提供模糊搜索
 
+import type { CustomPlaylistService } from '../custom_playlists/service';
+import type { CustomPlaylist, CustomPlaylistSong } from '../custom_playlists/types';
+
 // ===== 类型定义 =====
 
 /** 索引中的歌曲信息 */
@@ -207,6 +210,16 @@ const MAX_SEARCH_RESULTS = 10;
 /** 最低匹配分数阈值 — 低于此分数的模糊匹配视为无效（编辑距离噪声最高约 30，子串匹配 40+） */
 const MIN_MATCH_SCORE = 40;
 
+type CustomPlaylistReader = Pick<CustomPlaylistService, 'list'>;
+
+function syntheticPlaylistId(index: number): number {
+  return -100000 - index;
+}
+
+function syntheticSongId(playlistIndex: number, songIndex: number): number {
+  return -100000000 - playlistIndex * 100000 - songIndex;
+}
+
 /**
  * 计算歌曲综合匹配得分，联合评估标题和歌手
  *
@@ -244,6 +257,12 @@ export class IndexingManager {
   private lastRefreshTime: number = 0;
   private isRefreshing: boolean = false;
   private indexReady: boolean = false;
+
+  constructor(private customPlaylists?: CustomPlaylistReader) {}
+
+  setCustomPlaylistService(customPlaylists: CustomPlaylistReader): void {
+    this.customPlaylists = customPlaylists;
+  }
 
   /**
    * 刷新索引（从宿主API获取最新数据）
@@ -296,6 +315,8 @@ export class IndexingManager {
         }
       }
       const plSongsMs = Date.now() - plSongsStart;
+
+      await this.appendCustomPlaylists(newPlaylists, newSongs, newPlaylistSongsCache);
 
       // 6. 更新索引
       this.playlists = newPlaylists;
@@ -563,5 +584,56 @@ export class IndexingManager {
    */
   isIndexReady(): boolean {
     return this.indexReady;
+  }
+
+  private async appendCustomPlaylists(
+    playlists: IndexedPlaylist[],
+    songs: IndexedSong[],
+    playlistSongsCache: Map<number, Array<{ id: number; title: string; artist: string }>>,
+  ): Promise<void> {
+    if (!this.customPlaylists) {
+      return;
+    }
+
+    let customPlaylists: CustomPlaylist[] = [];
+    try {
+      customPlaylists = await this.customPlaylists.list();
+    } catch (error) {
+      songloft.log.warn(`索引刷新: 获取自建歌单失败: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+
+    customPlaylists.forEach((playlist, playlistIndex) => {
+      const nativeId = typeof playlist.native_playlist_id === 'number' ? playlist.native_playlist_id : undefined;
+      if (nativeId !== undefined && playlists.some((item) => item.id === nativeId)) {
+        return;
+      }
+
+      const playlistId = nativeId ?? syntheticPlaylistId(playlistIndex);
+      const playlistSongs = playlist.songs.map((song, songIndex) => this.indexCustomSong(song, playlistIndex, songIndex));
+      playlists.push({
+        id: playlistId,
+        name: playlist.name,
+        nameLower: playlist.name.toLowerCase(),
+        songCount: playlistSongs.length,
+      });
+      songs.push(...playlistSongs.map((song) => ({
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        album: '',
+        titleLower: song.title.toLowerCase(),
+        artistLower: song.artist.toLowerCase(),
+      })));
+      playlistSongsCache.set(playlistId, playlistSongs);
+    });
+  }
+
+  private indexCustomSong(song: CustomPlaylistSong, playlistIndex: number, songIndex: number): { id: number; title: string; artist: string } {
+    return {
+      id: syntheticSongId(playlistIndex, songIndex),
+      title: song.title,
+      artist: song.artist,
+    };
   }
 }

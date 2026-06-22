@@ -81,6 +81,7 @@ async function onInit(): Promise<void> {
   await runtimeManager.loadEnabledSources();
   platformRegistry = new PlatformRegistry();
   bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService);
+  indexingManager.setCustomPlaylistService(customPlaylistService);
 
   customPlaylistService = new CustomPlaylistService(new CustomPlaylistStore(), bridgeService);
   conversationMonitor = new ConversationMonitor(accountManager, configManager);
