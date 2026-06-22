@@ -354,18 +354,50 @@
                             <button class="ghost-button" type="button" data-action="load-voice">重新加载</button>
                         </div>
                     </section>
-                    <section class="surface-section">
-                        <div class="section-bar">
-                            <h2>索引</h2>
-                            <span data-role="indexing-state">未加载</span>
-                        </div>
-                        <div class="metric-grid">
-                            <div><span>歌单</span><strong data-role="index-playlists">0</strong></div>
-                            <div><span>歌曲</span><strong data-role="index-songs">0</strong></div>
-                            <div><span>时间</span><strong data-role="index-updated">-</strong></div>
-                        </div>
-                        <button class="primary-button" type="button" data-action="refresh-index">刷新索引</button>
-                    </section>
+                    <div class="automation-side-stack">
+                        <section class="surface-section automation-player-panel">
+                            <div class="section-bar">
+                                <h2>音箱播放</h2>
+                                <span data-role="automation-player-state">未选择设备</span>
+                            </div>
+                            <label>
+                                <span>控制设备</span>
+                                <select data-role="automation-player-device" aria-label="自动化播放控制设备"></select>
+                            </label>
+                            <div class="player-status-card">
+                                <strong data-role="automation-player-title">暂无播放信息</strong>
+                                <span data-role="automation-player-meta">选择音箱后可管理语音口令触发的播放。</span>
+                            </div>
+                            <div class="player-actions automation-player-actions">
+                                <button class="icon-button" type="button" data-action="automation-player-previous" title="上一首" aria-label="上一首">上一首</button>
+                                <button class="icon-button" type="button" data-action="automation-player-toggle" title="暂停播放" aria-label="暂停播放">暂停播放</button>
+                                <button class="icon-button" type="button" data-action="automation-player-stop" title="停止" aria-label="停止">停止</button>
+                                <button class="icon-button" type="button" data-action="automation-player-next" title="下一首" aria-label="下一首">下一首</button>
+                            </div>
+                            <div class="inline-actions">
+                                <select data-role="automation-player-mode" aria-label="播放模式">
+                                    <option value="order">顺序</option>
+                                    <option value="loop">列表循环</option>
+                                    <option value="random">随机</option>
+                                    <option value="single">单曲</option>
+                                </select>
+                                <button class="ghost-button" type="button" data-action="automation-player-mode">应用模式</button>
+                                <button class="ghost-button" type="button" data-action="automation-player-refresh">刷新状态</button>
+                            </div>
+                        </section>
+                        <section class="surface-section">
+                            <div class="section-bar">
+                                <h2>索引</h2>
+                                <span data-role="indexing-state">未加载</span>
+                            </div>
+                            <div class="metric-grid">
+                                <div><span>歌单</span><strong data-role="index-playlists">0</strong></div>
+                                <div><span>歌曲</span><strong data-role="index-songs">0</strong></div>
+                                <div><span>时间</span><strong data-role="index-updated">-</strong></div>
+                            </div>
+                            <button class="primary-button" type="button" data-action="refresh-index">刷新索引</button>
+                        </section>
+                    </div>
                 </div>
 
                 <section class="surface-section">

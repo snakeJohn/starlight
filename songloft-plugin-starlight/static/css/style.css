@@ -699,6 +699,42 @@ textarea:focus {
     grid-template-columns: 1fr;
 }
 
+.automation-side-stack,
+.automation-player-panel {
+    min-width: 0;
+    display: grid;
+    gap: 14px;
+}
+
+.automation-player-actions {
+    align-items: stretch;
+}
+
+.automation-player-actions button {
+    flex: 1 1 76px;
+}
+
+.player-status-card {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    border: 1px solid var(--surface-line);
+    border-radius: var(--radius);
+    padding: 9px 10px;
+    background: var(--surface-muted);
+}
+
+.player-status-card strong,
+.player-status-card span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.player-status-card span {
+    color: var(--muted);
+    font-size: 12px;
+}
+
 .segmented {
     height: 38px;
     display: grid;

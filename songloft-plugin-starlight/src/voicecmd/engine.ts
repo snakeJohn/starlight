@@ -7,7 +7,7 @@
 import { ConfigManager } from '../config/manager';
 import { AccountManager } from '../account/manager';
 import { MinaService } from '../service/service';
-import { PlaylistManagerMap } from '../player/manager';
+import { PlaylistManagerMap, type PlayerSong } from '../player/manager';
 import { IndexingManager } from '../indexing/manager';
 import { URLBuilder } from '../player/url_builder';
 import { AIAnalyzer } from './ai_analyzer';
@@ -49,6 +49,28 @@ const SOURCE_NAME_TO_PLATFORM: Record<string, MusicPlatform> = {
   '咪咕': 'mg',
   '网易云': 'wy',
 };
+
+function standaloneSongToPlayerSong(song: { id: number; url: string; title: string; artist: string }, url: string): PlayerSong {
+  return {
+    id: song.id,
+    type: 'remote',
+    title: song.title,
+    artist: song.artist,
+    album: '',
+    duration: 0,
+    file_path: '',
+    url,
+    cover_path: '',
+    cover_url: '',
+    lyric_url: '',
+    file_size: 0,
+    format: '',
+    bit_rate: 0,
+    sample_rate: 0,
+    is_live: false,
+    cache_hash: '',
+  };
+}
 
 // ===== 默认口令配置 =====
 
@@ -631,8 +653,12 @@ export class VoiceEngine {
       if (standalone) {
         const playUrl = await URLBuilder.buildSongURL(standalone);
         if (playUrl) {
-          await this.minaService.playURL(accountId, deviceId, playUrl);
-          songloft.log.info('[VoiceEngine] Played standalone remote song: ' + standalone.title + ' - ' + standalone.artist);
+          const ok = await pm.playStandalone([standaloneSongToPlayerSong(standalone, playUrl)], 0, 'single');
+          if (!ok) {
+            songloft.log.error('[VoiceEngine] Failed to play standalone remote song: ' + standalone.title + ' - ' + standalone.artist);
+            return;
+          }
+          songloft.log.info('[VoiceEngine] Played standalone remote song through PlaylistManager: ' + standalone.title + ' - ' + standalone.artist);
           return;
         }
       }

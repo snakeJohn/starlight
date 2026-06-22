@@ -130,6 +130,18 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('white-space: normal');
   });
 
+  it('adds speaker playback controls to the automation page', () => {
+    const html = indexHtml();
+
+    expect(html).toContain('<h2>音箱播放</h2>');
+    expect(html).toContain('data-role="automation-player-device"');
+    expect(html).toContain('data-action="automation-player-previous"');
+    expect(html).toContain('data-action="automation-player-toggle"');
+    expect(html).toContain('data-action="automation-player-stop"');
+    expect(html).toContain('data-action="automation-player-next"');
+    expect(html).toContain('data-action="automation-player-refresh"');
+  });
+
   it('hides advanced settings while keeping voice commands gated by saved conversation monitoring', () => {
     const html = indexHtml();
 
