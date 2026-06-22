@@ -7,6 +7,7 @@ interface SpeakerControlsModule {
   selectAndPersistDevice(accountId: string, deviceId: string, name?: string): Promise<void>;
   runPlayerAction(action: string): Promise<Record<string, unknown>>;
   togglePlayerPlayback(): Promise<Record<string, unknown>>;
+  renderVoiceRecordList(records: Array<Record<string, unknown>>, now?: number): string;
 }
 
 interface StateModule {
@@ -129,5 +130,43 @@ describe('speaker controls helpers', () => {
       method: 'POST',
       body: JSON.stringify({ account_id: 'miot-account', device_id: 'speaker-1' }),
     }));
+  });
+
+  it('renders only the last 12 hours of speaker conversations newest first', async () => {
+    installDom();
+    const { speaker } = await loadModules();
+    const now = new Date('2026-06-22T20:00:00+08:00').getTime();
+
+    const html = speaker.renderVoiceRecordList([
+      {
+        device_name: '卧室音箱',
+        message: {
+          timestamp_ms: now - 13 * 60 * 60 * 1000,
+          response: { answer: [{ question: '旧记录', content: '过期回答' }] },
+        },
+      },
+      {
+        device_name: '客厅音箱',
+        message: {
+          timestamp_ms: now - 2 * 60 * 1000,
+          response: { answer: [{ question: '播放稻香', content: '好的' }] },
+        },
+      },
+      {
+        device_name: '书房音箱',
+        message: {
+          timestamp_ms: now - 8 * 60 * 60 * 1000,
+          response: { answer: [{ intention: { query: '下一首' }, content: '已切换' }] },
+        },
+      },
+    ], now);
+
+    expect(html).toContain('客厅音箱');
+    expect(html).toContain('播放稻香');
+    expect(html).toContain('书房音箱');
+    expect(html).toContain('下一首');
+    expect(html.indexOf('客厅音箱')).toBeLessThan(html.indexOf('书房音箱'));
+    expect(html).not.toContain('旧记录');
+    expect(html).not.toContain('过期回答');
   });
 });

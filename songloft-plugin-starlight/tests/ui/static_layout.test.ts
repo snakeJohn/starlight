@@ -194,4 +194,17 @@ describe('static UI layout copy', () => {
     expect(js).toContain('data-action="global-player-next"');
     expect(stylesheet).toContain('.global-player');
   });
+
+  it('mounts a 12 hour speaker voice record widget in the speaker page', () => {
+    const html = indexHtml();
+    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
+    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
+    const speakerHtml = html.slice(speakerStart, songlistsStart);
+
+    expect(speakerHtml).toContain('<h2>语音记录</h2>');
+    expect(speakerHtml).toContain('data-role="voice-record-summary"');
+    expect(speakerHtml).toContain('data-role="voice-record-list"');
+    expect(speakerHtml).toContain('data-action="refresh-voice-records"');
+    expect(speakerHtml).toContain('12 小时');
+  });
 });

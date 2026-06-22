@@ -321,6 +321,15 @@ textarea:disabled {
     color: var(--muted);
 }
 
+.section-caption {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
 .control-grid,
 .toggle-grid {
     display: grid;
@@ -725,6 +734,81 @@ textarea:focus {
 .download-progress-row strong {
     min-width: 0;
     overflow-wrap: anywhere;
+}
+
+.voice-record-panel {
+    min-width: 0;
+}
+
+.voice-record-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 10px;
+}
+
+.voice-record-item {
+    min-width: 0;
+    display: grid;
+    gap: 8px;
+    border: 1px solid var(--surface-line);
+    border-radius: var(--radius);
+    padding: 10px;
+    background: color-mix(in srgb, var(--surface-solid) 90%, transparent);
+}
+
+.voice-record-meta {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.voice-record-meta strong,
+.voice-record-meta span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.voice-record-meta strong {
+    color: var(--text);
+}
+
+.voice-record-bubble {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    background: var(--surface-muted);
+}
+
+.voice-record-bubble.user {
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface-solid));
+}
+
+.voice-record-bubble span,
+.voice-record-domain {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.voice-record-bubble p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.voice-record-domain {
+    justify-self: start;
+    border: 1px solid var(--surface-line);
+    border-radius: 999px;
+    padding: 3px 8px;
+    background: var(--surface-muted);
 }
 
 .two-column,
