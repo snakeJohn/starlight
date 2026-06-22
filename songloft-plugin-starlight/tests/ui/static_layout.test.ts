@@ -93,6 +93,17 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-role="ranking-pagination"');
   });
 
+  it('replaces the plugin mini player with download source management UI', () => {
+    const html = indexHtml();
+
+    expect(html).not.toContain('id="miniPlayer"');
+    expect(html).toContain('data-role="download-source-file"');
+    expect(html).toContain('data-role="download-source-list"');
+    expect(html).toContain('data-role="download-settings-form"');
+    expect(html).toContain('data-role="download-progress"');
+    expect(html).toContain('下载音源');
+  });
+
   it('hides the top status platform chip', () => {
     const js = appJs();
 

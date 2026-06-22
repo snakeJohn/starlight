@@ -79,33 +79,11 @@ function renderStatus() {
     `;
 }
 
-function renderMiniPlayer() {
-    const player = $('#miniPlayer');
-    if (!player || player.dataset.lockedByPreview === 'true') return;
-    player.innerHTML = `
-        <div class="now-playing">
-            <strong>${state.selectedSong ? escapeHtml(state.selectedSong.title || state.selectedSong.name) : '待播放'}</strong>
-            <span>${state.deviceId ? `设备 ${escapeHtml(state.deviceName || state.deviceId)}` : '选择设备后可推送搜索结果到音箱'}</span>
-        </div>
-        <span class="status-pill">${escapeHtml(state.quality || '320k')}</span>
-    `;
-}
-
 function bindStateRenderers() {
     window.addEventListener('starlight:state', event => {
         if (event.detail?.activeTab) renderActiveTab(event.detail.activeTab);
         renderStatus();
-        renderMiniPlayer();
     });
-}
-
-function markPreviewPlayer() {
-    const player = $('#miniPlayer');
-    if (!player) return;
-    const observer = new MutationObserver(() => {
-        player.dataset.lockedByPreview = player.querySelector('audio') ? 'true' : 'false';
-    });
-    observer.observe(player, { childList: true, subtree: true });
 }
 
 async function boot() {
@@ -113,9 +91,7 @@ async function boot() {
     renderActiveTab(state.activeTab);
     bindNavigation();
     bindStateRenderers();
-    markPreviewPlayer();
     renderStatus();
-    renderMiniPlayer();
 
     const results = await Promise.allSettled([
         initMusicUI(),

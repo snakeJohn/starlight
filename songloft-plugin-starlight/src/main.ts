@@ -17,6 +17,7 @@ import { SourceManager } from './music/source_manager';
 import { RuntimeManager } from './music/runtime_manager';
 import { PlatformRegistry } from './music/platforms/registry';
 import { BridgeService } from './bridge/service';
+import { DownloadService } from './download/service';
 import { CustomPlaylistStore } from './custom_playlists/store';
 import { CustomPlaylistService } from './custom_playlists/service';
 import { prefixRouter } from './router/prefix';
@@ -33,6 +34,7 @@ import { registerVoiceCommandHandlers } from './handlers/voice_command';
 import { registerIndexingHandlers } from './handlers/indexing';
 import { registerMusicHandlers } from './handlers/music';
 import { registerBridgeHandlers } from './handlers/bridge';
+import { registerDownloadHandlers } from './handlers/download';
 import { registerCustomPlaylistHandlers } from './handlers/custom_playlists';
 import { registerHealthHandlers } from './handlers/health';
 import { resolveHostBaseUrl } from './utils/http';
@@ -51,8 +53,11 @@ let voiceEngine: VoiceEngine;
 let indexingManager: IndexingManager;
 let sourceManager: SourceManager;
 let runtimeManager: RuntimeManager;
+let downloadSourceManager: SourceManager;
+let downloadRuntimeManager: RuntimeManager;
 let platformRegistry: PlatformRegistry;
 let bridgeService: BridgeService;
+let downloadService: DownloadService;
 let customPlaylistService: CustomPlaylistService;
 
 async function onInit(): Promise<void> {
@@ -76,8 +81,15 @@ async function onInit(): Promise<void> {
   sourceManager = new SourceManager(new SourceStore());
   await sourceManager.init();
   runtimeManager = new RuntimeManager(sourceManager);
+  downloadSourceManager = new SourceManager(new SourceStore({
+    indexKey: 'starlight:music:download_sources',
+    scriptPrefix: 'starlight:music:download_source_script:',
+  }));
+  await downloadSourceManager.init();
+  downloadRuntimeManager = new RuntimeManager(downloadSourceManager);
   platformRegistry = new PlatformRegistry();
   bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService, playlistManagerMap);
+  downloadService = new DownloadService(downloadRuntimeManager);
   customPlaylistService = new CustomPlaylistService(new CustomPlaylistStore(), bridgeService);
   playlistManagerMap.setDynamicPlaylistOptions({
     dynamicPlaylistLoader: (playlistId) => customPlaylistService.loadDynamicPlayerSongs(playlistId),
@@ -122,11 +134,15 @@ async function onInit(): Promise<void> {
   registerIndexingHandlers(miotRouter, indexingManager);
   registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry);
   registerBridgeHandlers(router, bridgeService);
+  registerDownloadHandlers(router, downloadSourceManager, downloadRuntimeManager, downloadService);
   registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);
   registerHealthHandlers(router, sourceManager, runtimeManager);
 
   runtimeManager.loadEnabledSources().catch(e => {
     songloft.log.warn('Failed to load enabled music sources: ' + String(e));
+  });
+  downloadRuntimeManager.loadEnabledSources().catch(e => {
+    songloft.log.warn('Failed to load enabled download sources: ' + String(e));
   });
 
   // 自动登录 + 启动后台服务（异步，不阻塞插件初始化）
@@ -166,6 +182,7 @@ async function onDeinit(): Promise<void> {
   playlistManagerMap?.cleanup();
   authService?.cleanup();
   await runtimeManager?.close();
+  await downloadRuntimeManager?.close();
   songloft.log.info('Starlight 插件已停止');
 }
 

@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { requestNativePlayback } from './native_player.js';
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from './state.js';
 
 const platformSelectRoles = [
@@ -262,6 +263,7 @@ export function renderSongRow(song, index, extraActions = '') {
             <div class="row-actions">
                 ${actionButton('preview', index, '播放')}
                 ${actionButton('import', index, '导入 Songloft 歌曲库')}
+                ${actionButton('download', index, '下载')}
                 ${actionButton('speaker', index, '音箱')}
                 ${customPlaylistAction(index)}
                 ${extraActions}
@@ -322,35 +324,128 @@ async function importSource(file) {
     toast('音源已导入，按需手动启用');
 }
 
-export async function previewSong(song) {
-    const result = await api.post('/bridge/preview-url', { song });
-    if (result?.url) {
-        const player = $('#miniPlayer');
-        if (player) {
-            player.innerHTML = `
-                <div class="now-playing">
-                    <strong>${escapeHtml(songTitle(song))}</strong>
-                    <span>${escapeHtml(songArtist(song))}</span>
-                </div>
-                <audio controls autoplay src="${escapeHtml(result.url)}"></audio>
-            `;
-            const audio = player.querySelector?.('audio');
-            try {
-                await audio?.play?.();
-                toast('页面播放中');
-            } catch {
-                toast('浏览器阻止了自动播放，请点击底部播放器播放', 'error');
-            }
-        } else {
-            toast('页面播放器不可用', 'error');
-        }
+function renderSourceRows(sources, { toggleAction, deleteAction }) {
+    return sources.map(item => `
+        <article class="source-row">
+            <div class="row-main">
+                <strong>${escapeHtml(item.name || item.filename || item.id)}</strong>
+                <span>${escapeHtml(item.id)} · ${item.enabled ? '已启用' : '未启用'}</span>
+            </div>
+            <button type="button" data-action="${toggleAction}" data-source-id="${escapeHtml(item.id)}" data-enabled="${item.enabled ? 'false' : 'true'}">${item.enabled ? '停用' : '启用'}</button>
+            <button type="button" data-action="${deleteAction}" data-source-id="${escapeHtml(item.id)}">删除</button>
+        </article>
+    `).join('');
+}
+
+async function loadDownloadSources() {
+    const sources = asArray(await api.get('/download/sources'));
+    setState({ downloadSources: sources });
+
+    const list = $('[data-role="download-source-list"]');
+    if (!list) return sources;
+    list.innerHTML = sources.length
+        ? renderSourceRows(sources, { toggleAction: 'toggle-download-source', deleteAction: 'delete-download-source' })
+        : '<div class="empty-state">暂无下载音源。请导入专用下载音源后手动启用，播放音源不会用于下载。</div>';
+    return sources;
+}
+
+async function importDownloadSource(file) {
+    const content = await file.text();
+    await api.post('/download/sources/import', { filename: file.name, content });
+    await loadDownloadSources();
+    toast('下载音源已导入，按需手动启用');
+}
+
+function applyDownloadSettings(settings) {
+    const form = $('[data-role="download-settings-form"]');
+    if (!form || !settings) return;
+    form.elements.path_template.value = settings.path_template || 'downloads/{artist}-{album}/{title}';
+    form.elements.download_interval.value = String(settings.download_interval ?? 0);
+    form.elements.embed_metadata.checked = settings.embed_metadata !== false;
+}
+
+async function loadDownloadSettings() {
+    const settings = await api.get('/download/settings');
+    setState({ downloadSettings: settings });
+    applyDownloadSettings(settings);
+    return settings;
+}
+
+function renderDownloadProgress(progress) {
+    const node = $('[data-role="download-progress"]');
+    if (!node) return;
+    if (!progress?.active) {
+        node.innerHTML = '<div class="empty-state">暂无下载任务。</div>';
+        return;
+    }
+
+    const rows = asArray(progress.results).slice(-8).map(result => `
+        <div class="download-progress-row">
+            <span>${escapeHtml(result.status === 'failed' ? '失败' : '完成')}</span>
+            <strong>${escapeHtml(result.path || result.error || `Song #${result.song_id || '-'}`)}</strong>
+        </div>
+    `).join('');
+    node.innerHTML = `
+        <div class="metric-grid">
+            <div><span>进度</span><strong>${Number(progress.current) || 0}/${Number(progress.total) || 0}</strong></div>
+            <div><span>成功</span><strong>${Number(progress.success) || 0}</strong></div>
+            <div><span>失败</span><strong>${Number(progress.failed) || 0}</strong></div>
+        </div>
+        <div class="list-stack tight">${rows || '<div class="empty-state">任务已开始，等待第一首完成。</div>'}</div>
+    `;
+}
+
+async function loadDownloadProgress() {
+    const progress = await api.get('/download/batch/progress');
+    setState({ downloadProgress: progress });
+    renderDownloadProgress(progress);
+    return progress;
+}
+
+async function downloadSongs(songs) {
+    const selectedSongs = asArray(songs);
+    if (!selectedSongs.length) {
+        throw new Error('请先选择歌曲');
+    }
+    const result = selectedSongs.length === 1
+        ? await downloadSong(selectedSongs[0])
+        : await api.post('/download/batch', { songs: selectedSongs });
+    if (selectedSongs.length > 1) {
+        toast(`已开始下载 ${selectedSongs.length} 首歌曲`);
+        await loadDownloadProgress().catch(() => {});
     }
     return result;
 }
 
-async function importSongs(songs) {
+export async function previewSong(song) {
+    const result = await importSongs([song], { silent: true });
+    const importedSongs = Array.isArray(result?.songs) ? result.songs : [];
+    if (!importedSongs.length) {
+        toast('已导入 Songloft 歌曲库；当前 Songloft 未返回可播放歌曲记录', 'error');
+        return result;
+    }
+
+    const nativeResult = requestNativePlayback(importedSongs, 0);
+    if (nativeResult.direct) {
+        toast('已发送到 Songloft 播放器');
+    } else {
+        toast('已导入 Songloft 歌曲库；当前 Songloft 未开放插件直控播放器入口，请在原生播放器中播放。');
+    }
+    return { ...result, native_player: nativeResult };
+}
+
+async function importSongs(songs, options = {}) {
     const result = await api.post('/bridge/songs/import', { songs });
-    toast(`已导入 ${result?.total ?? songs.length} 首歌曲`);
+    if (!options.silent) {
+        toast(`已导入 ${result?.total ?? songs.length} 首歌曲`);
+    }
+    return result;
+}
+
+export async function downloadSong(song) {
+    const result = await api.post('/download/song', { song });
+    toast(result?.path ? `下载完成：${result.path}` : '下载任务已完成');
+    await loadDownloadProgress().catch(() => {});
     return result;
 }
 
@@ -496,13 +591,14 @@ function bindSongActions(root, getSong) {
         const button = event.target.closest('button[data-action]');
         if (!button) return;
         const action = button.dataset.action;
-        if (!['preview', 'import', 'speaker', 'add-to-playlist'].includes(action)) return;
+        if (!['preview', 'import', 'download', 'speaker', 'add-to-playlist'].includes(action)) return;
         const song = getSong(Number(button.dataset.index));
         if (!song) return;
         button.disabled = true;
         try {
             if (action === 'preview') await previewSong(song);
             if (action === 'import') await importSongs([song]);
+            if (action === 'download') await downloadSong(song);
             if (action === 'speaker') await playOnSpeaker(song);
             if (action === 'add-to-playlist') await addSongToCustomPlaylist(selectedCustomPlaylistId(), song);
         } catch (error) {
@@ -556,6 +652,7 @@ function renderCustomPlaylistSongRow(song, index) {
             </div>
             <div class="row-actions">
                 ${hasSourceData ? `<button type="button" data-action="play-custom-playlist-song" data-index="${index}">播放</button>` : ''}
+                ${hasSourceData ? `<button type="button" data-action="download-custom-playlist-song" data-index="${index}">下载</button>` : ''}
                 <button type="button" data-action="speaker-custom-playlist-song" data-index="${index}">音箱播放</button>
                 <button type="button" data-action="add-custom-playlist-song" data-index="${index}">加入歌单</button>
             </div>
@@ -615,7 +712,7 @@ export function renderCustomPlaylistDetail(playlist, page = state.customPlaylist
                     <h2>${escapeHtml(playlist.name || '未命名歌单')}</h2>
                     <span>${escapeHtml(meta)}</span>
                 </div>
-                ${songs.length ? `<button class="primary-button" type="button" data-action="add-selected-custom-playlist-songs">加入选中歌曲</button>` : ''}
+                ${songs.length ? `<button class="primary-button" type="button" data-action="add-selected-custom-playlist-songs">加入选中歌曲</button><button class="ghost-button" type="button" data-action="download-selected-custom-playlist-songs">下载选中歌曲</button>` : ''}
             </div>
             ${songs.length
                 ? `<div class="list-stack tight">${pageSongs.map((song, index) => renderCustomPlaylistSongRow(song, start + index)).join('')}</div>
@@ -766,12 +863,16 @@ function bindCustomPlaylists() {
         const playlist = currentViewedCustomPlaylist();
         if (!playlist) return;
         const songs = Array.isArray(playlist.songs) ? playlist.songs : [];
-        if (!['play-custom-playlist-song', 'speaker-custom-playlist-song', 'add-custom-playlist-song', 'add-selected-custom-playlist-songs'].includes(button.dataset.action)) return;
+        if (!['play-custom-playlist-song', 'download-custom-playlist-song', 'speaker-custom-playlist-song', 'add-custom-playlist-song', 'add-selected-custom-playlist-songs', 'download-selected-custom-playlist-songs'].includes(button.dataset.action)) return;
         button.disabled = true;
         try {
             if (button.dataset.action === 'play-custom-playlist-song') {
                 const song = songs[Number(button.dataset.index)];
                 if (song) await previewSong(song);
+            }
+            if (button.dataset.action === 'download-custom-playlist-song') {
+                const song = songs[Number(button.dataset.index)];
+                if (song) await downloadSong(song);
             }
             if (button.dataset.action === 'speaker-custom-playlist-song') {
                 const song = songs[Number(button.dataset.index)];
@@ -789,6 +890,12 @@ function bindCustomPlaylists() {
                     .map(input => songs[Number(input.dataset.index)])
                     .filter(Boolean);
                 await addSelectedSongsToCustomPlaylist(selectedCustomPlaylistId(), selectedSongs);
+            }
+            if (button.dataset.action === 'download-selected-custom-playlist-songs') {
+                const selectedSongs = $$('[data-role="custom-playlist-song-check"]:checked', detail)
+                    .map(input => songs[Number(input.dataset.index)])
+                    .filter(song => song?.source_data?.platform);
+                await downloadSongs(selectedSongs);
             }
         } catch (error) {
             toast(error.message, 'error');
@@ -913,6 +1020,84 @@ function bindSources() {
     });
 }
 
+function bindDownloads() {
+    const input = $('[data-role="download-source-file"]');
+    if (input) {
+        input.addEventListener('change', async () => {
+            const file = input.files?.[0];
+            if (!file) return;
+            try {
+                await importDownloadSource(file);
+            } catch (error) {
+                toast(error.message, 'error');
+            } finally {
+                input.value = '';
+            }
+        });
+    }
+
+    $('[data-action="refresh-download-sources"]')?.addEventListener('click', () => {
+        loadDownloadSources().catch(error => toast(error.message, 'error'));
+    });
+    $('[data-action="refresh-download-settings"]')?.addEventListener('click', () => {
+        loadDownloadSettings().catch(error => toast(error.message, 'error'));
+    });
+    $('[data-action="refresh-download-progress"]')?.addEventListener('click', () => {
+        loadDownloadProgress().catch(error => toast(error.message, 'error'));
+    });
+    $('[data-action="clear-download-progress"]')?.addEventListener('click', async () => {
+        try {
+            await api.post('/download/batch/clear');
+            await loadDownloadProgress();
+            toast('下载进度已清空');
+        } catch (error) {
+            toast(error.message, 'error');
+        }
+    });
+
+    $('[data-role="download-settings-form"]')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const button = form.querySelector('button[type="submit"]');
+        const body = Object.fromEntries(new FormData(form).entries());
+        body.embed_metadata = Boolean(form.elements.embed_metadata?.checked);
+        body.download_interval = Number(body.download_interval || 0);
+        button.disabled = true;
+        try {
+            const settings = await api.post('/download/settings', body);
+            setState({ downloadSettings: settings });
+            applyDownloadSettings(settings);
+            toast('下载设置已保存');
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    $('[data-role="download-source-list"]')?.addEventListener('click', async event => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const id = button.dataset.sourceId;
+        button.disabled = true;
+        try {
+            if (button.dataset.action === 'toggle-download-source') {
+                await api.post('/download/sources/toggle', { id, enabled: button.dataset.enabled === 'true' });
+                toast('下载音源状态已更新');
+            }
+            if (button.dataset.action === 'delete-download-source') {
+                await api.delete(`/download/sources/${encodeURIComponent(id)}`);
+                toast('下载音源已删除');
+            }
+            await loadDownloadSources();
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
 function songListTitle(item) {
     return cleanDisplayText(item?.name || item?.title || item?.songlist_name) || '未命名歌单';
 }
@@ -984,7 +1169,7 @@ async function loadSongListDetailPage(page = 1) {
     $('[data-role="songlist-title"]').textContent = context.title;
     const detail = $('[data-role="songlist-detail"]');
     detail.innerHTML = songs.length
-        ? `${songs.map((song, index) => renderSongRow(song, index)).join('')}<div class="inline-actions"><button class="primary-button" type="button" data-action="play-songlist">播放整个歌单</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button></div>`
+        ? `${songs.map((song, index) => renderSongRow(song, index)).join('')}<div class="inline-actions"><button class="primary-button" type="button" data-action="play-songlist">播放整个歌单</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button><button class="ghost-button" type="button" data-action="download-songlist">下载当前歌单</button></div>`
         : '<div class="empty-state">歌单没有可显示歌曲。</div>';
     renderPaginationInto('songlist-detail-pagination', { scope: 'songlist-detail', page, total, pageSize: pageSizes.songlistDetail });
 }
@@ -1070,12 +1255,14 @@ function bindSongLists() {
     detail.addEventListener('click', async event => {
         const playButton = event.target.closest('[data-action="play-songlist"]');
         const importButton = event.target.closest('[data-action="import-songlist"]');
-        if (!playButton && !importButton) return;
-        const button = playButton || importButton;
+        const downloadButton = event.target.closest('[data-action="download-songlist"]');
+        if (!playButton && !importButton && !downloadButton) return;
+        const button = playButton || importButton || downloadButton;
         button.disabled = true;
         try {
             if (playButton) await playSonglistOnSpeaker(state.songlistSongs || []);
             if (importButton) await importSongs(state.songlistSongs || []);
+            if (downloadButton) await downloadSongs(state.songlistSongs || []);
         } catch (error) {
             toast(error.message, 'error');
         } finally {
@@ -1181,10 +1368,14 @@ export async function initMusicUI() {
     installArtworkFallback();
     bindSearch();
     bindSources();
+    bindDownloads();
     bindSongLists();
     bindRankings();
     bindCustomPlaylists();
     await loadPlatforms().catch(error => toast(error.message, 'error'));
     await loadSources().catch(error => toast(error.message, 'error'));
+    await loadDownloadSources().catch(error => toast(error.message, 'error'));
+    await loadDownloadSettings().catch(error => toast(error.message, 'error'));
+    await loadDownloadProgress().catch(error => toast(error.message, 'error'));
     await loadCustomPlaylists().catch(error => toast(error.message, 'error'));
 }

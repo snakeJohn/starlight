@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 interface MusicActionsModule {
   previewSong(song: Record<string, unknown>): Promise<unknown>;
+  downloadSong(song: Record<string, unknown>): Promise<unknown>;
   playSonglistOnSpeaker(songs: Array<Record<string, unknown>>): Promise<unknown>;
 }
 
@@ -32,14 +33,11 @@ function installToastDom() {
   });
 }
 
-function installMiniPlayerDom(audio: { play: ReturnType<typeof vi.fn> }) {
+function installNativePlayerDom() {
   const node = { className: '', textContent: '', remove: vi.fn() };
-  const player = {
-    innerHTML: '',
-    querySelector: vi.fn((selector: string) => selector === 'audio' ? audio : null),
-  };
+  const postMessage = vi.fn();
   vi.stubGlobal('document', {
-    querySelector: vi.fn((selector: string) => selector === '#miniPlayer' ? player : null),
+    querySelector: vi.fn(() => null),
     createElement: vi.fn(() => node),
     body: {
       appendChild: vi.fn(),
@@ -47,8 +45,9 @@ function installMiniPlayerDom(audio: { play: ReturnType<typeof vi.fn> }) {
   });
   vi.stubGlobal('window', {
     setTimeout: vi.fn(),
+    parent: { postMessage },
   });
-  return player;
+  return { postMessage };
 }
 
 async function loadModules() {
@@ -90,22 +89,40 @@ describe('songlist speaker actions', () => {
     });
   });
 
-  it('starts page playback after resolving the preview URL', async () => {
-    const audio = { play: vi.fn(async () => undefined) };
-    const player = installMiniPlayerDom(audio);
-    const fetchMock = vi.fn(async () => okResponse({ url: 'https://audio.test/song.mp3' }) as Response);
+  it('requests native player playback after importing the song into Songloft', async () => {
+    const { postMessage } = installNativePlayerDom();
+    const nativeSong = { id: 99, type: 'remote', title: '晴天', artist: '周杰伦' };
+    const fetchMock = vi.fn(async () => okResponse({ total: 1, songs: [nativeSong] }) as Response);
     vi.stubGlobal('fetch', fetchMock);
     const { music } = await loadModules();
     const song = { title: '晴天', artist: '周杰伦', source_data: { platform: 'kw', quality: '320k', songInfo: {} } };
 
     await music.previewSong(song);
 
-    expect(fetchMock).toHaveBeenCalledWith('api/bridge/preview-url', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('api/bridge/songs/import', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ songs: [song] }),
+    }));
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'songloft:native-player:play',
+      songs: [nativeSong],
+      startIndex: 0,
+    }, '*');
+  });
+
+  it('downloads one song through the dedicated download endpoint', async () => {
+    installToastDom();
+    const fetchMock = vi.fn(async () => okResponse({ path: 'downloads/Singer/Song.mp3', status: 'ok' }) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const { music } = await loadModules();
+    const song = { title: 'Song', artist: 'Singer', source_data: { platform: 'kw', quality: '320k', songInfo: {} } };
+
+    await expect(music.downloadSong(song)).resolves.toMatchObject({ status: 'ok' });
+
+    expect(fetchMock).toHaveBeenCalledWith('api/download/song', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ song }),
     }));
-    expect(player.innerHTML).toContain('https://audio.test/song.mp3');
-    expect(audio.play).toHaveBeenCalled();
   });
 
   it('rejects empty songlists without calling bridge APIs', async () => {

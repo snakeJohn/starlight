@@ -282,6 +282,57 @@
                 </section>
             </section>
 
+            <section class="tab-panel" id="tab-download">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Downloader</p>
+                        <h1>下载</h1>
+                    </div>
+                    <label class="file-button">
+                        <input type="file" data-role="download-source-file" accept=".js,.zip,application/javascript,application/zip">
+                        <span>导入下载音源</span>
+                    </label>
+                </div>
+                <section class="surface-section">
+                    <div class="section-bar">
+                        <h2>下载设置</h2>
+                        <button class="ghost-button" type="button" data-action="refresh-download-settings">刷新</button>
+                    </div>
+                    <form class="control-grid" data-role="download-settings-form">
+                        <label class="wide-field">
+                            <span>保存路径模板</span>
+                            <input name="path_template" placeholder="downloads/{artist}-{album}/{title}">
+                        </label>
+                        <label>
+                            <span>批量间隔秒</span>
+                            <input name="download_interval" type="number" min="0" step="1" value="0">
+                        </label>
+                        <label class="toggle-line">
+                            <input name="embed_metadata" type="checkbox" checked>
+                            <span>写入歌曲元数据</span>
+                        </label>
+                        <button class="primary-button" type="submit">保存下载设置</button>
+                    </form>
+                </section>
+                <section class="surface-section">
+                    <div class="section-bar">
+                        <h2>下载音源</h2>
+                        <button class="ghost-button" type="button" data-action="refresh-download-sources">刷新</button>
+                    </div>
+                    <div class="list-stack" data-role="download-source-list"></div>
+                </section>
+                <section class="surface-section">
+                    <div class="section-bar">
+                        <h2>下载进度</h2>
+                        <div class="inline-actions">
+                            <button class="ghost-button" type="button" data-action="refresh-download-progress">刷新</button>
+                            <button class="ghost-button" type="button" data-action="clear-download-progress">清空</button>
+                        </div>
+                    </div>
+                    <div data-role="download-progress" class="download-progress"></div>
+                </section>
+            </section>
+
             <section class="tab-panel" id="tab-automation">
                 <div class="panel-heading">
                     <div>
@@ -454,7 +505,6 @@
                 </form>
             </section>
 
-            <footer class="mini-player" id="miniPlayer"></footer>
         </main>
         <nav class="bottom-tabs" id="bottomTabs"></nav>
     </div>
