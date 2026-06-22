@@ -25,6 +25,8 @@ const AI_SYSTEM_PROMPT = `你是一个智能音箱语音指令分析专家，擅
 |--------|------|----------|
 | play_song | 播放指定歌曲 | name 或 artist |
 | play_playlist | 播放指定歌单 | playlist |
+| create_playlist | 创建自建歌单 | playlist |
+| add_song_to_playlist | 添加歌曲到自建歌单 | playlist, name |
 | set_play_mode | 设置播放模式 | mode |
 | set_volume | 调节音量 | volume |
 | next | 切到下一首 | 无 |
@@ -36,6 +38,8 @@ const AI_SYSTEM_PROMPT = `你是一个智能音箱语音指令分析专家，擅
 
 - **play_song**: {"name": "歌曲名", "artist": "歌手名", "playlist": "所属歌单（如有）"}
 - **play_playlist**: {"playlist": "歌单名称"}
+- **create_playlist**: {"playlist": "歌单名称"}
+- **add_song_to_playlist**: {"playlist": "歌单名称", "name": "歌曲名", "artist": "歌手名（如有）", "source": "酷我|酷狗|QQ音乐|咪咕|网易云（如有）"}
 - **set_play_mode**: {"mode": "order|random|single|loop"}
 - **set_volume**: {"volume": 数字, "direction": "up|down|absolute（方向，up/down 时 volume 可忽略）"}
 - **next/previous/stop**: {}
@@ -73,6 +77,9 @@ const AI_SYSTEM_PROMPT = `你是一个智能音箱语音指令分析专家，擅
 
 输入：随机播放
 输出：{"action": "set_play_mode", "params": {"mode": "random"}, "confidence": "high", "rawText": "随机播放"}
+
+输入：把为龙 河图 酷狗 加到古风
+输出：{"action": "add_song_to_playlist", "params": {"playlist": "古风", "name": "为龙", "artist": "河图", "source": "酷狗"}, "confidence": "high", "rawText": "为龙 河图 酷狗 古风"}
 
 输入：声音大一点
 输出：{"action": "set_volume", "params": {"volume": 10, "direction": "up"}, "confidence": "high", "rawText": "大一点"}`;

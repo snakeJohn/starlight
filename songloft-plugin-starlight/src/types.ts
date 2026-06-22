@@ -201,6 +201,7 @@ export interface AIAnalysisResult {
   params: {
     name?: string;
     artist?: string;
+    source?: string;
     playlist?: string;
     mode?: string;
     volume?: number;

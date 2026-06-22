@@ -15,6 +15,9 @@ import { OnlineSearcher } from './online_searcher';
 import { updateDeviceStatusCache } from '../handlers/playlist';
 import type { ConversationMessage, VoiceCommand, PlayMode, AIAnalysisResult } from '../types';
 import type { BridgeService } from '../bridge/service';
+import type { CustomPlaylistService } from '../custom_playlists/service';
+import type { PlatformRegistry } from '../music/platforms/registry';
+import type { MusicPlatform, SearchResultSong } from '../music/types';
 
 // ===== 类型定义 =====
 
@@ -27,6 +30,8 @@ interface MatchResult {
 
 /** 口令类型优先级（数字越小优先级越高） */
 const COMMAND_PRIORITY: Record<string, number> = {
+  'create_playlist': 0,
+  'add_song_to_playlist': 0,
   'play_song': 1,
   'play_playlist': 2,
   'set_play_mode': 3,
@@ -36,14 +41,25 @@ const COMMAND_PRIORITY: Record<string, number> = {
   'stop': 7,
 };
 
+const SOURCE_NAME_TO_PLATFORM: Record<string, MusicPlatform> = {
+  '酷我': 'kw',
+  '酷狗': 'kg',
+  'QQ音乐': 'tx',
+  'QQ 音乐': 'tx',
+  '咪咕': 'mg',
+  '网易云': 'wy',
+};
+
 // ===== 默认口令配置 =====
 
 /**
- * 获取默认语音口令配置（12 条）
+ * 获取默认语音口令配置（14 条）
  * 翻译自 Go 源码: plugins/songloft-plugin-xiaomi/config/manager.go GetDefaultVoiceCommands()
  */
 export function getDefaultVoiceCommands(): VoiceCommand[] {
   return [
+    { type: 'create_playlist', keywords: ['创建歌单', '新建歌单'], enabled: true },
+    { type: 'add_song_to_playlist', keywords: ['把', '添加歌曲', '加入歌单'], enabled: true },
     { type: 'play_playlist', keywords: ['播放歌单', '放歌单', '播放列表'], enabled: true },
     { type: 'play_song', keywords: ['播放歌曲', '放歌曲', '我想听'], enabled: true },
     { type: 'set_play_mode', keywords: ['随机播放', '随机模式'], param: 'random', enabled: true },
@@ -73,6 +89,8 @@ export class VoiceEngine {
   private indexingManager: IndexingManager;
   private aiAnalyzer: AIAnalyzer;
   private onlineSearcher: OnlineSearcher;
+  private customPlaylistService?: Pick<CustomPlaylistService, 'create' | 'addSong'>;
+  private platforms?: PlatformRegistry;
   private enabled: boolean = false;
   private resumeTimer: any = null;
   private resumeCancelled: boolean = false;
@@ -85,6 +103,8 @@ export class VoiceEngine {
     indexingManager: IndexingManager,
     aiAnalyzer?: AIAnalyzer,
     bridgeService?: BridgeService,
+    customPlaylistService?: Pick<CustomPlaylistService, 'create' | 'addSong'>,
+    platforms?: PlatformRegistry,
   ) {
     this.configManager = configManager;
     this.accountManager = accountManager;
@@ -93,6 +113,8 @@ export class VoiceEngine {
     this.indexingManager = indexingManager;
     this.aiAnalyzer = aiAnalyzer || new AIAnalyzer();
     this.onlineSearcher = new OnlineSearcher(configManager, bridgeService);
+    this.customPlaylistService = customPlaylistService;
+    this.platforms = platforms;
   }
 
   // ===== 公开方法 =====
@@ -255,6 +277,12 @@ export class VoiceEngine {
     const wasPlaying = pm?.isPlaying() ?? false;
 
     switch (result.command.type) {
+      case 'create_playlist':
+        await this.executeCreateCustomPlaylist(result.argument, accountId, deviceId);
+        break;
+      case 'add_song_to_playlist':
+        await this.executeAddSongToPlaylist(result.argument, accountId, deviceId);
+        break;
       case 'play_playlist':
         await this.executePlayPlaylist(result.argument, accountId, deviceId);
         break;
@@ -292,6 +320,24 @@ export class VoiceEngine {
     const wasPlaying = pm?.isPlaying() ?? false;
 
     switch (result.action) {
+      case 'create_playlist': {
+        const playlist = result.params.playlist || result.params.name || '';
+        if (!playlist) {
+          songloft.log.warn('[VoiceEngine] [AI] create_playlist: no playlist name');
+          return;
+        }
+        await this.executeCreateCustomPlaylist(playlist, accountId, deviceId);
+        break;
+      }
+      case 'add_song_to_playlist': {
+        await this.executeAddSongToPlaylistFromParts({
+          name: result.params.name || '',
+          artist: result.params.artist || '',
+          source: result.params.source || '',
+          playlist: result.params.playlist || '',
+        }, accountId, deviceId);
+        break;
+      }
       case 'play_song': {
         const name = result.params.name || '';
         const artist = result.params.artist || '';
@@ -353,6 +399,116 @@ export class VoiceEngine {
     pm.suspendForVoiceInteraction();
     songloft.log.info('[VoiceEngine] Non-playback command while playing, scheduling smart resume');
     this.scheduleSmartResume(pm, accountId, deviceId);
+  }
+
+  private async executeCreateCustomPlaylist(playlistName: string, accountId: string, deviceId: string): Promise<void> {
+    const name = playlistName.trim();
+    if (!name) {
+      return;
+    }
+    if (!this.customPlaylistService) {
+      await this.minaService.textToSpeech(accountId, deviceId, '自建歌单不可用');
+      return;
+    }
+
+    await this.customPlaylistService.create(name);
+    await this.indexingManager.refresh();
+    await this.minaService.textToSpeech(accountId, deviceId, `已创建歌单：${name}`);
+  }
+
+  private async executeAddSongToPlaylist(argument: string, accountId: string, deviceId: string): Promise<void> {
+    const parsed = this.parseAddSongArgument(argument);
+    if (parsed.error === 'source') {
+      await this.minaService.textToSpeech(accountId, deviceId, '未找到音源');
+      return;
+    }
+    await this.executeAddSongToPlaylistFromParts(parsed, accountId, deviceId);
+  }
+
+  private async executeAddSongToPlaylistFromParts(
+    parts: { name: string; artist?: string; source?: string; playlist?: string; error?: string },
+    accountId: string,
+    deviceId: string,
+  ): Promise<void> {
+    const playlist = (parts.playlist || '').trim();
+    const name = (parts.name || '').trim();
+    if (!playlist || !name) {
+      return;
+    }
+    if (!this.customPlaylistService || !this.platforms) {
+      await this.minaService.textToSpeech(accountId, deviceId, '自建歌单不可用');
+      return;
+    }
+
+    const platform = parts.source ? this.resolveSourceName(parts.source) : null;
+    if (parts.source && !platform) {
+      await this.minaService.textToSpeech(accountId, deviceId, '未找到音源');
+      return;
+    }
+
+    const song = await this.searchPlaylistSong(name, parts.artist || '', platform);
+    if (!song) {
+      await this.minaService.textToSpeech(accountId, deviceId, `未找到歌曲：${name}`);
+      return;
+    }
+
+    await this.customPlaylistService.addSong(playlist, song);
+    await this.indexingManager.refresh();
+    await this.minaService.textToSpeech(accountId, deviceId, `已加入歌单：${playlist}`);
+  }
+
+  private parseAddSongArgument(argument: string): { name: string; artist?: string; source?: string; playlist?: string; error?: string } {
+    const match = argument.trim().match(/^(.*?)(?:加到|加入|添加到|放到|到)(?:歌单)?(.+)$/);
+    if (!match) {
+      return { name: argument.trim() };
+    }
+
+    const before = match[1].replace(/^歌曲/, '').trim();
+    const playlist = match[2].replace(/^歌单/, '').trim();
+    const tokens = before.split(/\s+/).filter(Boolean);
+    let source = '';
+    if (tokens.length >= 3) {
+      source = tokens.pop() || '';
+      if (!this.resolveSourceName(source)) {
+        return { name: '', playlist, error: 'source' };
+      }
+    }
+
+    return {
+      name: tokens[0] || before,
+      artist: tokens.slice(1).join(' '),
+      source,
+      playlist,
+    };
+  }
+
+  private resolveSourceName(source: string): MusicPlatform | null {
+    const normalized = source.trim().replace(/\s+/g, '');
+    return SOURCE_NAME_TO_PLATFORM[source.trim()] || SOURCE_NAME_TO_PLATFORM[normalized] || null;
+  }
+
+  private async searchPlaylistSong(name: string, artist: string, platform: MusicPlatform | null): Promise<SearchResultSong | null> {
+    if (!this.platforms) {
+      return null;
+    }
+
+    const providers = platform
+      ? [this.platforms.get(platform)]
+      : this.platforms.all().map(item => this.platforms?.get(item.id)).filter(Boolean);
+    const keyword = [name, artist].filter(Boolean).join(' ');
+    for (const provider of providers) {
+      if (!provider) continue;
+      try {
+        const result = await provider.search(keyword, 1, 5);
+        if (result.list[0]) {
+          return result.list[0];
+        }
+      } catch (error) {
+        songloft.log.warn(`[VoiceEngine] Custom playlist song search failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    return null;
   }
 
   /**

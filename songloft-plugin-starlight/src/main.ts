@@ -90,6 +90,8 @@ async function onInit(): Promise<void> {
     accountManager,
     minaService,
     playlistManagerMap,
+    customPlaylistService,
+    platformRegistry,
     indexingManager,
     new AIAnalyzer(),
     bridgeService,
