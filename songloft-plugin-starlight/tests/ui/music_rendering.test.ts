@@ -103,4 +103,26 @@ describe('music media rendering', () => {
     expect(mediaCoverUrl({ cover: 'https://img.test/cover.jpg' })).toBe('https://img.test/cover.jpg');
     expect(mediaCoverUrl({ source_data: { picUrl: 'https://img.test/source.jpg' } })).toBe('https://img.test/source.jpg');
   });
+
+  it('ignores bare numeric cover fields that would navigate inside the plugin route', async () => {
+    const { mediaCoverUrl, renderSongRow } = await loadMusicModule();
+
+    expect(mediaCoverUrl({ cover_url: '1' })).toBe('');
+    expect(mediaCoverUrl({ source_data: { songInfo: { pic: '2' } } })).toBe('');
+    expect(mediaCoverUrl({ cover_url: '1', picUrl: 'https://img.test/valid.jpg' })).toBe('https://img.test/valid.jpg');
+
+    const html = renderSongRow({
+      title: '搜索结果',
+      artist: '歌手',
+      cover_url: '1',
+      source_data: {
+        platform: 'kw',
+        songInfo: { pic: '2' },
+      },
+    }, 0);
+
+    expect(html).toContain('media-artwork-placeholder');
+    expect(html).not.toContain('src="1"');
+    expect(html).not.toContain('src="2"');
+  });
 });

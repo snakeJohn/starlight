@@ -175,10 +175,19 @@ function firstText(...values) {
     return '';
 }
 
+function normalizeCoverUrl(value) {
+    const url = cleanDisplayText(value).replace('{size}', '400');
+    if (!url) return '';
+    if (/^(https?:)?\/\//i.test(url)) return url;
+    if (/^(data:image\/|blob:)/i.test(url)) return url;
+    if (url.startsWith('/')) return url;
+    return '';
+}
+
 export function mediaCoverUrl(item = {}) {
     const sourceData = item?.source_data || {};
     const songInfo = sourceData.songInfo || {};
-    return firstText(
+    const candidates = [
         item.cover_url,
         item.coverUrl,
         item.picUrl,
@@ -218,7 +227,12 @@ export function mediaCoverUrl(item = {}) {
         songInfo.pic,
         songInfo.cover,
         songInfo.image,
-    ).replace('{size}', '400');
+    ];
+    for (const candidate of candidates) {
+        const cover = normalizeCoverUrl(candidate);
+        if (cover) return cover;
+    }
+    return '';
 }
 
 function renderArtwork(item, alt) {
