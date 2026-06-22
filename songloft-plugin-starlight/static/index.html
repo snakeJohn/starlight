@@ -106,42 +106,67 @@
                     </section>
                 </div>
 
-                <section class="surface-section">
+                <div class="two-column speaker-operations-layout">
+                <section class="surface-section speaker-player-panel">
                     <div class="section-bar">
-                        <h2>播放控制</h2>
-                        <span data-role="speaker-message">就绪</span>
+                        <h2>音箱播放</h2>
+                        <span data-role="speaker-player-state">未选择设备</span>
                     </div>
-                    <div class="control-grid">
-                        <form class="inline-form" data-role="volume-form">
-                            <label>
-                                <span>音量</span>
-                                <input name="volume" type="range" min="0" max="100" value="35">
-                            </label>
-                            <output data-role="volume-value">35</output>
-                            <button class="primary-button" type="submit">设置</button>
-                        </form>
-                        <form class="inline-form" data-role="url-play-form">
-                            <label class="wide-field">
-                                <span>URL</span>
-                                <input name="url" type="url" placeholder="https://">
-                            </label>
-                            <button class="primary-button" type="submit">播放</button>
-                        </form>
+                    <label>
+                        <span>控制设备</span>
+                        <select data-role="speaker-player-device" aria-label="音箱播放控制设备"></select>
+                    </label>
+                    <div class="player-status-card">
+                        <strong data-role="speaker-player-title">暂无播放信息</strong>
+                        <span data-role="speaker-player-meta">选择音箱后可管理当前播放。</span>
                     </div>
-                    <div class="player-actions">
-                        <button class="icon-button" type="button" data-action="player-previous" title="上一首" aria-label="上一首">上一首</button>
-                        <button class="icon-button" type="button" data-action="player-toggle" title="暂停播放" aria-label="暂停播放">暂停播放</button>
-                        <button class="icon-button" type="button" data-action="player-stop" title="停止" aria-label="停止">停止</button>
-                        <button class="icon-button" type="button" data-action="player-next" title="下一首" aria-label="下一首">下一首</button>
-                        <select data-role="play-mode-select" aria-label="播放模式">
+                    <div class="player-actions speaker-player-actions">
+                        <button class="icon-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">上一首</button>
+                        <button class="icon-button" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">暂停播放</button>
+                        <button class="icon-button" type="button" data-action="speaker-player-stop" title="停止" aria-label="停止">停止</button>
+                        <button class="icon-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">下一首</button>
+                    </div>
+                    <div class="inline-actions">
+                        <select data-role="speaker-player-mode" aria-label="播放模式">
                             <option value="order">顺序</option>
-                            <option value="repeat">循环</option>
+                            <option value="loop">列表循环</option>
                             <option value="random">随机</option>
                             <option value="single">单曲</option>
                         </select>
-                        <button class="ghost-button" type="button" data-action="player-mode">应用模式</button>
+                        <button class="ghost-button" type="button" data-action="speaker-player-mode">应用模式</button>
+                        <button class="ghost-button" type="button" data-action="speaker-player-refresh">刷新状态</button>
                     </div>
                 </section>
+                <div class="speaker-side-stack">
+                    <section class="surface-section">
+                        <div class="section-bar">
+                            <h2>索引</h2>
+                            <span data-role="indexing-state">未加载</span>
+                        </div>
+                        <div class="metric-grid">
+                            <div><span>歌单</span><strong data-role="index-playlists">0</strong></div>
+                            <div><span>歌曲</span><strong data-role="index-songs">0</strong></div>
+                            <div><span>时间</span><strong data-role="index-updated">-</strong></div>
+                        </div>
+                        <button class="primary-button" type="button" data-action="refresh-index">刷新索引</button>
+                    </section>
+                    <form class="surface-section settings-form" data-role="speaker-config-form" data-config-form>
+                        <div class="section-bar">
+                            <h2>音箱设置</h2>
+                            <button class="ghost-button" type="button" data-action="load-config">加载</button>
+                        </div>
+                        <div class="toggle-grid">
+                            <label class="toggle-line"><input name="conversation_monitor_enabled" type="checkbox"><span>对话监听</span></label>
+                            <label class="toggle-line"><input name="voice_command_enabled" type="checkbox" disabled><span>语音口令</span></label>
+                            <label class="toggle-line"><input name="force_mp3" type="checkbox"><span>强制 MP3</span></label>
+                        </div>
+                        <div class="inline-actions">
+                            <button class="primary-button" type="submit">保存设置</button>
+                            <span data-role="config-state">未加载</span>
+                        </div>
+                    </form>
+                </div>
+                </div>
             </section>
 
             <section class="tab-panel" id="tab-songlists">
@@ -354,57 +379,18 @@
                             <button class="ghost-button" type="button" data-action="load-voice">重新加载</button>
                         </div>
                     </section>
-                    <div class="automation-side-stack">
-                        <section class="surface-section automation-player-panel">
-                            <div class="section-bar">
-                                <h2>音箱播放</h2>
-                                <span data-role="automation-player-state">未选择设备</span>
-                            </div>
-                            <label>
-                                <span>控制设备</span>
-                                <select data-role="automation-player-device" aria-label="自动化播放控制设备"></select>
-                            </label>
-                            <div class="player-status-card">
-                                <strong data-role="automation-player-title">暂无播放信息</strong>
-                                <span data-role="automation-player-meta">选择音箱后可管理语音口令触发的播放。</span>
-                            </div>
-                            <div class="player-actions automation-player-actions">
-                                <button class="icon-button" type="button" data-action="automation-player-previous" title="上一首" aria-label="上一首">上一首</button>
-                                <button class="icon-button" type="button" data-action="automation-player-toggle" title="暂停播放" aria-label="暂停播放">暂停播放</button>
-                                <button class="icon-button" type="button" data-action="automation-player-stop" title="停止" aria-label="停止">停止</button>
-                                <button class="icon-button" type="button" data-action="automation-player-next" title="下一首" aria-label="下一首">下一首</button>
-                            </div>
-                            <div class="inline-actions">
-                                <select data-role="automation-player-mode" aria-label="播放模式">
-                                    <option value="order">顺序</option>
-                                    <option value="loop">列表循环</option>
-                                    <option value="random">随机</option>
-                                    <option value="single">单曲</option>
-                                </select>
-                                <button class="ghost-button" type="button" data-action="automation-player-mode">应用模式</button>
-                                <button class="ghost-button" type="button" data-action="automation-player-refresh">刷新状态</button>
-                            </div>
-                        </section>
-                        <section class="surface-section">
-                            <div class="section-bar">
-                                <h2>索引</h2>
-                                <span data-role="indexing-state">未加载</span>
-                            </div>
-                            <div class="metric-grid">
-                                <div><span>歌单</span><strong data-role="index-playlists">0</strong></div>
-                                <div><span>歌曲</span><strong data-role="index-songs">0</strong></div>
-                                <div><span>时间</span><strong data-role="index-updated">-</strong></div>
-                            </div>
-                            <button class="primary-button" type="button" data-action="refresh-index">刷新索引</button>
-                        </section>
-                    </div>
-                </div>
-
-                <section class="surface-section">
+                    <section class="surface-section schedule-panel">
                     <div class="section-bar">
                         <h2>定时任务</h2>
                         <span data-role="schedules-enabled">未加载</span>
                     </div>
+                    <form class="settings-form schedule-settings-form" data-role="schedule-config-form" data-config-form>
+                        <label class="toggle-line"><input name="scheduled_tasks_enabled" type="checkbox"><span>定时任务</span></label>
+                        <div class="inline-actions">
+                            <button class="primary-button" type="submit">保存定时设置</button>
+                            <span data-role="config-state">未加载</span>
+                        </div>
+                    </form>
                     <form class="control-grid" data-role="schedule-form">
                         <label>
                             <span>ID</span>
@@ -473,28 +459,7 @@
                     </form>
                     <div class="list-stack" data-role="schedule-list"></div>
                 </section>
-            </section>
-
-            <section class="tab-panel" id="tab-settings">
-                <div class="panel-heading">
-                    <div>
-                        <p class="eyebrow">System</p>
-                        <h1>设置</h1>
-                    </div>
-                    <button class="ghost-button" type="button" data-action="load-config">加载</button>
                 </div>
-                <form class="surface-section settings-form" data-role="config-form">
-                    <div class="toggle-grid">
-                        <label class="toggle-line"><input name="conversation_monitor_enabled" type="checkbox"><span>对话监听</span></label>
-                        <label class="toggle-line"><input name="voice_command_enabled" type="checkbox" disabled><span>语音口令</span></label>
-                        <label class="toggle-line"><input name="scheduled_tasks_enabled" type="checkbox"><span>定时任务</span></label>
-                        <label class="toggle-line"><input name="force_mp3" type="checkbox"><span>强制 MP3</span></label>
-                    </div>
-                    <div class="inline-actions">
-                        <button class="primary-button" type="submit">保存设置</button>
-                        <span data-role="config-state">未加载</span>
-                    </div>
-                </form>
             </section>
 
         </main>

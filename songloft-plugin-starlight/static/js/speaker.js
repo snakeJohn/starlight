@@ -134,6 +134,7 @@ function renderAccounts(accounts) {
 function renderDevices(groups) {
     const rows = flattenDevices(groups);
     const select = $('[data-role="device-select"]');
+    const playerSelect = $('[data-role="speaker-player-device"]');
     const list = $('[data-role="device-list"]');
 
     if (select) {
@@ -149,6 +150,21 @@ function renderDevices(groups) {
             if (selected && state.deviceName !== deviceName(selected.device)) {
                 setState({ deviceName: deviceName(selected.device) });
             }
+        }
+    }
+
+    if (playerSelect) {
+        playerSelect.innerHTML = rows.length
+            ? rows.map(row => {
+                const id = deviceId(row.device);
+                const value = `${row.account_id}|${id}`;
+                return `<option value="${escapeHtml(value)}">${escapeHtml(deviceName(row.device))} · ${escapeHtml(row.account_name)}</option>`;
+            }).join('')
+            : '<option value="">暂无设备</option>';
+        if (state.accountId && state.deviceId) {
+            playerSelect.value = `${state.accountId}|${state.deviceId}`;
+        } else if (rows[0]) {
+            playerSelect.value = `${rows[0].account_id}|${deviceId(rows[0].device)}`;
         }
     }
 
@@ -220,34 +236,112 @@ async function deleteAccount(accountIdValue) {
 }
 
 function setSpeakerMessage(message) {
-    const node = $('[data-role="speaker-message"]');
+    const node = $('[data-role="speaker-player-state"]');
     if (node) node.textContent = message;
 }
 
 function updatePlayerToggleButton(playbackState = state.playbackState) {
-    const button = $('[data-action="player-toggle"]');
-    if (!button) return;
     const paused = playbackState === 'paused';
-    button.textContent = paused ? '继续播放' : '暂停播放';
-    button.title = paused ? '继续播放' : '暂停播放';
-    button.setAttribute?.('aria-label', paused ? '继续播放' : '暂停播放');
+    $$('[data-action="speaker-player-toggle"], [data-action="global-player-toggle"]').forEach(button => {
+        button.textContent = paused ? '继续播放' : '暂停播放';
+        button.title = paused ? '继续播放' : '暂停播放';
+        button.setAttribute?.('aria-label', paused ? '继续播放' : '暂停播放');
+    });
+}
+
+function playStateLabel(playbackState) {
+    return {
+        idle: '空闲',
+        playing: '播放中',
+        paused: '已暂停',
+        stopped: '已停止',
+    }[playbackState] || '未知';
+}
+
+function playModeLabel(mode) {
+    return {
+        order: '顺序',
+        random: '随机',
+        single: '单曲循环',
+        loop: '列表循环',
+        repeat: '列表循环',
+    }[mode] || '保持';
+}
+
+function durationText(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value) || value <= 0) return '--:--';
+    const minutes = Math.floor(value / 60);
+    const rest = Math.floor(value % 60);
+    return `${minutes}:${String(rest).padStart(2, '0')}`;
+}
+
+function renderPlayerStatus(status = {}) {
+    if (status.state) {
+        state.playbackState = status.state;
+    }
+
+    const song = status.current_song || {};
+    const titleText = song.title
+        ? `${song.title}${song.artist ? ` - ${song.artist}` : ''}`
+        : '暂无播放信息';
+    const metaText = `${playStateLabel(status.state || state.playbackState)} · ${playModeLabel(status.play_mode)} · ${durationText(status.position)}/${durationText(status.duration)}`;
+
+    const title = $('[data-role="speaker-player-title"]');
+    const meta = $('[data-role="speaker-player-meta"]');
+    if (title) title.textContent = titleText;
+    if (meta) meta.textContent = metaText;
+    setSpeakerMessage(playStateLabel(status.state || state.playbackState));
+
+    const mode = $('[data-role="speaker-player-mode"]');
+    if (mode && status.play_mode) {
+        mode.value = status.play_mode === 'repeat' ? 'loop' : status.play_mode;
+    }
+
+    setState({
+        playbackState: status.state || state.playbackState,
+        playerSongTitle: song.title ? titleText : '',
+        playerSongMeta: song.title ? metaText : (state.deviceName || state.deviceId || '未选择设备'),
+    });
+    updatePlayerToggleButton(status.state || state.playbackState);
 }
 
 async function refreshPlayerStatus() {
     if (!state.accountId || !state.deviceId) return null;
     const result = await api.get(`/miot/player/status?account_id=${encodeURIComponent(state.accountId)}&device_id=${encodeURIComponent(state.deviceId)}`);
-    if (result?.state) {
-        setState({ playbackState: result.state });
-        updatePlayerToggleButton(result.state);
-    }
+    renderPlayerStatus(result || {});
     return result;
 }
 
 export async function togglePlayerPlayback() {
     const result = await api.post('/miot/player/toggle', selectedPayload());
-    if (result?.state) {
-        setState({ playbackState: result.state });
-        updatePlayerToggleButton(result.state);
+    renderPlayerStatus(result || {});
+    return result || {};
+}
+
+export async function runPlayerAction(action) {
+    const command = String(action || '').replace(/^speaker-player-/, '').replace(/^global-player-/, '');
+    const endpointMap = {
+        previous: '/miot/player/previous',
+        toggle: '/miot/player/toggle',
+        stop: '/miot/player/stop',
+        next: '/miot/player/next',
+        mode: '/miot/player/mode',
+        refresh: '',
+    };
+    if (command === 'refresh') {
+        return await refreshPlayerStatus() || {};
+    }
+    const endpoint = endpointMap[command];
+    if (!endpoint) throw new Error('未知播放控制命令');
+    const modeSelect = $('[data-role="speaker-player-mode"]');
+    const result = command === 'toggle'
+        ? await togglePlayerPlayback()
+        : await api.post(endpoint, selectedPayload(command === 'mode' ? { play_mode: modeSelect?.value || 'order' } : {}));
+    if (command === 'stop') {
+        renderPlayerStatus({ state: 'stopped', play_mode: modeSelect?.value || 'order', position: 0, duration: 0 });
+    } else if (command !== 'toggle') {
+        await refreshPlayerStatus().catch(() => null);
     }
     return result || {};
 }
@@ -417,6 +511,24 @@ function bindDeviceSelection() {
         }
     });
 
+    $('[data-role="speaker-player-device"]')?.addEventListener('change', async event => {
+        const [accountIdValue, deviceIdValue] = String(event.target.value || '').split('|');
+        if (!accountIdValue || !deviceIdValue) return;
+        const row = findDeviceRow(accountIdValue, deviceIdValue);
+        try {
+            await selectAndPersistDevice(accountIdValue, deviceIdValue, row ? deviceName(row.device) : '');
+            const accountSelect = $('[data-role="account-select"]');
+            const deviceSelect = $('[data-role="device-select"]');
+            if (accountSelect) accountSelect.value = state.accountId;
+            renderDevices(state.deviceGroups);
+            if (deviceSelect) deviceSelect.value = state.deviceId;
+            await refreshPlayerStatus().catch(() => null);
+            toast('播放设备已选择');
+        } catch (error) {
+            toast(error.message, 'error');
+        }
+    });
+
     $('[data-role="account-list"]')?.addEventListener('click', async event => {
         const button = event.target.closest('[data-action]');
         if (!button) return;
@@ -498,25 +610,11 @@ function bindPlayback() {
         }
     });
 
-    const playerActions = {
-        'player-previous': () => api.post('/miot/player/previous', selectedPayload()),
-        'player-next': () => api.post('/miot/player/next', selectedPayload()),
-        'player-stop': () => api.post('/miot/player/stop', selectedPayload()),
-        'player-toggle': () => togglePlayerPlayback(),
-        'player-mode': () => api.post('/miot/player/mode', selectedPayload({ play_mode: $('[data-role="play-mode-select"]')?.value || 'order' })),
-    };
-
-    for (const [action, run] of Object.entries(playerActions)) {
+    for (const action of ['speaker-player-previous', 'speaker-player-toggle', 'speaker-player-stop', 'speaker-player-next', 'speaker-player-mode', 'speaker-player-refresh']) {
         $(`[data-action="${action}"]`)?.addEventListener('click', async event => {
             event.currentTarget.disabled = true;
             try {
-                await run();
-                if (action === 'player-stop') {
-                    setState({ playbackState: 'stopped' });
-                    updatePlayerToggleButton('stopped');
-                } else if (action !== 'player-toggle') {
-                    await refreshPlayerStatus().catch(() => null);
-                }
+                await runPlayerAction(action);
                 setSpeakerMessage('控制命令已发送');
                 toast('控制命令已发送');
             } catch (error) {
@@ -526,6 +624,19 @@ function bindPlayback() {
             }
         });
     }
+
+    document.addEventListener?.('click', async event => {
+        const button = event.target.closest('[data-action^="global-player-"]');
+        if (!button) return;
+        button.disabled = true;
+        try {
+            await runPlayerAction(button.dataset.action);
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
 }
 
 function bindRefresh() {

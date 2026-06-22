@@ -6,7 +6,6 @@ export const tabs = [
     { id: 'sources', label: '音源', icon: '+' },
     { id: 'download', label: '下载', icon: 'D' },
     { id: 'automation', label: '自动化', icon: 'A' },
-    { id: 'settings', label: '设置', icon: 'C' },
 ];
 
 export const state = {
@@ -15,6 +14,8 @@ export const state = {
     deviceId: '',
     deviceName: '',
     playbackState: 'idle',
+    playerSongTitle: '',
+    playerSongMeta: '',
     platform: 'kw',
     quality: '320k',
     searchQuery: null,

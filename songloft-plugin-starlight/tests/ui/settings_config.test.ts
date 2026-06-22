@@ -72,6 +72,44 @@ describe('settings config helpers', () => {
     expect(payload).not.toHaveProperty('ai_config');
   });
 
+  it('saves speaker setting toggles without touching scheduled tasks', async () => {
+    installDom();
+    const { configFromForm } = await loadAutomationModule();
+
+    const payload = configFromForm({
+      elements: {
+        conversation_monitor_enabled: { checked: true },
+        voice_command_enabled: { checked: true },
+        force_mp3: { checked: false },
+      },
+    });
+
+    expect(payload).toEqual({
+      conversation_monitor_enabled: true,
+      voice_command_enabled: true,
+      force_mp3: false,
+    });
+    expect(payload).not.toHaveProperty('scheduled_tasks_enabled');
+  });
+
+  it('saves the automation schedule toggle without touching speaker settings', async () => {
+    installDom();
+    const { configFromForm } = await loadAutomationModule();
+
+    const payload = configFromForm({
+      elements: {
+        scheduled_tasks_enabled: { checked: true },
+      },
+    });
+
+    expect(payload).toEqual({
+      scheduled_tasks_enabled: true,
+    });
+    expect(payload).not.toHaveProperty('conversation_monitor_enabled');
+    expect(payload).not.toHaveProperty('voice_command_enabled');
+    expect(payload).not.toHaveProperty('force_mp3');
+  });
+
   it('keeps voice command access disabled until conversation monitoring is saved', async () => {
     installDom();
     const { updateVoiceCommandAccess } = await loadAutomationModule();

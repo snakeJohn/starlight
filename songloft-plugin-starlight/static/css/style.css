@@ -164,6 +164,15 @@ textarea:disabled {
     gap: 12px;
 }
 
+.status-side {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
 .status-items {
     min-width: 0;
     display: flex;
@@ -203,6 +212,45 @@ textarea:disabled {
 
 .status-chip[data-tone="danger"] {
     color: var(--danger);
+}
+
+.global-player {
+    min-width: 0;
+    max-width: min(540px, 48vw);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--surface-line);
+    border-radius: var(--radius);
+    padding: 4px;
+    background: color-mix(in srgb, var(--surface-solid) 78%, transparent);
+}
+
+.global-player-info {
+    min-width: 112px;
+    max-width: 220px;
+    display: grid;
+    gap: 1px;
+    padding: 0 6px;
+}
+
+.global-player-info strong,
+.global-player-info span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.global-player-info span {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.compact-icon-button {
+    min-height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
 }
 
 .tab-panel {
@@ -691,26 +739,30 @@ textarea:focus {
     grid-template-columns: minmax(190px, 0.42fr) minmax(0, 1.58fr);
 }
 
+.speaker-operations-layout {
+    grid-template-columns: minmax(0, 1.28fr) minmax(240px, 0.72fr);
+}
+
 .automation-layout {
     grid-template-columns: minmax(0, 1fr) minmax(220px, 0.34fr);
 }
 
-.automation-layout .metric-grid {
+.speaker-operations-layout .metric-grid {
     grid-template-columns: 1fr;
 }
 
-.automation-side-stack,
-.automation-player-panel {
+.speaker-side-stack,
+.speaker-player-panel {
     min-width: 0;
     display: grid;
     gap: 14px;
 }
 
-.automation-player-actions {
+.speaker-player-actions {
     align-items: stretch;
 }
 
-.automation-player-actions button {
+.speaker-player-actions button {
     flex: 1 1 76px;
 }
 
@@ -733,6 +785,22 @@ textarea:focus {
 .player-status-card span {
     color: var(--muted);
     font-size: 12px;
+}
+
+.schedule-settings-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    border: 1px solid var(--surface-line);
+    border-radius: var(--radius);
+    padding: 10px;
+    background: var(--surface-muted);
+}
+
+.schedule-settings-form .toggle-line {
+    min-width: 160px;
 }
 
 .segmented {
@@ -982,6 +1050,18 @@ legend {
         position: static;
         grid-template-columns: 1fr;
         padding: 10px 12px;
+    }
+
+    .status-side,
+    .global-player {
+        width: 100%;
+        max-width: none;
+        justify-content: stretch;
+    }
+
+    .global-player-info {
+        max-width: none;
+        flex: 1 1 130px;
     }
 
     .tab-panel {

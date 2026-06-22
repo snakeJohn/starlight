@@ -53,8 +53,8 @@ async function putOrPost(path, body) {
     }
 }
 
-function setConfigState(message) {
-    const node = $('[data-role="config-state"]');
+function setConfigState(message, form = null) {
+    const node = form?.querySelector?.('[data-role="config-state"]') || $('[data-role="config-state"]');
     if (node) node.textContent = message;
 }
 
@@ -126,6 +126,10 @@ export function updateVoiceCommandAccess(form, enabled) {
         field.checked = false;
     }
     field.closest?.('.toggle-line')?.classList.toggle('is-muted', !enabled);
+}
+
+function updateAllVoiceCommandAccess(enabled) {
+    $$('[data-config-form]').forEach(form => updateVoiceCommandAccess(form, enabled));
 }
 
 const voiceCommandTypes = [
@@ -565,44 +569,51 @@ function setField(form, name, value) {
 
 async function loadConfig() {
     const config = await api.get('/miot/config');
-    const form = $('[data-role="config-form"]');
-    if (!form) return;
+    const forms = $$('[data-config-form]');
+    if (forms.length === 0) return;
+    for (const form of forms) {
+        for (const name of [
+            'timezone',
+            'external_search_url',
+            'external_search_token',
+            'extra_music_api_models',
+            'interrupt_tts_hint_text',
+            'conversation_monitor_enabled',
+            'voice_command_enabled',
+            'scheduled_tasks_enabled',
+            'force_mp3',
+            'external_search_enabled',
+            'indicator_light_enabled',
+            'interrupt_tts_hint_enabled',
+        ]) {
+            setField(form, name, config[name]);
+        }
+        const ai = config.ai_config || {};
+        setField(form, 'ai_enabled', ai.enabled);
+        setField(form, 'ai_api_url', ai.api_url);
+        setField(form, 'ai_model', ai.model);
+        setField(form, 'ai_timeout', ai.timeout);
+        setField(form, 'ai_api_key', ai.api_key);
+        setConfigState('已加载', form);
+    }
+    const hostNode = $('[data-role="host-url"]');
+    if (hostNode) hostNode.textContent = config.songloft_host || config.server_host || '自动获取';
+    savedConversationMonitorEnabled = !!config.conversation_monitor_enabled;
+    updateAllVoiceCommandAccess(savedConversationMonitorEnabled);
+}
+
+export function configFromForm(form) {
+    const payload = {};
     for (const name of [
-        'timezone',
-        'external_search_url',
-        'external_search_token',
-        'extra_music_api_models',
-        'interrupt_tts_hint_text',
         'conversation_monitor_enabled',
         'voice_command_enabled',
         'scheduled_tasks_enabled',
         'force_mp3',
-        'external_search_enabled',
-        'indicator_light_enabled',
-        'interrupt_tts_hint_enabled',
     ]) {
-        setField(form, name, config[name]);
+        if (hasField(form, name)) {
+            payload[name] = boolValue(form, name);
+        }
     }
-    const ai = config.ai_config || {};
-    setField(form, 'ai_enabled', ai.enabled);
-    setField(form, 'ai_api_url', ai.api_url);
-    setField(form, 'ai_model', ai.model);
-    setField(form, 'ai_timeout', ai.timeout);
-    setField(form, 'ai_api_key', ai.api_key);
-    const hostNode = $('[data-role="host-url"]');
-    if (hostNode) hostNode.textContent = config.songloft_host || config.server_host || '自动获取';
-    savedConversationMonitorEnabled = !!config.conversation_monitor_enabled;
-    updateVoiceCommandAccess(form, savedConversationMonitorEnabled);
-    setConfigState('已加载');
-}
-
-export function configFromForm(form) {
-    const payload = {
-        conversation_monitor_enabled: boolValue(form, 'conversation_monitor_enabled'),
-        voice_command_enabled: boolValue(form, 'voice_command_enabled'),
-        scheduled_tasks_enabled: boolValue(form, 'scheduled_tasks_enabled'),
-        force_mp3: boolValue(form, 'force_mp3'),
-    };
     if (hasField(form, 'timezone')) {
         payload.timezone = textValue(form, 'timezone');
     }
@@ -643,24 +654,24 @@ export function configFromForm(form) {
 }
 
 async function prepareConversationMonitorFromCheckbox(input) {
-    const form = input.closest?.('form') || $('[data-role="config-form"]');
+    const form = input.closest?.('form') || $('[data-config-form]');
     if (!input.checked) {
         updateVoiceCommandAccess(form, false);
-        setConfigState('对话监听关闭后，语音口令将不可用');
+        setConfigState('对话监听关闭后，语音口令将不可用', form);
         return;
     }
 
     input.disabled = true;
-    setConfigState('正在检测并托管音箱设备...');
+    setConfigState('正在检测并托管音箱设备...', form);
     try {
         const count = await manageAllConversationDevices();
         updateVoiceCommandAccess(form, savedConversationMonitorEnabled);
-        setConfigState(`已自动托管 ${count} 台音箱，保存设置后可启用语音口令`);
+        setConfigState(`已自动托管 ${count} 台音箱，保存设置后可启用语音口令`, form);
         toast(`已自动托管 ${count} 台音箱`);
     } catch (error) {
         input.checked = false;
         updateVoiceCommandAccess(form, false);
-        setConfigState(error.message);
+        setConfigState(error.message, form);
         toast(error.message, 'error');
     } finally {
         input.disabled = false;
@@ -671,9 +682,14 @@ async function saveConfig(event) {
     event.preventDefault();
     const form = event.currentTarget;
     const result = await putOrPost('/miot/config', configFromForm(form));
-    savedConversationMonitorEnabled = boolValue(form, 'conversation_monitor_enabled');
-    updateVoiceCommandAccess(form, savedConversationMonitorEnabled);
-    setConfigState(result?.warning || (savedConversationMonitorEnabled ? '已保存，可启用语音口令' : '已保存'));
+    if (hasField(form, 'conversation_monitor_enabled')) {
+        savedConversationMonitorEnabled = boolValue(form, 'conversation_monitor_enabled');
+        updateAllVoiceCommandAccess(savedConversationMonitorEnabled);
+    }
+    const savedMessage = hasField(form, 'conversation_monitor_enabled') && savedConversationMonitorEnabled
+        ? '已保存，可启用语音口令'
+        : '已保存';
+    setConfigState(result?.warning || savedMessage, form);
     toast(result?.warning || '设置已保存', result?.warning ? 'error' : 'success');
 }
 
@@ -688,14 +704,19 @@ function bindAutomation() {
     });
     $('[data-action="refresh-index"]')?.addEventListener('click', () => refreshIndexing().catch(error => toast(error.message, 'error')));
     $('[data-action="refresh-automation"]')?.addEventListener('click', () => loadAutomation().catch(error => toast(error.message, 'error')));
-    $('[data-action="automation-player-refresh"]')?.addEventListener('click', () => loadAutomationPlayer().catch(error => toast(error.message, 'error')));
-    $('[data-action="load-config"]')?.addEventListener('click', () => loadConfig().catch(error => toast(error.message, 'error')));
+    $$('[data-action="load-config"]').forEach(button => {
+        button.addEventListener('click', () => loadConfig().catch(error => toast(error.message, 'error')));
+    });
     $('[data-role="schedule-form"]')?.addEventListener('submit', event => saveSchedule(event).catch(error => toast(error.message, 'error')));
-    $('[data-role="config-form"]')?.addEventListener('submit', event => saveConfig(event).catch(error => toast(error.message, 'error')));
-    $('[name="conversation_monitor_enabled"]')?.addEventListener('change', event => {
-        prepareConversationMonitorFromCheckbox(event.currentTarget).catch(error => {
-            setConfigState(error.message);
-            toast(error.message, 'error');
+    $$('[data-config-form]').forEach(form => {
+        form.addEventListener('submit', event => saveConfig(event).catch(error => toast(error.message, 'error')));
+    });
+    $$('[name="conversation_monitor_enabled"]').forEach(input => {
+        input.addEventListener('change', event => {
+            prepareConversationMonitorFromCheckbox(event.currentTarget).catch(error => {
+                setConfigState(error.message, event.currentTarget.closest?.('form'));
+                toast(error.message, 'error');
+            });
         });
     });
 
@@ -764,7 +785,6 @@ async function loadAutomation() {
         loadIndexing(),
         loadSchedules(),
         loadConfig(),
-        loadAutomationPlayer(),
     ]);
 }
 
