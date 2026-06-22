@@ -1,5 +1,27 @@
 const BASE = 'api';
 
+function getAuthToken() {
+    return globalThis.window?.SongloftPlugin?.getAuthToken?.() || '';
+}
+
+function hasAuthorization(headers) {
+    return Object.keys(headers).some(key => key.toLowerCase() === 'authorization');
+}
+
+function requestHeaders(headers = {}) {
+    const nextHeaders = {
+        'Content-Type': 'application/json',
+        ...headers,
+    };
+    const token = getAuthToken();
+
+    if (token && !hasAuthorization(nextHeaders)) {
+        nextHeaders.Authorization = `Bearer ${token}`;
+    }
+
+    return nextHeaders;
+}
+
 function messageFrom(error) {
     if (!error) return '请求失败';
     if (typeof error === 'string') return error;
@@ -9,10 +31,7 @@ function messageFrom(error) {
 async function request(path, options = {}) {
     const response = await fetch(`${BASE}${path}`, {
         ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...(options.headers || {}),
-        },
+        headers: requestHeaders(options.headers || {}),
     });
 
     let payload = null;

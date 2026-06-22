@@ -17,9 +17,9 @@ import { SourceManager } from './music/source_manager';
 import { RuntimeManager } from './music/runtime_manager';
 import { PlatformRegistry } from './music/platforms/registry';
 import { BridgeService } from './bridge/service';
-import { prefixRouter } from './router/prefix';
 import { CustomPlaylistStore } from './custom_playlists/store';
 import { CustomPlaylistService } from './custom_playlists/service';
+import { prefixRouter } from './router/prefix';
 
 // 导入所有handler注册函数
 import { registerAccountHandlers } from './handlers/account';
@@ -33,8 +33,8 @@ import { registerVoiceCommandHandlers } from './handlers/voice_command';
 import { registerIndexingHandlers } from './handlers/indexing';
 import { registerMusicHandlers } from './handlers/music';
 import { registerBridgeHandlers } from './handlers/bridge';
-import { registerHealthHandlers } from './handlers/health';
 import { registerCustomPlaylistHandlers } from './handlers/custom_playlists';
+import { registerHealthHandlers } from './handlers/health';
 import { setHostBaseUrl } from './utils/http';
 
 const router = createRouter();
@@ -53,8 +53,8 @@ let sourceManager: SourceManager;
 let runtimeManager: RuntimeManager;
 let platformRegistry: PlatformRegistry;
 let bridgeService: BridgeService;
-
 let customPlaylistService: CustomPlaylistService;
+
 async function onInit(): Promise<void> {
   songloft.log.info('Starlight 插件初始化...');
 
@@ -78,23 +78,22 @@ async function onInit(): Promise<void> {
   sourceManager = new SourceManager(new SourceStore());
   await sourceManager.init();
   runtimeManager = new RuntimeManager(sourceManager);
-  await runtimeManager.loadEnabledSources();
   platformRegistry = new PlatformRegistry();
   bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService);
+  customPlaylistService = new CustomPlaylistService(new CustomPlaylistStore(), bridgeService);
   indexingManager.setCustomPlaylistService(customPlaylistService);
 
-  customPlaylistService = new CustomPlaylistService(new CustomPlaylistStore(), bridgeService);
   conversationMonitor = new ConversationMonitor(accountManager, configManager);
   voiceEngine = new VoiceEngine(
     configManager,
     accountManager,
     minaService,
     playlistManagerMap,
-    customPlaylistService,
-    platformRegistry,
     indexingManager,
     new AIAnalyzer(),
     bridgeService,
+    customPlaylistService,
+    platformRegistry,
   );
 
   const executor = new TaskExecutor(configManager, accountManager, minaService, playlistManagerMap, indexingManager, conversationMonitor);
@@ -121,8 +120,12 @@ async function onInit(): Promise<void> {
   registerIndexingHandlers(miotRouter, indexingManager);
   registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry);
   registerBridgeHandlers(router, bridgeService);
-  registerHealthHandlers(router, sourceManager, runtimeManager);
   registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);
+  registerHealthHandlers(router, sourceManager, runtimeManager);
+
+  runtimeManager.loadEnabledSources().catch(e => {
+    songloft.log.warn('Failed to load enabled music sources: ' + String(e));
+  });
 
   // 自动登录 + 启动后台服务（异步，不阻塞插件初始化）
   authService.autoLoginAll().catch(e => {

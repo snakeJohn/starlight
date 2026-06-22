@@ -105,14 +105,13 @@ export class SourceRuntime {
     try {
       await songloft.jsenv.create(envName, LX_SHIM);
       const initResult = await songloft.jsenv.executeWait(envName, script, 30000, ['inited']) as RuntimeResult;
-      if (initResult.error) {
-        await destroyEnv(envName);
-        throw new StarlightError('SOURCE_RUNTIME_FAILED', String(initResult.error), false);
-      }
-
       const initEvent = findEvent(initResult.events, 'inited');
       if (!initEvent) {
         await destroyEnv(envName);
+        if (initResult.error) {
+          throw new StarlightError('SOURCE_RUNTIME_FAILED', String(initResult.error), false);
+        }
+
         throw new StarlightError('SOURCE_IMPORT_INVALID', '音源未调用 lx.send("inited")', false);
       }
 
@@ -120,6 +119,10 @@ export class SourceRuntime {
       if (!config) {
         await destroyEnv(envName);
         throw new StarlightError('SOURCE_IMPORT_INVALID', '音源 inited 配置无效', false);
+      }
+
+      if (initResult.error) {
+        songloft.log.warn(`Music source ${sourceId} reported an error after init: ${String(initResult.error)}`);
       }
 
       return new SourceRuntime(envName, config);

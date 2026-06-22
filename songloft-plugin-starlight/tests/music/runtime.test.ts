@@ -31,18 +31,30 @@ interface TestJsenv {
 }
 
 interface ShimLx {
+  EVENT_NAMES: {
+    request: string;
+    inited: string;
+    updateAlert: string;
+  };
+  utils: {
+    buffer: {
+      bufToString(value: unknown, encoding?: string): string;
+    };
+  };
   request(
     url: string,
     options: Record<string, unknown>,
     callback: (error: unknown, response: unknown, text: unknown) => void,
   ): Promise<unknown>;
   on(name: string, handler: (payload: unknown) => unknown): void;
+  send(name: string, data: unknown): void;
   _dispatch(id: string, event: string, payload: unknown): void;
 }
 
 interface ShimGlobal {
   lx?: ShimLx;
   __songloftEmitEvent?: (name: string, data: string) => void;
+  __go_send?: (name: string, data: string) => void;
 }
 
 const syntheticScript = String.raw`lx.send('inited', { sources: { kw: {}, kg: {} } });`;
@@ -121,9 +133,11 @@ function installShim(): { shimGlobal: ShimGlobal; restore: () => void } {
   const shimGlobal = globalThis as typeof globalThis & ShimGlobal;
   const previousLx = shimGlobal.lx;
   const previousEmitEvent = shimGlobal.__songloftEmitEvent;
+  const previousGoSend = shimGlobal.__go_send;
 
   delete shimGlobal.lx;
   shimGlobal.__songloftEmitEvent = vi.fn();
+  delete shimGlobal.__go_send;
   Function(LX_SHIM)();
 
   return {
@@ -139,6 +153,12 @@ function installShim(): { shimGlobal: ShimGlobal; restore: () => void } {
         delete shimGlobal.__songloftEmitEvent;
       } else {
         shimGlobal.__songloftEmitEvent = previousEmitEvent;
+      }
+
+      if (previousGoSend === undefined) {
+        delete shimGlobal.__go_send;
+      } else {
+        shimGlobal.__go_send = previousGoSend;
       }
     },
   };
@@ -408,6 +428,17 @@ describe('SourceRuntime', () => {
     expect(destroy).toHaveBeenCalledWith(expect.stringMatching(/^starlight_lx_broken_source(?:_[a-z0-9]+)?$/));
   });
 
+  test('accepts a valid inited event even when later optional source code reports an error', async () => {
+    const { destroy } = installJsenvMock(() =>
+      result([initedEvent({ kw: {} })], 'ReferenceError: setTimeout is not defined'),
+    );
+
+    const runtime = await SourceRuntime.create('late/error', syntheticScript);
+
+    expect(runtime.supportsPlatform('kw')).toBe(true);
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   test('missing inited event destroys env and throws SOURCE_IMPORT_INVALID', async () => {
     const { destroy } = installJsenvMock(() => result([]));
     const createPromise = SourceRuntime.create('missing/inited', syntheticScript);
@@ -432,6 +463,38 @@ describe('SourceRuntime', () => {
 });
 
 describe('LX_SHIM', () => {
+  test('exposes common LX event constants and buffer helpers', () => {
+    const { shimGlobal, restore } = installShim();
+
+    try {
+      expect(shimGlobal.lx?.EVENT_NAMES).toEqual({
+        request: 'request',
+        inited: 'inited',
+        updateAlert: 'updateAlert',
+      });
+      expect(shimGlobal.lx?.utils.buffer.bufToString('body text', 'utf-8')).toBe('body text');
+    } finally {
+      restore();
+    }
+  });
+
+  test('lx.send uses the Songloft jsenv __go_send bridge when present', () => {
+    const { shimGlobal, restore } = installShim();
+    const emittedEvents: Array<{ name: string; data: string }> = [];
+    delete shimGlobal.__songloftEmitEvent;
+    shimGlobal.__go_send = (name, data) => emittedEvents.push({ name, data });
+
+    try {
+      shimGlobal.lx?.send('inited', { sources: { kw: {} } });
+
+      expect(emittedEvents).toEqual([
+        { name: 'inited', data: JSON.stringify({ sources: { kw: {} } }) },
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
   test('lx.request calls back with error, response, and text on success', async () => {
     const { shimGlobal, restore } = installShim();
     const previousFetch = globalThis.fetch;
@@ -450,7 +513,11 @@ describe('LX_SHIM', () => {
     try {
       const promiseResult = await shimGlobal.lx?.request('https://example.invalid/api', { method: 'POST' }, callback);
 
-      expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ status: 201 }), 'body text');
+      expect(callback).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({ statusCode: 201, body: 'body text' }),
+        'body text',
+      );
       expect(promiseResult).toEqual(expect.objectContaining({ status: 201, body: 'body text', data: 'body text' }));
     } finally {
       globalThis.fetch = previousFetch;
@@ -471,6 +538,53 @@ describe('LX_SHIM', () => {
       await expect(shimGlobal.lx?.request('https://example.invalid/api', {}, callback)).resolves.toBeNull();
       expect(callback).toHaveBeenCalledWith(error, null, null);
     } finally {
+      globalThis.fetch = previousFetch;
+      restore();
+    }
+  });
+
+  test('lx.request resolves through callback error when the timeout elapses', async () => {
+    vi.useFakeTimers();
+    const { shimGlobal, restore } = installShim();
+    const previousFetch = globalThis.fetch;
+    const callback = vi.fn();
+    globalThis.fetch = vi.fn(async () => new Promise<Response>(() => {}));
+
+    try {
+      const requestPromise = shimGlobal.lx?.request('https://example.invalid/api', { timeout: 500 }, callback);
+      await vi.advanceTimersByTimeAsync(500);
+
+      await expect(Promise.race([requestPromise, Promise.resolve('pending')])).resolves.toBeNull();
+      expect(callback).toHaveBeenCalledWith(expect.any(Error), null, null);
+      expect(callback.mock.calls[0][0].message).toContain('timeout');
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://example.invalid/api', {
+        method: 'GET',
+        headers: {},
+      });
+    } finally {
+      vi.useRealTimers();
+      globalThis.fetch = previousFetch;
+      restore();
+    }
+  });
+
+  test('lx.request fails timeout-guarded requests without fetch when timers are unavailable', async () => {
+    const { shimGlobal, restore } = installShim();
+    const previousFetch = globalThis.fetch;
+    const previousSetTimeout = globalThis.setTimeout;
+    const callback = vi.fn();
+    globalThis.fetch = vi.fn(async () => new Promise<Response>(() => {}));
+    vi.stubGlobal('setTimeout', undefined);
+
+    try {
+      const requestPromise = shimGlobal.lx?.request('https://example.invalid/api', { timeout: 500 }, callback);
+
+      await expect(Promise.race([requestPromise, Promise.resolve('pending')])).resolves.toBeNull();
+      expect(callback).toHaveBeenCalledWith(expect.any(Error), null, null);
+      expect(callback.mock.calls[0][0].message).toContain('timeout');
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.stubGlobal('setTimeout', previousSetTimeout);
       globalThis.fetch = previousFetch;
       restore();
     }

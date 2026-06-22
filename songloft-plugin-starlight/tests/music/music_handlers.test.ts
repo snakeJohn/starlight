@@ -140,6 +140,22 @@ describe('registerMusicHandlers', () => {
     expect(parseResponseBody(response).data).toMatchObject({ id: 'star', enabled: true });
   });
 
+  test('toggle source does not wait for slow runtime reloads', async () => {
+    const { router, runtimes } = createHarness();
+    vi.mocked(runtimes.loadEnabledSources).mockImplementation(async () => new Promise<void>(() => {}));
+
+    const responsePromise = Promise.resolve(
+      router.handle(request('POST', '/api/music/sources/toggle', { id: 'star', enabled: true })),
+    );
+    const outcome = await Promise.race([
+      responsePromise.then((response: HTTPResponse) => response.statusCode),
+      new Promise((resolve) => setTimeout(() => resolve('pending'), 10)),
+    ]);
+
+    expect(outcome).toBe(200);
+    expect(runtimes.loadEnabledSources).toHaveBeenCalledTimes(1);
+  });
+
   test('deletes source and reloads runtimes', async () => {
     const { router, sources, runtimes } = createHarness();
 

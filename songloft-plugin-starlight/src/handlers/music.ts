@@ -120,6 +120,12 @@ function requireId(value: unknown, name = 'id'): string {
   return id;
 }
 
+function reloadRuntimesInBackground(runtimes: RuntimeManager): void {
+  runtimes.loadEnabledSources().catch((error) => {
+    songloft.log.warn('Failed to reload music source runtimes: ' + String(error));
+  });
+}
+
 export function registerMusicHandlers(
   router: Router,
   sources: SourceManager,
@@ -148,7 +154,7 @@ export function registerMusicHandlers(
       const id = requireId(body.id);
       const enabled = boolField(body.enabled);
       await sources.setEnabled(id, enabled);
-      await runtimes.loadEnabledSources();
+      reloadRuntimesInBackground(runtimes);
 
       return sources.listSources().find((source) => source.id === id) || { id, enabled };
     }));
@@ -157,7 +163,7 @@ export function registerMusicHandlers(
     handle(async () => {
       const id = requireId(params.id);
       await sources.deleteSource(id);
-      await runtimes.loadEnabledSources();
+      reloadRuntimesInBackground(runtimes);
       return { id };
     }));
 
