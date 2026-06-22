@@ -56,9 +56,8 @@ describe('registerConfigHandlers', () => {
     setHostBaseUrl('');
   });
 
-  it('does not warn about loopback when Songloft host is auto-detected and no server_host is configured', async () => {
+  function createHarness(config = pluginConfig({ server_host: '' })) {
     const router = createRouter();
-    const config = pluginConfig({ server_host: '' });
     const configManager = {
       getConfig: vi.fn(async () => config),
       saveConfig: vi.fn(async () => {}),
@@ -78,6 +77,11 @@ describe('registerConfigHandlers', () => {
     } as unknown as VoiceEngine;
 
     registerConfigHandlers(router, configManager, monitor, scheduler, voiceEngine);
+    return { router, configManager, monitor, scheduler, voiceEngine };
+  }
+
+  it('does not warn about loopback when Songloft host is auto-detected and no server_host is configured', async () => {
+    const { router, configManager } = createHarness();
 
     const response = await router.handle(request('POST', '/config', { timezone: 'Asia/Hong_Kong' }));
 
@@ -87,5 +91,26 @@ describe('registerConfigHandlers', () => {
       server_host: '',
       timezone: 'Asia/Hong_Kong',
     }));
+  });
+
+  it('accepts PUT /config so the settings form does not produce a 404 before saving', async () => {
+    const { router, configManager, monitor, voiceEngine } = createHarness();
+
+    const response = await router.handle(request('PUT', '/config', {
+      timezone: 'Asia/Hong_Kong',
+      conversation_monitor_enabled: true,
+      voice_command_enabled: true,
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response)).toEqual({ success: true });
+    expect(configManager.saveConfig).toHaveBeenCalledWith(expect.objectContaining({
+      timezone: 'Asia/Hong_Kong',
+      conversation_monitor_enabled: true,
+      voice_command_enabled: true,
+    }));
+    expect(monitor.stop).toHaveBeenCalledTimes(1);
+    expect(monitor.start).toHaveBeenCalledTimes(1);
+    expect(voiceEngine.setEnabled).toHaveBeenCalledWith(true);
   });
 });
