@@ -198,7 +198,7 @@ export function registerDownloadHandlers(
   router.post('/api/download/song', async (req) =>
     handle(() => {
       const body = parseJsonBody<SongBody>(req);
-      return downloads.downloadSong(requireSong(body.song));
+      return downloads.startBatch([requireSong(body.song)]);
     }));
 
   router.post('/api/download/batch', async (req) =>

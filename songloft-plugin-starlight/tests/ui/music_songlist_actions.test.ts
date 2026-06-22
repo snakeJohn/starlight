@@ -21,16 +21,18 @@ const okResponse = (data: unknown) => ({
 
 function installToastDom() {
   const node = { className: '', textContent: '', remove: vi.fn() };
+  const appendChild = vi.fn();
   vi.stubGlobal('document', {
     querySelector: vi.fn(() => null),
     createElement: vi.fn(() => node),
     body: {
-      appendChild: vi.fn(),
+      appendChild,
     },
   });
   vi.stubGlobal('window', {
     setTimeout: vi.fn(),
   });
+  return { node, appendChild };
 }
 
 function installNativePlayerDom() {
@@ -110,19 +112,20 @@ describe('songlist speaker actions', () => {
     }, '*');
   });
 
-  it('downloads one song through the dedicated download endpoint', async () => {
-    installToastDom();
-    const fetchMock = vi.fn(async () => okResponse({ path: 'downloads/Singer/Song.mp3', status: 'ok' }) as Response);
+  it('starts one-song downloads through the background download endpoint', async () => {
+    const { node } = installToastDom();
+    const fetchMock = vi.fn(async () => okResponse({ started: true, total: 1 }) as Response);
     vi.stubGlobal('fetch', fetchMock);
     const { music } = await loadModules();
     const song = { title: 'Song', artist: 'Singer', source_data: { platform: 'kw', quality: '320k', songInfo: {} } };
 
-    await expect(music.downloadSong(song)).resolves.toMatchObject({ status: 'ok' });
+    await expect(music.downloadSong(song)).resolves.toMatchObject({ started: true, total: 1 });
 
     expect(fetchMock).toHaveBeenCalledWith('api/download/song', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ song }),
     }));
+    expect(node.textContent).toBe('已开始下载 1 首歌曲，可在下载进度中查看');
   });
 
   it('rejects empty songlists without calling bridge APIs', async () => {

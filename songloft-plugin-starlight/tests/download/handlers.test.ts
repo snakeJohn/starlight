@@ -97,7 +97,7 @@ describe('registerDownloadHandlers', () => {
     expect(sources.deleteSource).toHaveBeenCalledWith('download-source');
   });
 
-  it('exposes download settings and single-song download routes', async () => {
+  it('exposes download settings and starts single-song downloads in the background', async () => {
     const { router, downloads } = createHarness();
     const song = {
       title: 'Song',
@@ -117,8 +117,9 @@ describe('registerDownloadHandlers', () => {
 
     const downloaded = await router.handle(request('POST', '/api/download/song', { song }));
     expect(downloaded.statusCode).toBe(200);
-    expect(downloads.downloadSong).toHaveBeenCalledWith(song);
-    expect(parseResponseBody(downloaded).data).toMatchObject({ song_id: 501, status: 'ok' });
+    expect(downloads.startBatch).toHaveBeenCalledWith([song]);
+    expect(downloads.downloadSong).not.toHaveBeenCalled();
+    expect(parseResponseBody(downloaded).data).toMatchObject({ started: true, total: 1 });
   });
 
   it('exposes batch download progress routes', async () => {
