@@ -125,7 +125,7 @@ async function onInit(): Promise<void> {
   const miotRouter = prefixRouter(router, '/api/miot');
   registerAccountHandlers(miotRouter, accountManager, authService);
   registerAuthHandlers(miotRouter, authService, accountManager);
-  registerDeviceHandlers(miotRouter, minaService, accountManager, playlistManagerMap);
+  registerDeviceHandlers(miotRouter, minaService, accountManager, playlistManagerMap, conversationMonitor);
   registerPlaylistHandlers(miotRouter, playlistManagerMap, minaService, configManager);
   registerConfigHandlers(miotRouter, configManager, conversationMonitor, scheduler, voiceEngine);
   registerConversationHandlers(miotRouter, conversationMonitor, configManager);

@@ -5,6 +5,7 @@ import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { MinaService } from '../service/service';
 import { AccountManager } from '../account/manager';
+import type { ConversationMonitor } from '../conversation/monitor';
 import { updateDeviceStatusCache } from './playlist';
 import type { PlayerSong, PlaylistManagerMap } from '../player/manager';
 
@@ -36,6 +37,7 @@ export function registerDeviceHandlers(
   minaService: MinaService,
   accountManager: AccountManager,
   playlistManagerMap?: PlaylistManagerMap,
+  conversationMonitor?: ConversationMonitor,
 ): void {
 
   // GET /mina/devices - 获取设备列表（按账号分组）
@@ -180,6 +182,7 @@ export function registerDeviceHandlers(
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to update managed status' });
       }
+      await conversationMonitor?.refresh();
       return jsonResponse({
         success: true,
         data: { message: 'device managed status updated', account_id, device_id, managed: !!managed },

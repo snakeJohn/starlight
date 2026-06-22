@@ -73,6 +73,19 @@ function selectDevice(accountId, deviceIdValue, name = '') {
     });
 }
 
+export async function selectAndPersistDevice(accountId, deviceIdValue, name = '') {
+    selectDevice(accountId, deviceIdValue, name);
+    await api.post('/miot/mina/device/managed', {
+        account_id: accountId,
+        device_id: deviceIdValue,
+        managed: true,
+    });
+    await api.post('/miot/mina/last_selection', {
+        account_id: accountId,
+        device_id: deviceIdValue,
+    });
+}
+
 export function renderAccountRow(account) {
     const id = accountId(account);
     const selected = Boolean(id && id === state.accountId);
@@ -393,9 +406,15 @@ function bindDeviceSelection() {
         renderDevices(state.deviceGroups);
     });
 
-    $('[data-role="device-select"]')?.addEventListener('change', event => {
-        selectDevice(state.accountId, event.target.value);
-        renderDevices(state.deviceGroups);
+    $('[data-role="device-select"]')?.addEventListener('change', async event => {
+        try {
+            await selectAndPersistDevice(state.accountId, event.target.value);
+            renderDevices(state.deviceGroups);
+            refreshPlayerStatus().catch(() => null);
+            toast('设备已选择');
+        } catch (error) {
+            toast(error.message, 'error');
+        }
     });
 
     $('[data-role="account-list"]')?.addEventListener('click', async event => {
@@ -426,17 +445,24 @@ function bindDeviceSelection() {
         }
     });
 
-    $('[data-role="device-list"]')?.addEventListener('click', event => {
+    $('[data-role="device-list"]')?.addEventListener('click', async event => {
         const button = event.target.closest('[data-action="select-device"]');
         if (!button) return;
-        selectDevice(button.dataset.accountId, button.dataset.deviceId, button.dataset.deviceName);
-        const accountSelect = $('[data-role="account-select"]');
-        const deviceSelect = $('[data-role="device-select"]');
-        if (accountSelect) accountSelect.value = state.accountId;
-        renderDevices(state.deviceGroups);
-        if (deviceSelect) deviceSelect.value = state.deviceId;
-        refreshPlayerStatus().catch(() => null);
-        toast('设备已选择');
+        button.disabled = true;
+        try {
+            await selectAndPersistDevice(button.dataset.accountId, button.dataset.deviceId, button.dataset.deviceName);
+            const accountSelect = $('[data-role="account-select"]');
+            const deviceSelect = $('[data-role="device-select"]');
+            if (accountSelect) accountSelect.value = state.accountId;
+            renderDevices(state.deviceGroups);
+            if (deviceSelect) deviceSelect.value = state.deviceId;
+            refreshPlayerStatus().catch(() => null);
+            toast('设备已选择');
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
     });
 }
 

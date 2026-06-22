@@ -4,6 +4,7 @@ interface SpeakerControlsModule {
   normalizeDeviceId(device: Record<string, unknown>): string;
   normalizeDeviceName(device: Record<string, unknown>): string;
   renderAccountRow(account: Record<string, unknown>): string;
+  selectAndPersistDevice(accountId: string, deviceId: string, name?: string): Promise<void>;
   togglePlayerPlayback(): Promise<Record<string, unknown>>;
 }
 
@@ -91,5 +92,25 @@ describe('speaker controls helpers', () => {
     expect(html).toContain('data-action="delete-account"');
     expect(html).toContain('selected-action');
     expect(html).toContain('>已选</button>');
+  });
+
+  it('persists selected speaker as managed and last selected for conversation monitoring', async () => {
+    installDom();
+    const fetchMock = vi.fn(async () => okResponse({}) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const { speaker, state } = await loadModules();
+
+    await speaker.selectAndPersistDevice('miot-account', 'speaker-1', '客厅音箱');
+
+    expect(state.accountId).toBe('miot-account');
+    expect(state.deviceId).toBe('speaker-1');
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'api/miot/mina/device/managed', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ account_id: 'miot-account', device_id: 'speaker-1', managed: true }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'api/miot/mina/last_selection', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ account_id: 'miot-account', device_id: 'speaker-1' }),
+    }));
   });
 });
