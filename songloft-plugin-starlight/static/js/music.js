@@ -458,7 +458,7 @@ async function importSongs(songs, options = {}) {
 
 export async function downloadSong(song) {
     const result = await api.post('/download/song', { song });
-    toast(result?.path ? `下载完成：${result.path}` : '下载任务已完成');
+    toast(result?.started ? '已开始下载 1 首歌曲，可在下载进度中查看' : (result?.path ? `下载完成：${result.path}` : '下载任务已完成'));
     await loadDownloadProgress().catch(() => {});
     return result;
 }

@@ -31,7 +31,12 @@ interface UrlBody {
     platform?: unknown;
     quality?: unknown;
     songInfo?: unknown;
+    starlight?: unknown;
   };
+}
+
+interface MusicHandlerOptions {
+  downloadRuntimes?: RuntimeManager;
 }
 
 function statusFor(error: unknown): number {
@@ -50,6 +55,18 @@ function statusFor(error: unknown): number {
 async function handle(fn: () => unknown | Promise<unknown>, statusCode = 200): Promise<HTTPResponse> {
   try {
     return apiOk(await fn(), statusCode);
+  } catch (error) {
+    return apiError(error, statusFor(error));
+  }
+}
+
+async function handleRawJson(fn: () => unknown | Promise<unknown>, statusCode = 200): Promise<HTTPResponse> {
+  try {
+    return {
+      statusCode,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(await fn()),
+    };
   } catch (error) {
     return apiError(error, statusFor(error));
   }
@@ -131,6 +148,7 @@ export function registerMusicHandlers(
   sources: SourceManager,
   runtimes: RuntimeManager,
   platforms: PlatformRegistry,
+  options: MusicHandlerOptions = {},
 ): void {
   router.get('/api/music/platforms', async () => handle(() => platforms.all()));
 
@@ -175,7 +193,7 @@ export function registerMusicHandlers(
     }));
 
   router.post('/api/music/url', async (req) =>
-    handle(async () => {
+    handleRawJson(async () => {
       const body = parseJsonBody<UrlBody>(req);
       const sourceData = body.source_data;
       if (!sourceData || typeof sourceData !== 'object' || !sourceData.songInfo) {
@@ -191,7 +209,10 @@ export function registerMusicHandlers(
         throw new StarlightError('MUSIC_PLATFORM_UNSUPPORTED', '不支持的音乐平台', false);
       }
 
-      const url = await runtimes.getMusicUrl(platform, quality, sourceData.songInfo as LxSongInfo);
+      const resolver = isDownloadMusicUrlSource(sourceData) && options.downloadRuntimes
+        ? options.downloadRuntimes
+        : runtimes;
+      const url = await resolver.getMusicUrl(platform, quality, sourceData.songInfo as LxSongInfo);
       if (!url) {
         throw new StarlightError('PLAY_URL_RESOLVE_FAILED', '播放地址解析失败');
       }
@@ -235,4 +256,13 @@ export function registerMusicHandlers(
     }));
 
   router.post('/api/music/lyric', async () => handle(() => ({ lyric: '' })));
+}
+
+function isDownloadMusicUrlSource(sourceData: { starlight?: unknown }): boolean {
+  const marker = sourceData.starlight;
+  return Boolean(
+    marker
+    && typeof marker === 'object'
+    && (marker as { purpose?: unknown }).purpose === 'download',
+  );
 }

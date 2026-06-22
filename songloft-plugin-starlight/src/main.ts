@@ -132,7 +132,7 @@ async function onInit(): Promise<void> {
   registerScheduleHandlers(miotRouter, scheduler, configManager);
   registerVoiceCommandHandlers(miotRouter, configManager);
   registerIndexingHandlers(miotRouter, indexingManager);
-  registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry);
+  registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry, { downloadRuntimes: downloadRuntimeManager });
   registerBridgeHandlers(router, bridgeService);
   registerDownloadHandlers(router, downloadSourceManager, downloadRuntimeManager, downloadService);
   registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);

@@ -55,7 +55,7 @@ describe('DownloadService', () => {
     });
   });
 
-  it('downloads a song by importing the resolved download URL as a pure external remote song', async () => {
+  it('downloads a song by importing a current-plugin sourced remote song for fresh URL resolving', async () => {
     const runtime = createRuntime();
     const fetchMock = installRemoteImport(501);
     const downloadMock = vi.fn(async () => ({ path: 'downloads/Singer/Song.flac', status: 'ok' }));
@@ -74,15 +74,19 @@ describe('DownloadService', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const fetchCalls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
     const payload = JSON.parse(String(fetchCalls[0][1].body));
+    const sourceData = JSON.parse(payload[0].source_data);
     expect(payload).toEqual([
       expect.objectContaining({
         title: 'Song',
-        url: 'https://download.test/song.flac',
-        plugin_entry_path: '',
-        source_data: '',
+        url: '',
+        plugin_entry_path: 'starlight',
         dedup_key: '',
       }),
     ]);
+    expect(sourceData).toEqual({
+      ...song.source_data,
+      starlight: { purpose: 'download' },
+    });
     expect(downloadMock).toHaveBeenCalledWith(501, {
       path_template: 'starlight/{artist}/{title}',
       embed_metadata: false,
