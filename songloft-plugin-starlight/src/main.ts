@@ -18,6 +18,8 @@ import { RuntimeManager } from './music/runtime_manager';
 import { PlatformRegistry } from './music/platforms/registry';
 import { BridgeService } from './bridge/service';
 import { prefixRouter } from './router/prefix';
+import { CustomPlaylistStore } from './custom_playlists/store';
+import { CustomPlaylistService } from './custom_playlists/service';
 
 // 导入所有handler注册函数
 import { registerAccountHandlers } from './handlers/account';
@@ -32,6 +34,7 @@ import { registerIndexingHandlers } from './handlers/indexing';
 import { registerMusicHandlers } from './handlers/music';
 import { registerBridgeHandlers } from './handlers/bridge';
 import { registerHealthHandlers } from './handlers/health';
+import { registerCustomPlaylistHandlers } from './handlers/custom_playlists';
 import { setHostBaseUrl } from './utils/http';
 
 const router = createRouter();
@@ -51,6 +54,7 @@ let runtimeManager: RuntimeManager;
 let platformRegistry: PlatformRegistry;
 let bridgeService: BridgeService;
 
+let customPlaylistService: CustomPlaylistService;
 async function onInit(): Promise<void> {
   songloft.log.info('Starlight 插件初始化...');
 
@@ -78,6 +82,7 @@ async function onInit(): Promise<void> {
   platformRegistry = new PlatformRegistry();
   bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService);
 
+  customPlaylistService = new CustomPlaylistService(new CustomPlaylistStore(), bridgeService);
   conversationMonitor = new ConversationMonitor(accountManager, configManager);
   voiceEngine = new VoiceEngine(
     configManager,
@@ -114,6 +119,7 @@ async function onInit(): Promise<void> {
   registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry);
   registerBridgeHandlers(router, bridgeService);
   registerHealthHandlers(router, sourceManager, runtimeManager);
+  registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);
 
   // 自动登录 + 启动后台服务（异步，不阻塞插件初始化）
   authService.autoLoginAll().catch(e => {

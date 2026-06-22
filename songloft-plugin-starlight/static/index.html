@@ -195,6 +195,35 @@
                     <button class="primary-button" type="submit" name="mode" value="search">搜索</button>
                     <button class="ghost-button" type="submit" name="mode" value="recommended">推荐</button>
                 </form>
+                <section class="surface-section">
+                    <div class="section-bar">
+                        <h2>自建歌单</h2>
+                        <button class="ghost-button" type="button" data-action="refresh-custom-playlists">刷新</button>
+                    </div>
+                    <form class="inline-form" data-role="custom-playlist-create-form">
+                        <label>
+                            <span>名称</span>
+                            <input name="name" placeholder="歌单名" autocomplete="off">
+                        </label>
+                        <button class="primary-button" type="submit">新建</button>
+                    </form>
+                    <form class="inline-form" data-role="custom-playlist-import-form">
+                        <label>
+                            <span>平台</span>
+                            <select name="source_id" data-role="custom-playlist-import-platform"></select>
+                        </label>
+                        <label class="wide-field">
+                            <span>链接或 ID</span>
+                            <input name="id" placeholder="歌单链接或 ID" autocomplete="off">
+                        </label>
+                        <button class="primary-button" type="submit">导入歌单</button>
+                    </form>
+                    <label>
+                        <span>当前歌单</span>
+                        <select data-role="custom-playlist-select"></select>
+                    </label>
+                    <div class="list-stack tight" data-role="custom-playlist-list"></div>
+                </section>
                 <div class="split-view">
                     <section class="surface-section">
                         <div class="section-bar">

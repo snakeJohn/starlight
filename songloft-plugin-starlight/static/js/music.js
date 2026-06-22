@@ -5,6 +5,7 @@ const platformSelectRoles = [
     'platform-select',
     'songlist-platform',
     'ranking-platform',
+    'custom-playlist-import-platform',
 ];
 
 function asArray(value) {
@@ -86,6 +87,10 @@ function actionButton(action, index, text) {
     return `<button type="button" data-action="${action}" data-index="${index}">${text}</button>`;
 }
 
+function customPlaylistAction(index) {
+    return actionButton('add-to-playlist', index, '加入歌单');
+}
+
 export function renderSongRow(song, index, extraActions = '') {
     return `
         <article class="song-row media-row">
@@ -99,6 +104,7 @@ export function renderSongRow(song, index, extraActions = '') {
                 ${actionButton('preview', index, '试听')}
                 ${actionButton('import', index, '导入')}
                 ${actionButton('speaker', index, '音箱')}
+                ${customPlaylistAction(index)}
                 ${extraActions}
             </div>
         </article>
@@ -200,12 +206,50 @@ export async function playSonglistOnSpeaker(songs) {
     return playOnSpeaker(songs[0]);
 }
 
+export async function addSongToCustomPlaylist(playlistId, song) {
+    if (!playlistId) {
+        throw new Error('请先选择歌单');
+    }
+    const result = await api.post(`/custom-playlists/${encodeURIComponent(playlistId)}/songs`, { song });
+    toast('已加入歌单');
+    await loadCustomPlaylists().catch(error => toast(error.message, 'error'));
+    return result;
+}
+
+async function createCustomPlaylist(name) {
+    const result = await api.post('/custom-playlists', { name });
+    toast('歌单已创建');
+    await loadCustomPlaylists();
+    return result;
+}
+
+export async function importCustomPlaylistFromSource(sourceId, listId) {
+    const result = await api.post('/custom-playlists/import', { source_id: sourceId, id: listId });
+    toast('歌单已导入');
+    await loadCustomPlaylists();
+    return result;
+}
+
+export async function refreshCustomPlaylist(playlistId) {
+    const result = await api.post(`/custom-playlists/${encodeURIComponent(playlistId)}/refresh`);
+    toast('歌单已刷新');
+    await loadCustomPlaylists();
+    return result;
+}
+
+async function deleteCustomPlaylist(playlistId) {
+    const result = await api.delete(`/custom-playlists/${encodeURIComponent(playlistId)}`);
+    toast('歌单已删除');
+    await loadCustomPlaylists();
+    return result;
+}
+
 function bindSongActions(root, getSong) {
     root.addEventListener('click', async event => {
         const button = event.target.closest('button[data-action]');
         if (!button) return;
         const action = button.dataset.action;
-        if (!['preview', 'import', 'speaker'].includes(action)) return;
+        if (!['preview', 'import', 'speaker', 'add-to-playlist'].includes(action)) return;
         const song = getSong(Number(button.dataset.index));
         if (!song) return;
         button.disabled = true;
@@ -213,11 +257,141 @@ function bindSongActions(root, getSong) {
             if (action === 'preview') await previewSong(song);
             if (action === 'import') await importSongs([song]);
             if (action === 'speaker') await playOnSpeaker(song);
+            if (action === 'add-to-playlist') await addSongToCustomPlaylist(selectedCustomPlaylistId(), song);
         } catch (error) {
             toast(error.message, 'error');
         } finally {
             button.disabled = false;
         }
+    });
+}
+
+function selectedCustomPlaylistId() {
+    const select = $('[data-role="custom-playlist-select"]');
+    return select?.value || state.customPlaylistId || '';
+}
+
+function playlistSongLabel(song) {
+    return `${song?.title || '未知歌曲'} - ${song?.artist || '未知歌手'}${song?.source_name ? `（${song.source_name}）` : ''}`;
+}
+
+export function renderCustomPlaylistItem(playlist) {
+    const songs = Array.isArray(playlist?.songs) ? playlist.songs : [];
+    const meta = [playlist?.source_name, `${songs.length} 首`].filter(Boolean).join(' · ');
+    const songPreview = songs.slice(0, 3).map(song => `<span>${escapeHtml(playlistSongLabel(song))}</span>`).join('');
+    return `
+        <article class="data-row custom-playlist-row" data-playlist-id="${escapeHtml(playlist?.id || '')}">
+            ${renderArtwork(playlist, playlist?.name || '歌单')}
+            <div class="row-main">
+                <strong>${escapeHtml(playlist?.name || '未命名歌单')}</strong>
+                <span>${escapeHtml(meta)}</span>
+                ${songPreview ? `<span class="row-meta">${songPreview}</span>` : ''}
+            </div>
+            <div class="row-actions">
+                ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="refresh-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">刷新</button>` : ''}
+                <button type="button" data-action="select-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">选择</button>
+                <button type="button" data-action="delete-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">删除</button>
+            </div>
+        </article>
+    `;
+}
+
+function renderCustomPlaylists() {
+    const list = $('[data-role="custom-playlist-list"]');
+    const select = $('[data-role="custom-playlist-select"]');
+    const playlists = state.customPlaylists || [];
+    if (select) {
+        select.innerHTML = playlists.length
+            ? playlists.map(playlist => `<option value="${escapeHtml(playlist.id)}">${escapeHtml(playlist.name)}</option>`).join('')
+            : '<option value="">无可用歌单</option>';
+        if (state.customPlaylistId && playlists.some(playlist => playlist.id === state.customPlaylistId)) {
+            select.value = state.customPlaylistId;
+        } else if (playlists[0]) {
+            select.value = playlists[0].id;
+            setState({ customPlaylistId: playlists[0].id });
+        }
+    }
+    if (!list) return;
+    list.innerHTML = playlists.length
+        ? playlists.map(playlist => renderCustomPlaylistItem(playlist)).join('')
+        : '<div class="empty-state">暂无自建歌单。</div>';
+}
+
+async function loadCustomPlaylists() {
+    const playlists = asArray(await api.get('/custom-playlists'));
+    setState({ customPlaylists: playlists });
+    renderCustomPlaylists();
+    return playlists;
+}
+
+function bindCustomPlaylists() {
+    const createForm = $('[data-role="custom-playlist-create-form"]');
+    const importForm = $('[data-role="custom-playlist-import-form"]');
+    const select = $('[data-role="custom-playlist-select"]');
+    const list = $('[data-role="custom-playlist-list"]');
+
+    createForm?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const button = createForm.querySelector('button[type="submit"]');
+        const body = Object.fromEntries(new FormData(createForm).entries());
+        if (!body.name?.trim()) return;
+        button.disabled = true;
+        try {
+            await createCustomPlaylist(body.name.trim());
+            createForm.reset();
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    importForm?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const button = importForm.querySelector('button[type="submit"]');
+        const body = Object.fromEntries(new FormData(importForm).entries());
+        if (!body.id?.trim()) return;
+        button.disabled = true;
+        try {
+            await importCustomPlaylistFromSource(body.source_id || state.platform, body.id.trim());
+            importForm.reset();
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    select?.addEventListener('change', () => {
+        setState({ customPlaylistId: select.value });
+    });
+
+    list?.addEventListener('click', async event => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const playlistId = button.dataset.playlistId;
+        if (!playlistId) return;
+        button.disabled = true;
+        try {
+            if (button.dataset.action === 'select-custom-playlist') {
+                setState({ customPlaylistId: playlistId });
+                renderCustomPlaylists();
+            }
+            if (button.dataset.action === 'refresh-custom-playlist') {
+                await refreshCustomPlaylist(playlistId);
+            }
+            if (button.dataset.action === 'delete-custom-playlist') {
+                await deleteCustomPlaylist(playlistId);
+            }
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    $('[data-action="refresh-custom-playlists"]')?.addEventListener('click', () => {
+        loadCustomPlaylists().catch(error => toast(error.message, 'error'));
     });
 }
 
@@ -494,6 +668,8 @@ export async function initMusicUI() {
     bindSources();
     bindSongLists();
     bindRankings();
+    bindCustomPlaylists();
     await loadPlatforms().catch(error => toast(error.message, 'error'));
     await loadSources().catch(error => toast(error.message, 'error'));
+    await loadCustomPlaylists().catch(error => toast(error.message, 'error'));
 }

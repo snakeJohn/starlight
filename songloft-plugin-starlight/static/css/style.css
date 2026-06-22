@@ -457,6 +457,10 @@ textarea:focus {
     align-items: center;
 }
 
+.custom-playlist-row {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+}
+
 .row-main {
     min-width: 0;
     display: grid;

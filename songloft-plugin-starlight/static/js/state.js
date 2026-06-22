@@ -15,6 +15,8 @@ export const state = {
     platform: 'kw',
     quality: '320k',
     searchResults: [],
+    customPlaylists: [],
+    customPlaylistId: '',
     platforms: [],
     sources: [],
     accounts: [],

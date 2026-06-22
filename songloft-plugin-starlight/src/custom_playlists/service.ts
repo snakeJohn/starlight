@@ -67,7 +67,7 @@ function nativeId(value: unknown): string | number | undefined {
 
 export class CustomPlaylistService {
   constructor(
-    private readonly store = new CustomPlaylistStore(),
+    private readonly store: CustomPlaylistStore,
     private readonly bridge: Pick<BridgeService, 'importSongs'>,
     private readonly nativePlaylists: NativePlaylists = songloft.playlists as NativePlaylists,
   ) {}
