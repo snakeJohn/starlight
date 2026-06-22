@@ -98,10 +98,10 @@ describe('CustomPlaylistService', () => {
   });
 
   it('still persists through fallback storage when native playlist writes fail', async () => {
-    (songloft.playlists as Record<string, unknown>).create = vi.fn(async () => {
+    (songloft.playlists as unknown as Record<string, unknown>).create = vi.fn(async () => {
       throw new Error('native create failed');
     });
-    (songloft.playlists as Record<string, unknown>).addSongs = vi.fn(async () => {
+    (songloft.playlists as unknown as Record<string, unknown>).addSongs = vi.fn(async () => {
       throw new Error('native add failed');
     });
     const { service } = createService();

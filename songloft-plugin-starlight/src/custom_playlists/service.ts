@@ -69,7 +69,7 @@ export class CustomPlaylistService {
   constructor(
     private readonly store: CustomPlaylistStore,
     private readonly bridge: Pick<BridgeService, 'importSongs'>,
-    private readonly nativePlaylists: NativePlaylists = songloft.playlists as NativePlaylists,
+    private readonly nativePlaylists: NativePlaylists = songloft.playlists as unknown as NativePlaylists,
   ) {}
 
   async list(): Promise<CustomPlaylist[]> {

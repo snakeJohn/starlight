@@ -31,7 +31,8 @@ function installToastDom() {
 }
 
 async function loadMusicModule(): Promise<CustomPlaylistUiModule> {
-  return await import('../../static/js/music.js') as CustomPlaylistUiModule;
+  const modulePath = '../../static/js/music.js';
+  return await import(modulePath) as CustomPlaylistUiModule;
 }
 
 describe('custom playlist music UI helpers', () => {
@@ -78,12 +79,13 @@ describe('custom playlist music UI helpers', () => {
     await importCustomPlaylistFromSource('kw', '3360244412');
     await refreshCustomPlaylist('imported_1');
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('api/custom-playlists/import');
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+    const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls[0]?.[0]).toBe('api/custom-playlists/import');
+    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({
       source_id: 'kw',
       id: '3360244412',
     });
-    expect(fetchMock.mock.calls.map((call) => call[0])).toContain('api/custom-playlists/imported_1/refresh');
+    expect(calls.map((call) => call[0])).toContain('api/custom-playlists/imported_1/refresh');
   });
 
   it('renders imported playlist metadata without exposing upstream ids', async () => {

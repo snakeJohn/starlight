@@ -32,8 +32,10 @@ function installToastDom() {
 }
 
 async function loadModules() {
-  const music = await import('../../static/js/music.js') as MusicActionsModule;
-  const stateModule = await import('../../static/js/state.js') as StateModule;
+  const musicModulePath = '../../static/js/music.js';
+  const stateModulePath = '../../static/js/state.js';
+  const music = await import(musicModulePath) as MusicActionsModule;
+  const stateModule = await import(stateModulePath) as StateModule;
   return { music, state: stateModule.state };
 }
 

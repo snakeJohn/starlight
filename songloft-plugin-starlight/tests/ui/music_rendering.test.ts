@@ -8,7 +8,8 @@ interface MusicRenderingModule {
 }
 
 async function loadMusicModule(): Promise<MusicRenderingModule> {
-  return await import('../../static/js/music.js') as MusicRenderingModule;
+  const modulePath = '../../static/js/music.js';
+  return await import(modulePath) as MusicRenderingModule;
 }
 
 describe('music media rendering', () => {
