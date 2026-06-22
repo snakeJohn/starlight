@@ -14,6 +14,8 @@ export interface RemoteSongPayload {
 
 export interface RemoteSongOptions {
   pluginEntryPath?: string;
+  includeSourceData?: boolean;
+  dedupKey?: string;
 }
 
 export function remoteSongDedupKey(song: SearchResultSong): string {
@@ -30,8 +32,8 @@ export function toRemoteSong(song: SearchResultSong, url: string, options: Remot
     cover_url: song.cover_url,
     duration: song.duration,
     url,
-    plugin_entry_path: options.pluginEntryPath || 'starlight-playback',
-    source_data: JSON.stringify(song.source_data),
-    dedup_key: remoteSongDedupKey(song),
+    plugin_entry_path: options.pluginEntryPath ?? 'starlight-playback',
+    source_data: options.includeSourceData === false ? '' : JSON.stringify(song.source_data),
+    dedup_key: options.dedupKey ?? remoteSongDedupKey(song),
   };
 }
