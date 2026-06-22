@@ -315,4 +315,47 @@ describe('SourceStore', () => {
     await store.deleteScript('test-source');
     await expect(store.loadScript('test-source')).resolves.toBeNull();
   });
+
+  test('custom storage keys isolate playback and download source sets', async () => {
+    const playbackStore = new SourceStore();
+    const downloadStore = new SourceStore({
+      indexKey: 'starlight:music:download_sources',
+      scriptPrefix: 'starlight:music:download_source_script:',
+    });
+
+    await playbackStore.saveIndex([sourceMeta('playback-source', 'Playback Source')]);
+    await playbackStore.saveScript('playback-source', 'playback-script');
+    await downloadStore.saveIndex([sourceMeta('download-source', 'Download Source')]);
+    await downloadStore.saveScript('download-source', 'download-script');
+
+    await expect(playbackStore.loadIndex()).resolves.toEqual([
+      expect.objectContaining({ id: 'playback-source', name: 'Playback Source' }),
+    ]);
+    await expect(downloadStore.loadIndex()).resolves.toEqual([
+      expect.objectContaining({ id: 'download-source', name: 'Download Source' }),
+    ]);
+    await expect(playbackStore.loadScript('download-source')).resolves.toBeNull();
+    await expect(downloadStore.loadScript('playback-source')).resolves.toBeNull();
+    await expect(songloft.storage.keys()).resolves.toEqual(expect.arrayContaining([
+      'starlight:music:sources',
+      'starlight:music:download_sources',
+      'starlight:music:source_script:playback-source',
+      'starlight:music:download_source_script:download-source',
+    ]));
+  });
 });
+
+function sourceMeta(id: string, name: string): MusicSourceMeta {
+  return {
+    id,
+    name,
+    version: '',
+    description: '',
+    author: '',
+    homepage: '',
+    filename: `${id}.js`,
+    importedAt: '2026-06-22T00:00:00.000Z',
+    enabled: false,
+    supportedPlatforms: [],
+  };
+}

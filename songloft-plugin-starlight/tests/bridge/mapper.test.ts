@@ -22,7 +22,7 @@ describe('toRemoteSong', () => {
       cover_url: 'https://img.test/a.jpg',
       duration: 200,
       url: 'https://audio.test/song.mp3',
-      plugin_entry_path: '',
+      plugin_entry_path: 'starlight-playback',
       dedup_key: 'kw:123',
     });
     expect(remote.source_data).toBe(JSON.stringify({

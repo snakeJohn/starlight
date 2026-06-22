@@ -23,6 +23,7 @@ interface TestSongloft {
     list: AsyncFunction<unknown[]>;
     getById: AsyncFunction;
     search: AsyncFunction<unknown[]>;
+    download: AsyncFunction;
   };
   jsenv: {
     create: AsyncFunction<Record<string, never>>;
@@ -85,6 +86,7 @@ export function installSongloftMock() {
       list: async () => [],
       getById: unmockedAsync('songs.getById'),
       search: unmockedAsync('songs.search'),
+      download: unmockedAsync('songs.download'),
     },
     jsenv: {
       create: async () => ({}),

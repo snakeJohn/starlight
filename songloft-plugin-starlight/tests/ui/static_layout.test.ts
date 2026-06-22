@@ -28,7 +28,7 @@ describe('static UI layout copy', () => {
     const html = indexHtml();
 
     expect(html).toContain('>上一首</button>');
-    expect(html).toContain('data-action="player-toggle"');
+    expect(html).toContain('data-action="speaker-player-toggle"');
     expect(html).toContain('>暂停播放</button>');
     expect(html).toContain('>停止</button>');
     expect(html).toContain('>下一首</button>');
@@ -56,11 +56,12 @@ describe('static UI layout copy', () => {
     expect(searchPlaylists).toBeGreaterThan(importPlaylists);
   });
 
-  it('renames server host to the Songloft access address', () => {
+  it('hides the server host configuration from the settings page', () => {
     const html = indexHtml();
 
-    expect(html).toContain('Songloft 访问地址');
-    expect(html).toContain('小爱音箱访问 Songloft 播放接口用的局域网地址');
+    expect(html).not.toContain('Songloft 访问地址');
+    expect(html).not.toContain('小爱音箱访问 Songloft 播放接口用的局域网地址');
+    expect(html).not.toContain('data-role="host-url"');
     expect(html).not.toContain('<span>服务器地址</span>');
     expect(html).not.toContain('name="server_host"');
   });
@@ -93,6 +94,17 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-role="ranking-pagination"');
   });
 
+  it('replaces the plugin mini player with download source management UI', () => {
+    const html = indexHtml();
+
+    expect(html).not.toContain('id="miniPlayer"');
+    expect(html).toContain('data-role="download-source-file"');
+    expect(html).toContain('data-role="download-source-list"');
+    expect(html).toContain('data-role="download-settings-form"');
+    expect(html).toContain('data-role="download-progress"');
+    expect(html).toContain('下载音源');
+  });
+
   it('hides the top status platform chip', () => {
     const js = appJs();
 
@@ -110,11 +122,76 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('repeat(auto-fit');
   });
 
-  it('stacks automation index metrics vertically and allows long values to wrap', () => {
+  it('stacks moved speaker index metrics vertically and allows long values to wrap', () => {
     const stylesheet = css();
 
-    expect(stylesheet).toContain('.automation-layout .metric-grid');
+    expect(stylesheet).toContain('.speaker-operations-layout .metric-grid');
     expect(stylesheet).toContain('grid-template-columns: 1fr');
     expect(stylesheet).toContain('white-space: normal');
+  });
+
+  it('moves player and index controls into the speaker page', () => {
+    const html = indexHtml();
+    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
+    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
+    const speakerHtml = html.slice(speakerStart, songlistsStart);
+    const automationHtml = html.slice(
+      html.indexOf('<section class="tab-panel" id="tab-automation">'),
+      html.indexOf('<section class="tab-panel" id="tab-settings">') >= 0
+        ? html.indexOf('<section class="tab-panel" id="tab-settings">')
+        : html.indexOf('</main>'),
+    );
+
+    expect(speakerHtml).toContain('<h2>音箱播放</h2>');
+    expect(speakerHtml).toContain('data-role="speaker-player-device"');
+    expect(speakerHtml).toContain('data-action="speaker-player-previous"');
+    expect(speakerHtml).toContain('data-action="speaker-player-toggle"');
+    expect(speakerHtml).toContain('<h2>索引</h2>');
+    expect(speakerHtml).toContain('data-action="refresh-index"');
+    expect(automationHtml).not.toContain('<h2>音箱播放</h2>');
+    expect(automationHtml).not.toContain('<h2>索引</h2>');
+  });
+
+  it('moves visible settings into speaker and automation pages and removes the settings tab', () => {
+    const html = indexHtml();
+    const stateJs = readFileSync(resolve(process.cwd(), 'static/js/state.js'), 'utf8');
+    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
+    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
+    const speakerHtml = html.slice(speakerStart, songlistsStart);
+    const automationHtml = html.slice(
+      html.indexOf('<section class="tab-panel" id="tab-automation">'),
+      html.indexOf('</main>'),
+    );
+
+    expect(stateJs).not.toContain("id: 'settings'");
+    expect(html).not.toContain('id="tab-settings"');
+    expect(speakerHtml).toContain('data-role="speaker-config-form"');
+    expect(speakerHtml).toContain('name="conversation_monitor_enabled" type="checkbox"');
+    expect(speakerHtml).toContain('name="voice_command_enabled" type="checkbox" disabled');
+    expect(speakerHtml).toContain('name="force_mp3" type="checkbox"');
+    expect(speakerHtml).not.toContain('name="scheduled_tasks_enabled"');
+    expect(automationHtml).toContain('data-role="schedule-config-form"');
+    expect(automationHtml).toContain('name="scheduled_tasks_enabled" type="checkbox"');
+    expect(html).not.toContain('name="timezone"');
+    expect(html).not.toContain('name="extra_music_api_models"');
+    expect(html).not.toContain('额外型号');
+    expect(html).not.toContain('外部搜索 URL');
+    expect(html).not.toContain('外部搜索 Token');
+    expect(html).not.toContain('打断提示');
+    expect(html).not.toContain('<span>外部搜索</span>');
+    expect(html).not.toContain('<span>保留灯效</span>');
+    expect(html).not.toContain('<span>搜索提示</span>');
+    expect(html).not.toContain('<legend>AI</legend>');
+    expect(html).not.toContain('name="ai_api_key"');
+  });
+
+  it('renders a global player control in the status strip', () => {
+    const js = appJs();
+    const stylesheet = css();
+
+    expect(js).toContain('data-role="global-player"');
+    expect(js).toContain('data-action="global-player-toggle"');
+    expect(js).toContain('data-action="global-player-next"');
+    expect(stylesheet).toContain('.global-player');
   });
 });

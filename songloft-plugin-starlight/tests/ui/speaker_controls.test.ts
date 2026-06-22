@@ -4,6 +4,8 @@ interface SpeakerControlsModule {
   normalizeDeviceId(device: Record<string, unknown>): string;
   normalizeDeviceName(device: Record<string, unknown>): string;
   renderAccountRow(account: Record<string, unknown>): string;
+  selectAndPersistDevice(accountId: string, deviceId: string, name?: string): Promise<void>;
+  runPlayerAction(action: string): Promise<Record<string, unknown>>;
   togglePlayerPlayback(): Promise<Record<string, unknown>>;
 }
 
@@ -79,6 +81,22 @@ describe('speaker controls helpers', () => {
     }));
   });
 
+  it('runs global player controls against the selected speaker', async () => {
+    installDom();
+    const fetchMock = vi.fn(async () => okResponse({ message: 'playing next song' }) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const { speaker, state } = await loadModules();
+    state.accountId = 'miot-account';
+    state.deviceId = 'speaker-1';
+
+    await expect(speaker.runPlayerAction('global-player-next')).resolves.toMatchObject({ message: 'playing next song' });
+
+    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/next', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ account_id: 'miot-account', device_id: 'speaker-1' }),
+    }));
+  });
+
   it('renders selected account rows with relogin and delete actions', async () => {
     installDom();
     const { speaker, state } = await loadModules();
@@ -91,5 +109,25 @@ describe('speaker controls helpers', () => {
     expect(html).toContain('data-action="delete-account"');
     expect(html).toContain('selected-action');
     expect(html).toContain('>已选</button>');
+  });
+
+  it('persists selected speaker as managed and last selected for conversation monitoring', async () => {
+    installDom();
+    const fetchMock = vi.fn(async () => okResponse({}) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const { speaker, state } = await loadModules();
+
+    await speaker.selectAndPersistDevice('miot-account', 'speaker-1', '客厅音箱');
+
+    expect(state.accountId).toBe('miot-account');
+    expect(state.deviceId).toBe('speaker-1');
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'api/miot/mina/device/managed', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ account_id: 'miot-account', device_id: 'speaker-1', managed: true }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'api/miot/mina/last_selection', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ account_id: 'miot-account', device_id: 'speaker-1' }),
+    }));
   });
 });

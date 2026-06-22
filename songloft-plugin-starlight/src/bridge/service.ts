@@ -29,9 +29,9 @@ export class BridgeService {
     return url;
   }
 
-  async importSongs(songs: SearchResultSong[]): Promise<{ total: number; payloads: RemoteSongPayload[] }> {
+  async importSongs(songs: SearchResultSong[]): Promise<{ total: number; payloads: RemoteSongPayload[]; songs: SongloftRemoteSong[] }> {
     if (songs.length === 0) {
-      return { total: 0, payloads: [] };
+      return { total: 0, payloads: [], songs: [] };
     }
 
     const payloads: RemoteSongPayload[] = [];
@@ -43,20 +43,23 @@ export class BridgeService {
     const token = await songloft.plugin.getToken();
     const host = await songloft.plugin.getHostUrl();
     const imported = await postRemoteSongs(host, token, payloads);
+    let importedSongs = imported.songs;
     if (!imported.ok) {
       if (!isDuplicateRemoteSongError(imported.body)) {
         throw remoteImportError(imported.status, imported.body);
       }
 
+      importedSongs = [];
       for (const payload of payloads) {
         const single = await postRemoteSongs(host, token, [payload]);
         if (!single.ok && !isDuplicateRemoteSongError(single.body)) {
           throw remoteImportError(single.status, single.body);
         }
+        importedSongs.push(...single.songs);
       }
     }
 
-    return { total: payloads.length, payloads };
+    return { total: payloads.length, payloads, songs: importedSongs };
   }
 
   async importSongsBestEffort(songs: SearchResultSong[]): Promise<{
@@ -280,6 +283,23 @@ function scoreResolvedCandidate(title: string, artist: string, song: SearchResul
   return score;
 }
 
+export interface SongloftRemoteSong {
+  id?: number;
+  type?: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  [key: string]: unknown;
+}
+
+interface RemoteImportResult {
+  ok: boolean;
+  status: number;
+  body: string;
+  songs: SongloftRemoteSong[];
+  count: number;
+}
+
 async function safeResponseText(response: Response): Promise<string> {
   if (typeof response.text !== 'function') {
     return '';
@@ -291,16 +311,41 @@ async function safeResponseText(response: Response): Promise<string> {
   }
 }
 
-async function postRemoteSongs(host: string, token: string, payloads: RemoteSongPayload[]): Promise<{ ok: boolean; status: number; body: string }> {
+async function safeResponseJson(response: Response): Promise<unknown> {
+  if (typeof response.json !== 'function') {
+    return null;
+  }
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function remoteImportSongsFromBody(body: unknown): SongloftRemoteSong[] {
+  if (!body || typeof body !== 'object') {
+    return [];
+  }
+  const songs = (body as { songs?: unknown }).songs;
+  return Array.isArray(songs) ? (songs as SongloftRemoteSong[]) : [];
+}
+
+export async function postRemoteSongs(host: string, token: string, payloads: RemoteSongPayload[]): Promise<RemoteImportResult> {
   const response = await fetch(`${host}/api/v1/songs/remote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(payloads),
   });
+  const successBody = response.ok ? await safeResponseJson(response) : null;
+  const songs = remoteImportSongsFromBody(successBody);
   return {
     ok: response.ok,
     status: response.status,
     body: response.ok ? '' : await safeResponseText(response),
+    songs,
+    count: typeof successBody === 'object' && successBody !== null && typeof (successBody as { count?: unknown }).count === 'number'
+      ? (successBody as { count: number }).count
+      : songs.length,
   };
 }
 

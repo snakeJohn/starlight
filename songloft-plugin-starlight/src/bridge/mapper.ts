@@ -12,10 +12,17 @@ export interface RemoteSongPayload {
   dedup_key: string;
 }
 
-export function toRemoteSong(song: SearchResultSong, url: string): RemoteSongPayload {
+export interface RemoteSongOptions {
+  pluginEntryPath?: string;
+}
+
+export function remoteSongDedupKey(song: SearchResultSong): string {
   const info = song.source_data.songInfo;
   const id = info.musicId || info.songmid || info.hash || info.copyrightId || '';
+  return id ? `${song.source_data.platform}:${id}` : '';
+}
 
+export function toRemoteSong(song: SearchResultSong, url: string, options: RemoteSongOptions = {}): RemoteSongPayload {
   return {
     title: song.title,
     artist: song.artist,
@@ -23,8 +30,8 @@ export function toRemoteSong(song: SearchResultSong, url: string): RemoteSongPay
     cover_url: song.cover_url,
     duration: song.duration,
     url,
-    plugin_entry_path: '',
+    plugin_entry_path: options.pluginEntryPath || 'starlight-playback',
     source_data: JSON.stringify(song.source_data),
-    dedup_key: id ? `${song.source_data.platform}:${id}` : '',
+    dedup_key: remoteSongDedupKey(song),
   };
 }

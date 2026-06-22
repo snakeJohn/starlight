@@ -155,12 +155,20 @@ describe('BridgeService', () => {
     ]);
   });
 
-  it('imports resolved remote songs into Songloft', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+  it('imports resolved remote songs into Songloft and returns native song records', async () => {
+    const nativeSong = { id: 101, type: 'remote', title: 'Song', artist: 'Singer' };
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: vi.fn(async () => ({ songs: [nativeSong], count: 1 })),
+    }) as unknown as Response);
     globalThis.fetch = fetchMock;
     const { service } = createService();
 
-    await expect(service.importSongs([song])).resolves.toMatchObject({ total: 1 });
+    await expect(service.importSongs([song])).resolves.toMatchObject({
+      total: 1,
+      songs: [nativeSong],
+    });
 
     expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:18191/api/v1/songs/remote', {
       method: 'POST',
@@ -173,6 +181,7 @@ describe('BridgeService', () => {
       expect.objectContaining({
         title: 'Song',
         url: 'https://audio.test/song.mp3',
+        plugin_entry_path: 'starlight-playback',
         dedup_key: 'kw:123',
       }),
     ]);
@@ -241,7 +250,7 @@ describe('BridgeService', () => {
     globalThis.fetch = fetchMock;
     const { service, runtimes } = createService();
 
-    await expect(service.importSongs([])).resolves.toEqual({ total: 0, payloads: [] });
+    await expect(service.importSongs([])).resolves.toEqual({ total: 0, payloads: [], songs: [] });
 
     expect(runtimes.getMusicUrl).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -438,7 +447,7 @@ describe('registerBridgeHandlers', () => {
     const response = await router.handle(request('POST', '/api/bridge/songs/import', { songs: [] }));
 
     expect(response.statusCode).toBe(200);
-    expect(parseResponseBody(response).data).toEqual({ total: 0, payloads: [] });
+    expect(parseResponseBody(response).data).toEqual({ total: 0, payloads: [], songs: [] });
     expect(runtimes.getMusicUrl).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -34,6 +34,8 @@ describe('music media rendering', () => {
     expect(html).toContain('晴天');
     expect(html).toContain('周杰伦');
     expect(html).toContain('播放');
+    expect(html).toContain('data-action="download"');
+    expect(html).toContain('>下载</button>');
     expect(html).toContain('导入 Songloft 歌曲库');
     expect(html).not.toContain('>试听<');
     expect(html).not.toContain('>导入<');

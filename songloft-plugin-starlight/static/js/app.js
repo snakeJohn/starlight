@@ -69,25 +69,27 @@ function renderStatus() {
     const sourceEnabled = state.sources.filter(item => item.enabled).length;
     const accountLabel = state.accountId || '未选择账号';
     const deviceLabel = state.deviceName || state.deviceId || '未选择设备';
+    const paused = state.playbackState === 'paused';
+    const playerTitle = state.playerSongTitle || '暂无播放';
+    const playerMeta = state.playerSongMeta || deviceLabel;
     status.innerHTML = `
         <div class="status-items">
             <span class="status-chip" data-tone="${state.accountId ? 'success' : 'warning'}"><strong>账号</strong>${escapeHtml(accountLabel)}</span>
             <span class="status-chip" data-tone="${state.deviceId ? 'success' : 'warning'}"><strong>设备</strong>${escapeHtml(deviceLabel)}</span>
             <span class="status-chip"><strong>音源</strong>${sourceTotal} / ${sourceEnabled} 启用</span>
         </div>
-        <span class="status-pill">${escapeHtml(state.message || '就绪')}</span>
-    `;
-}
-
-function renderMiniPlayer() {
-    const player = $('#miniPlayer');
-    if (!player || player.dataset.lockedByPreview === 'true') return;
-    player.innerHTML = `
-        <div class="now-playing">
-            <strong>${state.selectedSong ? escapeHtml(state.selectedSong.title || state.selectedSong.name) : '待播放'}</strong>
-            <span>${state.deviceId ? `设备 ${escapeHtml(state.deviceName || state.deviceId)}` : '选择设备后可推送搜索结果到音箱'}</span>
+        <div class="status-side">
+            <div class="global-player" data-role="global-player">
+                <span class="global-player-info">
+                    <strong>${escapeHtml(playerTitle)}</strong>
+                    <span>${escapeHtml(playerMeta)}</span>
+                </span>
+                <button class="icon-button compact-icon-button" type="button" data-action="global-player-previous" title="上一首" aria-label="上一首">上一首</button>
+                <button class="icon-button compact-icon-button" type="button" data-action="global-player-toggle" title="${paused ? '继续播放' : '暂停播放'}" aria-label="${paused ? '继续播放' : '暂停播放'}">${paused ? '继续播放' : '暂停播放'}</button>
+                <button class="icon-button compact-icon-button" type="button" data-action="global-player-next" title="下一首" aria-label="下一首">下一首</button>
+            </div>
+            <span class="status-pill">${escapeHtml(state.message || '就绪')}</span>
         </div>
-        <span class="status-pill">${escapeHtml(state.quality || '320k')}</span>
     `;
 }
 
@@ -95,17 +97,7 @@ function bindStateRenderers() {
     window.addEventListener('starlight:state', event => {
         if (event.detail?.activeTab) renderActiveTab(event.detail.activeTab);
         renderStatus();
-        renderMiniPlayer();
     });
-}
-
-function markPreviewPlayer() {
-    const player = $('#miniPlayer');
-    if (!player) return;
-    const observer = new MutationObserver(() => {
-        player.dataset.lockedByPreview = player.querySelector('audio') ? 'true' : 'false';
-    });
-    observer.observe(player, { childList: true, subtree: true });
 }
 
 async function boot() {
@@ -113,9 +105,7 @@ async function boot() {
     renderActiveTab(state.activeTab);
     bindNavigation();
     bindStateRenderers();
-    markPreviewPlayer();
     renderStatus();
-    renderMiniPlayer();
 
     const results = await Promise.allSettled([
         initMusicUI(),

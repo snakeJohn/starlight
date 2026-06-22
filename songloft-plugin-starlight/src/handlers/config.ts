@@ -89,8 +89,8 @@ export function registerConfigHandlers(
     }
   });
 
-  // POST /config - 更新配置
-  router.post('/config', async (req: HTTPRequest) => {
+  // POST/PUT /config - 更新配置
+  const updateConfig = async (req: HTTPRequest) => {
     try {
       const body = parseBody(req);
       const config = await configManager.getConfig();
@@ -212,8 +212,7 @@ export function registerConfigHandlers(
 
       // 检查保存后的地址是否有效，附带 warning
       let warning = '';
-      const host = await resolveHostBaseUrl(config.server_host);
-      if (host && isLoopbackAddress(host)) {
+      if (config.server_host && isLoopbackAddress(config.server_host)) {
         warning = 'Songloft 访问地址为本地回环地址，MIoT 智能音箱可能无法通过此地址播放音乐。';
       }
 
@@ -225,5 +224,8 @@ export function registerConfigHandlers(
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) }, 500);
     }
-  });
+  };
+
+  router.post('/config', updateConfig);
+  router.put('/config', updateConfig);
 }

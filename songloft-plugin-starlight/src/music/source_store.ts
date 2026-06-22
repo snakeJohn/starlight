@@ -3,13 +3,26 @@ import type { MusicSourceMeta } from './types';
 const SOURCE_INDEX_KEY = 'starlight:music:sources';
 const SOURCE_SCRIPT_PREFIX = 'starlight:music:source_script:';
 
+export interface SourceStoreOptions {
+  indexKey?: string;
+  scriptPrefix?: string;
+}
+
 function asSourceIndex(value: unknown): MusicSourceMeta[] {
   return Array.isArray(value) ? (value as MusicSourceMeta[]) : [];
 }
 
 export class SourceStore {
+  private readonly indexKey: string;
+  private readonly scriptPrefix: string;
+
+  constructor(options: SourceStoreOptions = {}) {
+    this.indexKey = options.indexKey || SOURCE_INDEX_KEY;
+    this.scriptPrefix = options.scriptPrefix || SOURCE_SCRIPT_PREFIX;
+  }
+
   async loadIndex(): Promise<MusicSourceMeta[]> {
-    const raw = await songloft.storage.get(SOURCE_INDEX_KEY);
+    const raw = await songloft.storage.get(this.indexKey);
 
     if (raw === null || raw === undefined || raw === '') {
       return [];
@@ -31,7 +44,7 @@ export class SourceStore {
   }
 
   async saveIndex(sources: MusicSourceMeta[]): Promise<void> {
-    await songloft.storage.set(SOURCE_INDEX_KEY, JSON.stringify(sources));
+    await songloft.storage.set(this.indexKey, JSON.stringify(sources));
   }
 
   async saveScript(id: string, script: string): Promise<void> {
@@ -48,6 +61,6 @@ export class SourceStore {
   }
 
   private scriptKey(id: string): string {
-    return `${SOURCE_SCRIPT_PREFIX}${id}`;
+    return `${this.scriptPrefix}${id}`;
   }
 }

@@ -4,8 +4,8 @@ export const tabs = [
     { id: 'songlists', label: '歌单', icon: 'L' },
     { id: 'rankings', label: '排行', icon: '#' },
     { id: 'sources', label: '音源', icon: '+' },
+    { id: 'download', label: '下载', icon: 'D' },
     { id: 'automation', label: '自动化', icon: 'A' },
-    { id: 'settings', label: '设置', icon: 'C' },
 ];
 
 export const state = {
@@ -14,6 +14,8 @@ export const state = {
     deviceId: '',
     deviceName: '',
     playbackState: 'idle',
+    playerSongTitle: '',
+    playerSongMeta: '',
     platform: 'kw',
     quality: '320k',
     searchQuery: null,
@@ -39,6 +41,9 @@ export const state = {
     customPlaylistDetailPage: 1,
     platforms: [],
     sources: [],
+    downloadSources: [],
+    downloadSettings: null,
+    downloadProgress: null,
     accounts: [],
     deviceGroups: [],
     selectedSong: null,
