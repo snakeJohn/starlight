@@ -2,6 +2,8 @@ import { api } from './api.js';
 import { $, $$, escapeHtml, selectedDevicePayload, setState, state, toast } from './state.js';
 
 let qrAccountId = '';
+let qrPollTimer = null;
+let qrLoginDone = false;
 
 function asArray(value) {
     if (Array.isArray(value)) return value;
@@ -18,12 +20,20 @@ function accountName(account) {
     return account?.account || account?.account_name || account?.username || accountId(account) || '未命名账号';
 }
 
+export function normalizeDeviceId(device) {
+    return device?.device_id || device?.deviceID || device?.did || device?.miotDID || device?.id || '';
+}
+
+export function normalizeDeviceName(device) {
+    return device?.name || device?.device_name || device?.miotName || device?.alias || device?.model || normalizeDeviceId(device) || '未命名设备';
+}
+
 function deviceId(device) {
-    return device?.device_id || device?.did || device?.miotDID || device?.id || '';
+    return normalizeDeviceId(device);
 }
 
 function deviceName(device) {
-    return device?.name || device?.miotName || device?.alias || device?.model || deviceId(device) || '未命名设备';
+    return normalizeDeviceName(device);
 }
 
 function flattenDevices(groups) {
@@ -48,6 +58,44 @@ function selectedPayload(extra = {}) {
     return payload;
 }
 
+function findDeviceRow(accountId, deviceIdValue) {
+    return flattenDevices(state.deviceGroups).find(row =>
+        row.account_id === accountId && deviceId(row.device) === deviceIdValue
+    );
+}
+
+function selectDevice(accountId, deviceIdValue, name = '') {
+    const row = findDeviceRow(accountId, deviceIdValue);
+    setState({
+        accountId,
+        deviceId: deviceIdValue,
+        deviceName: name || (row ? deviceName(row.device) : ''),
+    });
+}
+
+export function renderAccountRow(account) {
+    const id = accountId(account);
+    const selected = Boolean(id && id === state.accountId);
+    return `
+        <article class="account-row">
+            <span class="row-main">
+                <strong>${escapeHtml(accountName(account))}</strong>
+                <span>${escapeHtml(id)} · ${account.auth_type || account.status || '已保存'}</span>
+            </span>
+            <span class="row-actions">
+                <button
+                    type="button"
+                    class="${selected ? 'selected-action' : ''}"
+                    data-action="select-account"
+                    data-account-id="${escapeHtml(id)}"
+                >${selected ? '已选' : '选择'}</button>
+                <button type="button" data-action="relogin-account" data-account-id="${escapeHtml(id)}">重新登录</button>
+                <button type="button" data-action="delete-account" data-account-id="${escapeHtml(id)}">删除账号</button>
+            </span>
+        </article>
+    `;
+}
+
 function renderAccounts(accounts) {
     const list = $('[data-role="account-list"]');
     const select = $('[data-role="account-select"]');
@@ -62,15 +110,7 @@ function renderAccounts(accounts) {
 
     if (list) {
         list.innerHTML = accounts.length
-            ? accounts.map(account => `
-                <article class="account-row">
-                    <span class="row-main">
-                        <strong>${escapeHtml(accountName(account))}</strong>
-                        <span>${escapeHtml(accountId(account))} · ${account.auth_type || account.status || '已保存'}</span>
-                    </span>
-                    <button type="button" data-action="select-account" data-account-id="${escapeHtml(accountId(account))}">选择</button>
-                </article>
-            `).join('')
+            ? accounts.map(account => renderAccountRow(account)).join('')
             : '<div class="empty-state">暂无米家账号。可使用扫码、账密或 Token 登录。</div>';
     }
 
@@ -89,7 +129,14 @@ function renderDevices(groups) {
             ? filtered.map(row => `<option value="${escapeHtml(deviceId(row.device))}">${escapeHtml(deviceName(row.device))}</option>`).join('')
             : '<option value="">暂无设备</option>';
         if (state.deviceId) select.value = state.deviceId;
-        if (!state.deviceId && filtered[0]) setState({ deviceId: deviceId(filtered[0].device) });
+        if (!state.deviceId && filtered[0]) {
+            setState({ deviceId: deviceId(filtered[0].device), deviceName: deviceName(filtered[0].device) });
+        } else if (state.deviceId) {
+            const selected = filtered.find(row => deviceId(row.device) === state.deviceId);
+            if (selected && state.deviceName !== deviceName(selected.device)) {
+                setState({ deviceName: deviceName(selected.device) });
+            }
+        }
     }
 
     if (list) {
@@ -100,7 +147,16 @@ function renderDevices(groups) {
                         <strong>${escapeHtml(deviceName(row.device))}</strong>
                         <span>${escapeHtml(row.account_name)} · ${escapeHtml(deviceId(row.device))} · ${escapeHtml(row.device.model || row.device.hardware || '')}</span>
                     </span>
-                    <button type="button" data-action="select-device" data-account-id="${escapeHtml(row.account_id)}" data-device-id="${escapeHtml(deviceId(row.device))}">选择</button>
+                    <span class="row-actions">
+                        <button
+                            type="button"
+                            class="${state.accountId === row.account_id && state.deviceId === deviceId(row.device) ? 'selected-action' : ''}"
+                            data-action="select-device"
+                            data-account-id="${escapeHtml(row.account_id)}"
+                            data-device-id="${escapeHtml(deviceId(row.device))}"
+                            data-device-name="${escapeHtml(deviceName(row.device))}"
+                        >${state.accountId === row.account_id && state.deviceId === deviceId(row.device) ? '已选' : '选择'}</button>
+                    </span>
                 </article>
             `).join('')
             : '<div class="empty-state">暂无设备。登录米家账号后刷新设备列表。</div>';
@@ -133,9 +189,117 @@ async function refreshSpeaker() {
     await loadDevices().catch(error => toast(error.message, 'error'));
 }
 
+async function reloginAccount(accountIdValue) {
+    await api.post('/miot/auth/relogin', { account_id: accountIdValue });
+    toast('重新登录已完成');
+    await refreshSpeaker();
+}
+
+async function deleteAccount(accountIdValue) {
+    if (window.confirm && !window.confirm('确认删除当前米家账号？删除后需要重新登录。')) return;
+    await api.delete(`/miot/account?account_id=${encodeURIComponent(accountIdValue)}`);
+    if (state.accountId === accountIdValue) {
+        setState({ accountId: '', deviceId: '', deviceName: '', playbackState: 'idle' });
+        updatePlayerToggleButton('idle');
+    }
+    toast('账号已删除');
+    await refreshSpeaker();
+}
+
 function setSpeakerMessage(message) {
     const node = $('[data-role="speaker-message"]');
     if (node) node.textContent = message;
+}
+
+function updatePlayerToggleButton(playbackState = state.playbackState) {
+    const button = $('[data-action="player-toggle"]');
+    if (!button) return;
+    const paused = playbackState === 'paused';
+    button.textContent = paused ? '继续播放' : '暂停播放';
+    button.title = paused ? '继续播放' : '暂停播放';
+    button.setAttribute?.('aria-label', paused ? '继续播放' : '暂停播放');
+}
+
+async function refreshPlayerStatus() {
+    if (!state.accountId || !state.deviceId) return null;
+    const result = await api.get(`/miot/player/status?account_id=${encodeURIComponent(state.accountId)}&device_id=${encodeURIComponent(state.deviceId)}`);
+    if (result?.state) {
+        setState({ playbackState: result.state });
+        updatePlayerToggleButton(result.state);
+    }
+    return result;
+}
+
+export async function togglePlayerPlayback() {
+    const result = await api.post('/miot/player/toggle', selectedPayload());
+    if (result?.state) {
+        setState({ playbackState: result.state });
+        updatePlayerToggleButton(result.state);
+    }
+    return result || {};
+}
+
+function setQrStatus(message) {
+    const status = $('[data-role="qr-status"]');
+    if (status) status.textContent = message;
+}
+
+function stopQrPolling() {
+    if (qrPollTimer) {
+        clearTimeout(qrPollTimer);
+        qrPollTimer = null;
+    }
+}
+
+async function pollQRCodeStatus(accountId) {
+    stopQrPolling();
+    qrLoginDone = false;
+
+    async function pollOnce() {
+        if (qrLoginDone || accountId !== qrAccountId) return;
+
+        try {
+            const result = await api.post('/miot/auth/qrcode/poll', { account_id: accountId });
+            if (qrLoginDone || accountId !== qrAccountId) return;
+
+            setQrStatus(result.message || result.state || '等待扫码');
+
+            if (result.account_id) {
+                setState({ accountId: result.account_id });
+                qrAccountId = result.account_id;
+            }
+
+            if (result.state === 'success') {
+                qrLoginDone = true;
+                stopQrPolling();
+                toast('扫码登录成功');
+                await refreshSpeaker();
+                return;
+            }
+
+            if (result.state === 'expired' || result.state === 'timeout') {
+                stopQrPolling();
+                setQrStatus('二维码已过期，请刷新后重新扫描');
+                toast('二维码已过期，请重新获取', 'error');
+                return;
+            }
+
+            if (result.state === 'error') {
+                stopQrPolling();
+                toast(result.message || '扫码登录失败', 'error');
+                return;
+            }
+
+            qrPollTimer = window.setTimeout(pollOnce, 3000);
+        } catch (error) {
+            if (qrLoginDone || accountId !== qrAccountId) return;
+            stopQrPolling();
+            setQrStatus(`轮询失败：${error.message}`);
+            toast(error.message, 'error');
+        }
+    }
+
+    pollOnce();
 }
 
 function bindAuthModes() {
@@ -152,6 +316,8 @@ function bindLogin() {
     $('[data-action="qr-start"]')?.addEventListener('click', async event => {
         const button = event.currentTarget;
         button.disabled = true;
+        stopQrPolling();
+        qrLoginDone = false;
         try {
             const result = await api.post('/miot/auth/qrcode', {});
             qrAccountId = result.account_id || '';
@@ -165,8 +331,11 @@ function bindLogin() {
                 link.textContent = result.login_url ? '打开登录链接' : '';
             }
             box?.classList.toggle('has-qr', Boolean(result.qrcode_url));
-            if (status) status.textContent = '请使用米家扫码';
+            if (status) status.textContent = '请使用米家扫码，页面将自动确认登录状态';
             toast('二维码已生成');
+            if (qrAccountId) {
+                pollQRCodeStatus(qrAccountId);
+            }
         } catch (error) {
             toast(error.message, 'error');
         } finally {
@@ -182,17 +351,8 @@ function bindLogin() {
         const button = event.currentTarget;
         button.disabled = true;
         try {
-            const result = await api.post('/miot/auth/qrcode/poll', { account_id: qrAccountId });
-            const status = $('[data-role="qr-status"]');
-            if (status) status.textContent = result.message || result.state || '等待扫码';
-            if (result.account_id) {
-                setState({ accountId: result.account_id });
-                qrAccountId = result.account_id;
-            }
-            if (result.state === 'success') {
-                toast('扫码登录成功');
-                await refreshSpeaker();
-            }
+            setQrStatus('正在检查扫码状态');
+            pollQRCodeStatus(qrAccountId);
         } catch (error) {
             toast(error.message, 'error');
         } finally {
@@ -229,33 +389,53 @@ function bindLogin() {
 
 function bindDeviceSelection() {
     $('[data-role="account-select"]')?.addEventListener('change', event => {
-        setState({ accountId: event.target.value, deviceId: '' });
+        setState({ accountId: event.target.value, deviceId: '', deviceName: '' });
         renderDevices(state.deviceGroups);
     });
 
     $('[data-role="device-select"]')?.addEventListener('change', event => {
-        setState({ deviceId: event.target.value });
+        selectDevice(state.accountId, event.target.value);
+        renderDevices(state.deviceGroups);
     });
 
-    $('[data-role="account-list"]')?.addEventListener('click', event => {
-        const button = event.target.closest('[data-action="select-account"]');
+    $('[data-role="account-list"]')?.addEventListener('click', async event => {
+        const button = event.target.closest('[data-action]');
         if (!button) return;
-        setState({ accountId: button.dataset.accountId, deviceId: '' });
-        const select = $('[data-role="account-select"]');
-        if (select) select.value = state.accountId;
-        renderDevices(state.deviceGroups);
-        toast('账号已选择');
+        const accountIdValue = button.dataset.accountId;
+        if (!accountIdValue) return;
+        button.disabled = true;
+        try {
+            if (button.dataset.action === 'select-account') {
+                setState({ accountId: accountIdValue, deviceId: '', deviceName: '' });
+                const select = $('[data-role="account-select"]');
+                if (select) select.value = state.accountId;
+                renderAccounts(state.accounts);
+                renderDevices(state.deviceGroups);
+                toast('账号已选择');
+            }
+            if (button.dataset.action === 'relogin-account') {
+                await reloginAccount(accountIdValue);
+            }
+            if (button.dataset.action === 'delete-account') {
+                await deleteAccount(accountIdValue);
+            }
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
     });
 
     $('[data-role="device-list"]')?.addEventListener('click', event => {
         const button = event.target.closest('[data-action="select-device"]');
         if (!button) return;
-        setState({ accountId: button.dataset.accountId, deviceId: button.dataset.deviceId });
+        selectDevice(button.dataset.accountId, button.dataset.deviceId, button.dataset.deviceName);
         const accountSelect = $('[data-role="account-select"]');
         const deviceSelect = $('[data-role="device-select"]');
         if (accountSelect) accountSelect.value = state.accountId;
         renderDevices(state.deviceGroups);
         if (deviceSelect) deviceSelect.value = state.deviceId;
+        refreshPlayerStatus().catch(() => null);
         toast('设备已选择');
     });
 }
@@ -283,6 +463,8 @@ function bindPlayback() {
         const body = Object.fromEntries(new FormData(event.currentTarget).entries());
         try {
             await api.post('/miot/mina/play-url', selectedPayload({ url: body.url }));
+            setState({ playbackState: 'playing' });
+            updatePlayerToggleButton('playing');
             setSpeakerMessage('URL 播放中');
             toast('URL 已发送');
         } catch (error) {
@@ -294,6 +476,7 @@ function bindPlayback() {
         'player-previous': () => api.post('/miot/player/previous', selectedPayload()),
         'player-next': () => api.post('/miot/player/next', selectedPayload()),
         'player-stop': () => api.post('/miot/player/stop', selectedPayload()),
+        'player-toggle': () => togglePlayerPlayback(),
         'player-mode': () => api.post('/miot/player/mode', selectedPayload({ play_mode: $('[data-role="play-mode-select"]')?.value || 'order' })),
     };
 
@@ -302,6 +485,12 @@ function bindPlayback() {
             event.currentTarget.disabled = true;
             try {
                 await run();
+                if (action === 'player-stop') {
+                    setState({ playbackState: 'stopped' });
+                    updatePlayerToggleButton('stopped');
+                } else if (action !== 'player-toggle') {
+                    await refreshPlayerStatus().catch(() => null);
+                }
                 setSpeakerMessage('控制命令已发送');
                 toast('控制命令已发送');
             } catch (error) {
@@ -324,5 +513,7 @@ export async function initSpeakerUI() {
     bindDeviceSelection();
     bindPlayback();
     bindRefresh();
+    updatePlayerToggleButton();
     await refreshSpeaker();
+    await refreshPlayerStatus().catch(() => null);
 }

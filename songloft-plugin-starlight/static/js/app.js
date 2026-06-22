@@ -68,13 +68,12 @@ function renderStatus() {
     const sourceTotal = state.sources.length;
     const sourceEnabled = state.sources.filter(item => item.enabled).length;
     const accountLabel = state.accountId || '未选择账号';
-    const deviceLabel = state.deviceId || '未选择设备';
+    const deviceLabel = state.deviceName || state.deviceId || '未选择设备';
     status.innerHTML = `
         <div class="status-items">
             <span class="status-chip" data-tone="${state.accountId ? 'success' : 'warning'}"><strong>账号</strong>${escapeHtml(accountLabel)}</span>
             <span class="status-chip" data-tone="${state.deviceId ? 'success' : 'warning'}"><strong>设备</strong>${escapeHtml(deviceLabel)}</span>
             <span class="status-chip"><strong>音源</strong>${sourceTotal} / ${sourceEnabled} 启用</span>
-            <span class="status-chip"><strong>平台</strong>${escapeHtml(state.platform || '-')}</span>
         </div>
         <span class="status-pill">${escapeHtml(state.message || '就绪')}</span>
     `;
@@ -86,7 +85,7 @@ function renderMiniPlayer() {
     player.innerHTML = `
         <div class="now-playing">
             <strong>${state.selectedSong ? escapeHtml(state.selectedSong.title || state.selectedSong.name) : '待播放'}</strong>
-            <span>${state.deviceId ? `设备 ${escapeHtml(state.deviceId)}` : '选择设备后可推送搜索结果到音箱'}</span>
+            <span>${state.deviceId ? `设备 ${escapeHtml(state.deviceName || state.deviceId)}` : '选择设备后可推送搜索结果到音箱'}</span>
         </div>
         <span class="status-pill">${escapeHtml(state.quality || '320k')}</span>
     `;

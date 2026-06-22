@@ -18,7 +18,7 @@ export interface MusicPlatformProvider {
   name: string;
   search(keyword: string, page: number, pageSize: number): Promise<{ list: SearchResultSong[]; total: number }>;
   songListSearch(keyword: string, page: number, pageSize: number): Promise<{ list: SongListSummary[]; total: number }>;
-  songListDetail(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string }>;
+  songListDetail(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string; cover_url?: string }>;
   recommendedSongLists(page: number, pageSize: number): Promise<{ list: SongListSummary[]; total: number }>;
   leaderboardBoards(): Promise<LeaderboardBoard[]>;
   leaderboardList(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string }>;

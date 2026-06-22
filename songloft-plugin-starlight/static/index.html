@@ -30,8 +30,8 @@
                     <label>
                         <span>音质</span>
                         <select name="quality" data-role="quality-select">
-                            <option value="320k">320k</option>
                             <option value="128k">128k</option>
+                            <option value="320k" selected>320k</option>
                             <option value="flac">flac</option>
                             <option value="flac24bit">flac24bit</option>
                         </select>
@@ -48,7 +48,12 @@
                         <h2>结果</h2>
                         <span data-role="search-total">0</span>
                     </div>
+                    <div class="target-playlist-banner">
+                        <span>加入歌单保存到</span>
+                        <strong data-role="target-playlist-label">未选择歌单</strong>
+                    </div>
                     <div class="list-stack" data-role="search-results"></div>
+                    <div data-role="search-pagination"></div>
                 </div>
             </section>
 
@@ -67,12 +72,6 @@
                             <h2>账号</h2>
                             <span data-role="auth-summary">未加载</span>
                         </div>
-                        <div class="segmented" role="tablist">
-                            <button class="active" type="button" data-auth-mode="qrcode">扫码</button>
-                            <button type="button" data-auth-mode="password">密码</button>
-                            <button type="button" data-auth-mode="token">Token</button>
-                        </div>
-
                         <div class="auth-panel active" data-auth-panel="qrcode">
                             <div class="inline-actions">
                                 <button class="primary-button" type="button" data-action="qr-start">获取二维码</button>
@@ -84,38 +83,6 @@
                                 <span data-role="qr-status">等待生成</span>
                             </div>
                         </div>
-
-                        <form class="auth-panel control-stack" data-auth-panel="password" data-role="password-login-form">
-                            <label>
-                                <span>账号 ID</span>
-                                <input name="account_id" autocomplete="username" placeholder="可留空">
-                            </label>
-                            <label>
-                                <span>用户名</span>
-                                <input name="username" autocomplete="username" required>
-                            </label>
-                            <label>
-                                <span>密码</span>
-                                <input name="password" type="password" autocomplete="current-password" required>
-                            </label>
-                            <button class="primary-button" type="submit">登录</button>
-                        </form>
-
-                        <form class="auth-panel control-stack" data-auth-panel="token" data-role="token-login-form">
-                            <label>
-                                <span>账号 ID</span>
-                                <input name="account_id" placeholder="可留空">
-                            </label>
-                            <label>
-                                <span>User ID</span>
-                                <input name="user_id" required>
-                            </label>
-                            <label>
-                                <span>Pass Token</span>
-                                <input name="pass_token" required>
-                            </label>
-                            <button class="primary-button" type="submit">保存 Token</button>
-                        </form>
 
                         <div class="list-stack tight" data-role="account-list"></div>
                     </section>
@@ -162,9 +129,10 @@
                         </form>
                     </div>
                     <div class="player-actions">
-                        <button class="icon-button" type="button" data-action="player-previous" title="上一首" aria-label="上一首">Prev</button>
-                        <button class="icon-button" type="button" data-action="player-stop" title="停止" aria-label="停止">Stop</button>
-                        <button class="icon-button" type="button" data-action="player-next" title="下一首" aria-label="下一首">Next</button>
+                        <button class="icon-button" type="button" data-action="player-previous" title="上一首" aria-label="上一首">上一首</button>
+                        <button class="icon-button" type="button" data-action="player-toggle" title="暂停播放" aria-label="暂停播放">暂停播放</button>
+                        <button class="icon-button" type="button" data-action="player-stop" title="停止" aria-label="停止">停止</button>
+                        <button class="icon-button" type="button" data-action="player-next" title="下一首" aria-label="下一首">下一首</button>
                         <select data-role="play-mode-select" aria-label="播放模式">
                             <option value="order">顺序</option>
                             <option value="repeat">循环</option>
@@ -183,21 +151,9 @@
                         <h1>歌单</h1>
                     </div>
                 </div>
-                <form class="control-grid compact" data-role="songlist-form">
-                    <label>
-                        <span>平台</span>
-                        <select name="source_id" data-role="songlist-platform"></select>
-                    </label>
-                    <label class="wide-field">
-                        <span>关键词</span>
-                        <input name="keyword" type="search" placeholder="歌单名" autocomplete="off">
-                    </label>
-                    <button class="primary-button" type="submit" name="mode" value="search">搜索</button>
-                    <button class="ghost-button" type="submit" name="mode" value="recommended">推荐</button>
-                </form>
                 <section class="surface-section">
                     <div class="section-bar">
-                        <h2>自建歌单</h2>
+                        <h2>我的歌单</h2>
                         <button class="ghost-button" type="button" data-action="refresh-custom-playlists">刷新</button>
                     </div>
                     <form class="inline-form" data-role="custom-playlist-create-form">
@@ -207,6 +163,18 @@
                         </label>
                         <button class="primary-button" type="submit">新建</button>
                     </form>
+                    <label>
+                        <span>加入目标歌单</span>
+                        <select data-role="custom-playlist-select"></select>
+                        <small class="field-help">搜索结果、榜单和歌单详情里的“加入歌单”会保存到这里。</small>
+                    </label>
+                    <div class="list-stack tight" data-role="custom-playlist-list"></div>
+                    <div data-role="custom-playlist-detail"></div>
+                </section>
+                <section class="surface-section">
+                    <div class="section-bar">
+                        <h2>导入歌单</h2>
+                    </div>
                     <form class="inline-form" data-role="custom-playlist-import-form">
                         <label>
                             <span>平台</span>
@@ -218,27 +186,45 @@
                         </label>
                         <button class="primary-button" type="submit">导入歌单</button>
                     </form>
-                    <label>
-                        <span>当前歌单</span>
-                        <select data-role="custom-playlist-select"></select>
-                    </label>
-                    <div class="list-stack tight" data-role="custom-playlist-list"></div>
                 </section>
-                <div class="split-view">
-                    <section class="surface-section">
-                        <div class="section-bar">
-                            <h2>列表</h2>
-                            <span data-role="songlist-total">0</span>
-                        </div>
-                        <div class="list-stack" data-role="songlist-list"></div>
-                    </section>
-                    <section class="surface-section">
-                        <div class="section-bar">
-                            <h2 data-role="songlist-title">详情</h2>
-                        </div>
-                        <div class="list-stack" data-role="songlist-detail"></div>
-                    </section>
-                </div>
+                <section class="songlist-discovery">
+                    <div class="section-bar">
+                        <h2>搜索歌单</h2>
+                        <span data-role="songlist-total">0</span>
+                    </div>
+                    <form class="control-grid compact" data-role="songlist-form">
+                        <label>
+                            <span>平台</span>
+                            <select name="source_id" data-role="songlist-platform"></select>
+                        </label>
+                        <label class="wide-field">
+                            <span>关键词</span>
+                            <input name="keyword" type="search" placeholder="歌单名" autocomplete="off">
+                        </label>
+                        <button class="primary-button" type="submit" name="mode" value="search">搜索</button>
+                        <button class="ghost-button" type="submit" name="mode" value="recommended">推荐</button>
+                    </form>
+                    <div class="split-view">
+                        <section class="surface-section">
+                            <div class="section-bar">
+                                <h2>列表</h2>
+                            </div>
+                            <div class="list-stack" data-role="songlist-list"></div>
+                            <div data-role="songlist-pagination"></div>
+                        </section>
+                        <section class="surface-section">
+                            <div class="section-bar">
+                                <h2 data-role="songlist-title">详情</h2>
+                            </div>
+                            <div class="target-playlist-banner">
+                                <span>加入歌单保存到</span>
+                                <strong data-role="target-playlist-label">未选择歌单</strong>
+                            </div>
+                            <div class="list-stack" data-role="songlist-detail"></div>
+                            <div data-role="songlist-detail-pagination"></div>
+                        </section>
+                    </div>
+                </section>
             </section>
 
             <section class="tab-panel" id="tab-rankings">
@@ -255,7 +241,7 @@
                     </label>
                     <button class="primary-button" type="button" data-action="load-rankings">加载榜单</button>
                 </div>
-                <div class="split-view">
+                <div class="split-view ranking-layout">
                     <section class="surface-section">
                         <div class="section-bar">
                             <h2>榜单</h2>
@@ -266,7 +252,12 @@
                         <div class="section-bar">
                             <h2 data-role="ranking-title">歌曲</h2>
                         </div>
+                        <div class="target-playlist-banner">
+                            <span>加入歌单保存到</span>
+                            <strong data-role="target-playlist-label">未选择歌单</strong>
+                        </div>
                         <div class="list-stack" data-role="ranking-songs"></div>
+                        <div data-role="ranking-pagination"></div>
                     </section>
                 </div>
             </section>
@@ -299,14 +290,15 @@
                     </div>
                     <button class="ghost-button" type="button" data-action="refresh-automation">刷新</button>
                 </div>
-                <div class="two-column">
+                <div class="two-column automation-layout">
                     <section class="surface-section">
                         <div class="section-bar">
                             <h2>语音口令</h2>
                             <span data-role="voice-enabled">未加载</span>
                         </div>
-                        <textarea data-role="voice-json" spellcheck="false"></textarea>
+                        <div class="list-stack voice-command-list" data-role="voice-command-list"></div>
                         <div class="inline-actions">
+                            <button class="ghost-button" type="button" data-action="add-voice-command">新增口令</button>
                             <button class="primary-button" type="button" data-action="save-voice">保存口令</button>
                             <button class="ghost-button" type="button" data-action="load-voice">重新加载</button>
                         </div>
@@ -409,11 +401,12 @@
                     <button class="ghost-button" type="button" data-action="load-config">加载</button>
                 </div>
                 <form class="surface-section settings-form" data-role="config-form">
+                    <div class="info-panel" data-role="host-access-info">
+                        <strong>Songloft 访问地址</strong>
+                        <span>小爱音箱访问 Songloft 播放接口用的局域网地址，插件会自动从 Songloft 宿主获取。</span>
+                        <code data-role="host-url">自动获取</code>
+                    </div>
                     <div class="control-grid">
-                        <label class="wide-field">
-                            <span>服务器地址</span>
-                            <input name="server_host" placeholder="http://192.168.x.x:58091">
-                        </label>
                         <label>
                             <span>时区</span>
                             <input name="timezone" placeholder="Asia/Shanghai">

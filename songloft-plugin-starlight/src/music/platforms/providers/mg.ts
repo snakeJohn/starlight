@@ -1,4 +1,4 @@
-import { fetchJson } from '../http';
+import { fetchJson, fetchResolvedUrl } from '../http';
 import type { LeaderboardBoard, MusicPlatformProvider, SongListSummary } from '../types';
 import { normalizeSong, normalizeSongListSummary, numberValue, stringValue } from '../types';
 import type { SearchResultSong } from '../../types';
@@ -65,6 +65,44 @@ function summarizeMgList(item: any): SongListSummary {
   });
 }
 
+function parseMiguPlaylistId(value: string): string {
+  const text = stringValue(value);
+  const queryMatch = text.match(/(?:\?|&)(?:playlistId|id)=(\d+)/);
+  if (queryMatch?.[1]) {
+    return queryMatch[1];
+  }
+  const pathMatch = text.match(/\/playlist\/(\d+)(?:[/?#]|$)/);
+  if (pathMatch?.[1]) {
+    return pathMatch[1];
+  }
+  return /^\d+$/.test(text) ? text : '';
+}
+
+async function resolveMiguPlaylistId(value: string): Promise<string> {
+  const direct = parseMiguPlaylistId(value);
+  if (direct) {
+    return direct;
+  }
+  if (/^https?:\/\//.test(value)) {
+    return parseMiguPlaylistId(await fetchResolvedUrl(value, { headers: headers() }));
+  }
+  return '';
+}
+
+async function loadMiguPlaylistInfo(listId: string): Promise<{ name: string; cover_url: string }> {
+  try {
+    const body = await fetchJson<any>(`https://c.musicapp.migu.cn/MIGUM3.0/resource/playlist/v2.0?playlistId=${encodeURIComponent(listId)}`, {
+      headers: headers(),
+    });
+    return {
+      name: stringValue(body.data?.title || body.data?.name),
+      cover_url: stringValue(body.data?.imgItem?.img || body.data?.musicListPicUrl || body.data?.imageUrl || body.data?.img),
+    };
+  } catch {
+    return { name: '', cover_url: '' };
+  }
+}
+
 export class MiguProvider implements MusicPlatformProvider {
   readonly id = 'mg';
   readonly name = '咪咕音乐';
@@ -94,16 +132,18 @@ export class MiguProvider implements MusicPlatformProvider {
     }
   }
 
-  async songListDetail(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string }> {
+  async songListDetail(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string; cover_url?: string }> {
     try {
-      const listId = id.replace(/^.*(?:playlistId|id)=(\d+).*$/, '$1').replace(/^.*\/playlist\/(\d+).*$/, '$1');
-      const body = await fetchJson<any>(`https://app.c.nf.migu.cn/MIGUM3.0/resource/playlist/song/v2.0?pageNo=${page}&pageSize=${pageSize}&playlistId=${encodeURIComponent(listId)}`, {
+      const listId = await resolveMiguPlaylistId(id);
+      const songsBody = await fetchJson<any>(`https://app.c.nf.migu.cn/MIGUM3.0/resource/playlist/song/v2.0?pageNo=${page}&pageSize=${pageSize}&playlistId=${encodeURIComponent(listId)}`, {
         headers: headers(),
       });
+      const info = await loadMiguPlaylistInfo(listId);
       return {
-        songs: Array.isArray(body.data?.songList) ? body.data.songList.map(mapMgSong) : [],
-        total: numberValue(body.data?.totalCount),
-        name: stringValue(body.data?.title || body.data?.name),
+        songs: Array.isArray(songsBody.data?.songList) ? songsBody.data.songList.map(mapMgSong) : [],
+        total: numberValue(songsBody.data?.totalCount),
+        name: info.name || stringValue(songsBody.data?.title || songsBody.data?.name),
+        cover_url: info.cover_url,
       };
     } catch {
       return { songs: [], total: 0, name: '' };

@@ -6,6 +6,7 @@ import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { MinaService } from '../service/service';
 import { AccountManager } from '../account/manager';
 import { updateDeviceStatusCache } from './playlist';
+import type { PlayerSong, PlaylistManagerMap } from '../player/manager';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
 function parseBody(req: HTTPRequest): any {
@@ -34,6 +35,7 @@ export function registerDeviceHandlers(
   router: Router,
   minaService: MinaService,
   accountManager: AccountManager,
+  playlistManagerMap?: PlaylistManagerMap,
 ): void {
 
   // GET /mina/devices - 获取设备列表（按账号分组）
@@ -106,10 +108,13 @@ export function registerDeviceHandlers(
       if (!device_id || !url) {
         return jsonResponse({ success: false, error: 'device_id and url are required' });
       }
-      const ok = await minaService.playURL(account_id, device_id, url);
+      const ok = playlistManagerMap
+        ? await (await playlistManagerMap.getOrCreate(account_id, device_id)).playStandalone([urlPlayerSong(url)], 0, 'single')
+        : await minaService.playURL(account_id, device_id, url);
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to play url' });
       }
+      updateDeviceStatusCache(account_id, device_id, { state: 'playing', position: 0 });
       return jsonResponse({ success: true, data: { message: 'playing url' } });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });
@@ -204,4 +209,26 @@ export function registerDeviceHandlers(
       return jsonResponse({ success: false, error: e.message || String(e) });
     }
   });
+}
+
+function urlPlayerSong(url: string): PlayerSong {
+  return {
+    id: 0,
+    type: 'remote',
+    title: 'URL 播放',
+    artist: '',
+    album: '',
+    duration: 0,
+    file_path: '',
+    url,
+    cover_path: '',
+    cover_url: '',
+    lyric_url: '',
+    file_size: 0,
+    format: '',
+    bit_rate: 0,
+    sample_rate: 0,
+    is_live: false,
+    cache_hash: '',
+  };
 }

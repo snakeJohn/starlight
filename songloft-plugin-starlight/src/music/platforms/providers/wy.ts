@@ -49,6 +49,18 @@ function summarizeWyList(item: any): SongListSummary {
   });
 }
 
+function trackIdValue(item: any): string {
+  return stringValue(item?.id || item);
+}
+
+async function loadWySongDetails(ids: string[]): Promise<any[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+  const body = await fetchJson<any>(`https://music.163.com/api/song/detail?ids=${encodeURIComponent(JSON.stringify(ids.map((id) => Number(id) || id)))}`);
+  return Array.isArray(body.songs) ? body.songs : [];
+}
+
 export class NeteaseProvider implements MusicPlatformProvider {
   readonly id = 'wy';
   readonly name = '网易云音乐';
@@ -87,15 +99,23 @@ export class NeteaseProvider implements MusicPlatformProvider {
     }
   }
 
-  async songListDetail(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string }> {
+  async songListDetail(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string; cover_url?: string }> {
     try {
       const listId = id.replace(/^.*(?:\?|&)id=(\d+).*$/, '$1');
       const body = await fetchJson<any>(`https://music.163.com/api/v6/playlist/detail?id=${encodeURIComponent(listId)}&n=${pageSize}&s=8`);
-      const tracks = Array.isArray(body.playlist?.tracks) ? body.playlist.tracks.slice((page - 1) * pageSize, page * pageSize) : [];
+      const tracks = Array.isArray(body.playlist?.tracks) ? body.playlist.tracks : [];
+      const trackIds: string[] = Array.isArray(body.playlist?.trackIds) ? body.playlist.trackIds.map((trackId: unknown) => trackIdValue(trackId)).filter(Boolean) : [];
+      const offset = (page - 1) * pageSize;
+      const pageTrackIds = trackIds.slice(offset, offset + pageSize);
+      const tracksById = new Map(tracks.map((track: any) => [trackIdValue(track), track]));
+      const pageTracks = pageTrackIds.length
+        ? await loadWySongDetails(pageTrackIds).catch(() => pageTrackIds.map((trackId) => tracksById.get(trackId)).filter(Boolean))
+        : tracks.slice(offset, offset + pageSize);
       return {
-        songs: tracks.map(mapWySong),
-        total: numberValue(body.playlist?.trackCount || body.playlist?.trackIds?.length),
+        songs: pageTracks.map(mapWySong),
+        total: numberValue(body.playlist?.trackCount || trackIds.length || tracks.length),
         name: stringValue(body.playlist?.name),
+        cover_url: stringValue(body.playlist?.coverImgUrl),
       };
     } catch {
       return { songs: [], total: 0, name: '' };

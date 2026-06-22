@@ -7,7 +7,7 @@ import { ConfigManager } from '../config/manager';
 import { ConversationMonitor } from '../conversation/monitor';
 import { Scheduler } from '../schedule/scheduler';
 import { VoiceEngine } from '../voicecmd/engine';
-import { setHostBaseUrl } from '../utils/http';
+import { resolveHostBaseUrl, setHostBaseUrl } from '../utils/http';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
 function parseBody(req: HTTPRequest): any {
@@ -62,10 +62,12 @@ export function registerConfigHandlers(
     try {
       const config = await configManager.getConfig();
       const aiConfig = await configManager.getAIConfig();
+      const songloftHost = await resolveHostBaseUrl(config.server_host);
       return jsonResponse({
         success: true,
         data: {
           server_host: config.server_host,
+          songloft_host: songloftHost,
           conversation_monitor_enabled: config.conversation_monitor_enabled,
           voice_command_enabled: config.voice_command_enabled,
           scheduled_tasks_enabled: config.scheduled_tasks_enabled,
@@ -210,10 +212,9 @@ export function registerConfigHandlers(
 
       // 检查保存后的地址是否有效，附带 warning
       let warning = '';
-      if (!config.server_host) {
-        warning = '服务器地址为空，MIoT 智能音箱将无法播放音乐。请配置局域网 IP 地址（如 http://192.168.x.x:58091）。';
-      } else if (isLoopbackAddress(config.server_host)) {
-        warning = '检测到服务器地址为本地回环地址，MIoT 智能音箱将无法通过此地址访问服务器播放音乐。请使用局域网 IP 地址。';
+      const host = await resolveHostBaseUrl(config.server_host);
+      if (host && isLoopbackAddress(host)) {
+        warning = 'Songloft 访问地址为本地回环地址，MIoT 智能音箱可能无法通过此地址播放音乐。';
       }
 
       const resp: any = { success: true };

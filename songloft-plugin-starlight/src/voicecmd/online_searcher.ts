@@ -4,7 +4,7 @@
 /// <reference types="@songloft/plugin-sdk" />
 
 import { MinaService } from '../service/service';
-import { getHostBaseUrl } from '../utils/http';
+import { resolveHostBaseUrl } from '../utils/http';
 import { URLBuilder } from '../player/url_builder';
 import { ConfigManager } from '../config/manager';
 import type { BridgeService } from '../bridge/service';
@@ -111,7 +111,7 @@ export class OnlineSearcher {
     }
 
     // 相对路径，拼接服务器地址
-    const host = getHostBaseUrl();
+    const host = await resolveHostBaseUrl(config.server_host);
     return host + searchUrl;
   }
 
@@ -272,7 +272,7 @@ export class OnlineSearcher {
 
     try {
       const pluginToken = await songloft.plugin.getToken();
-      const serverHost = getHostBaseUrl();
+      const serverHost = await resolveHostBaseUrl();
       const fetchResp = await fetch(serverHost + '/api/v1/songs/remote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pluginToken}` },

@@ -274,6 +274,21 @@ export function setHostBaseUrl(url: string): void {
   _hostBaseUrl = url.endsWith('/') ? url.slice(0, -1) : url;
 }
 
+/** 解析宿主 API 基础 URL：优先使用旧配置，否则使用 Songloft SDK 提供的宿主地址。 */
+export async function resolveHostBaseUrl(configuredUrl = ''): Promise<string> {
+  const configured = configuredUrl.trim();
+  if (configured) {
+    setHostBaseUrl(configured);
+    return _hostBaseUrl;
+  }
+  if (_hostBaseUrl) {
+    return _hostBaseUrl;
+  }
+  const host = await songloft.plugin.getHostUrl();
+  setHostBaseUrl(host || '');
+  return _hostBaseUrl;
+}
+
 /** 调用 Songloft 宿主 API（自动携带 Bearer token） */
 export async function callHostAPI<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
   if (!_hostBaseUrl) {

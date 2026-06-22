@@ -3,6 +3,7 @@
 
 import type { CustomPlaylistService } from '../custom_playlists/service';
 import type { CustomPlaylist, CustomPlaylistSong } from '../custom_playlists/types';
+import { syntheticPlaylistId, syntheticSongId } from '../custom_playlists/synthetic';
 
 // ===== 类型定义 =====
 
@@ -211,14 +212,6 @@ const MAX_SEARCH_RESULTS = 10;
 const MIN_MATCH_SCORE = 40;
 
 type CustomPlaylistReader = Pick<CustomPlaylistService, 'list'>;
-
-function syntheticPlaylistId(index: number): number {
-  return -100000 - index;
-}
-
-function syntheticSongId(playlistIndex: number, songIndex: number): number {
-  return -100000000 - playlistIndex * 100000 - songIndex;
-}
 
 /**
  * 计算歌曲综合匹配得分，联合评估标题和歌手

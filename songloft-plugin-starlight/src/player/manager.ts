@@ -7,13 +7,13 @@
 import { ConfigManager } from '../config/manager';
 import { MinaService } from '../service/service';
 import { URLBuilder } from './url_builder';
-import { getHostBaseUrl, callHostAPI } from '../utils/http';
+import { resolveHostBaseUrl, callHostAPI } from '../utils/http';
 import type { PlayState, PlayMode, PlayerStatus } from '../types';
 
 // ===== 歌曲类型 =====
 
 /** 歌曲信息（从宿主API返回） */
-interface Song {
+export interface PlayerSong {
   id: number;
   type: string;       // "local" | "remote" | "radio"
   title: string;
@@ -33,11 +33,16 @@ interface Song {
   cache_hash: string;
 }
 
+export interface DynamicPlaylistOptions {
+  dynamicPlaylistLoader?: (playlistId: number) => Promise<PlayerSong[] | null>;
+  dynamicSongResolver?: (song: PlayerSong) => Promise<PlayerSong | null>;
+}
+
 /** 宿主API歌单歌曲响应 */
 interface PlaylistSongsResponse {
   code: number;
   data: {
-    songs: Song[];
+    songs: PlayerSong[];
     total: number;
   };
 }
@@ -57,7 +62,7 @@ export class PlaylistManager {
   private state: PlayState = 'idle';
   private playMode: PlayMode = 'order';
   private playlistId: number = 0;
-  private songs: Song[] = [];
+  private songs: PlayerSong[] = [];
   private currentIndex: number = 0;
   private checkTimer: any = null;       // 定时器ID（基于歌曲时长的切歌定时器）
   private totalSongs: number = 0;
@@ -70,6 +75,7 @@ export class PlaylistManager {
     deviceId: string,
     minaService: MinaService,
     configManager: ConfigManager,
+    private readonly dynamicOptions: DynamicPlaylistOptions = {},
   ) {
     this.accountId = accountId;
     this.deviceId = deviceId;
@@ -122,6 +128,38 @@ export class PlaylistManager {
     await this.persistState();
 
     songloft.log.info(`[PlaylistManager] Playlist started id=${playlistId} index=${this.currentIndex} mode=${this.playMode} total=${this.songs.length}`);
+    return true;
+  }
+
+  /**
+   * 播放临时歌曲队列。
+   * 用于搜索结果单曲推送或手动 URL 播放，不依赖 Songloft 歌单。
+   */
+  async playStandalone(songs: PlayerSong[], startIndex = 0, mode: PlayMode = 'single'): Promise<boolean> {
+    this.stopCheckTimer();
+    this.clearVoiceSuspend();
+    this.state = 'idle';
+    this.playStartTimeMs = 0;
+
+    if (!songs.length) {
+      songloft.log.warn('[PlaylistManager] Empty standalone song queue');
+      return false;
+    }
+
+    this.songs = songs;
+    this.totalSongs = songs.length;
+    this.playlistId = 0;
+    this.currentIndex = startIndex >= 0 && startIndex < songs.length ? startIndex : 0;
+    this.playMode = mode;
+    this.randomPlayed = new Set();
+
+    const ok = await this.playCurrent();
+    if (!ok) {
+      songloft.log.error('[PlaylistManager] Failed to play standalone song');
+      return false;
+    }
+
+    songloft.log.info(`[PlaylistManager] Standalone queue started index=${this.currentIndex} mode=${this.playMode} total=${this.songs.length}`);
     return true;
   }
 
@@ -259,7 +297,7 @@ export class PlaylistManager {
   /**
    * 获取当前歌曲
    */
-  getCurrentSong(): Song | null {
+  getCurrentSong(): PlayerSong | null {
     if (this.currentIndex >= 0 && this.currentIndex < this.songs.length) {
       return this.songs[this.currentIndex];
     }
@@ -411,7 +449,7 @@ export class PlaylistManager {
   /**
    * 使用已有歌曲列表初始化播放列表（恢复用）
    */
-  initWithSongs(songs: Song[], startIndex: number, playMode: PlayMode, playlistId: number): void {
+  initWithSongs(songs: PlayerSong[], startIndex: number, playMode: PlayMode, playlistId: number): void {
     this.songs = songs;
     this.totalSongs = songs.length;
     this.currentIndex = (startIndex >= 0 && startIndex < songs.length) ? startIndex : 0;
@@ -428,6 +466,17 @@ export class PlaylistManager {
    */
   private async loadPlaylistSongs(playlistId: number): Promise<boolean> {
     try {
+      if (playlistId < 0 && this.dynamicOptions.dynamicPlaylistLoader) {
+        const songs = await this.dynamicOptions.dynamicPlaylistLoader(playlistId);
+        if (!songs || !Array.isArray(songs)) {
+          songloft.log.error('[PlaylistManager] Dynamic playlist loader returned invalid songs: ' + playlistId);
+          return false;
+        }
+        this.songs = songs;
+        this.totalSongs = songs.length;
+        return songs.length > 0;
+      }
+
       // 使用 songloft.playlists.getSongs 桥接调用（与 Go WASM 版本的 hostFunctions.CallRouter 等价）
       // 这样不需要 hostBaseUrl 和 pluginToken，直接通过内部桥接访问数据库
       const songs = await songloft.playlists.getSongs(playlistId, { limit: 100000 });
@@ -448,31 +497,62 @@ export class PlaylistManager {
    * 播放当前索引的歌曲
    */
   private async playCurrent(): Promise<boolean> {
+    let attempts = 0;
+    while (attempts < this.songs.length) {
+      const result = await this.playCurrentOnce();
+      if (result === 'played') {
+        return true;
+      }
+      if (result !== 'unplayable') {
+        return false;
+      }
+
+      const currentSong = this.songs[this.currentIndex];
+      if (currentSong?.type !== 'dynamic') {
+        return false;
+      }
+
+      const nextIdx = this.getNextIndex();
+      if (nextIdx < 0 || nextIdx === this.currentIndex) {
+        return false;
+      }
+      songloft.log.warn('[PlaylistManager] Skip unplayable dynamic song: ' + currentSong.title);
+      this.currentIndex = nextIdx;
+      attempts += 1;
+    }
+    return false;
+  }
+
+  private async playCurrentOnce(): Promise<'played' | 'unplayable' | 'failed'> {
     if (this.currentIndex < 0 || this.currentIndex >= this.songs.length) {
       songloft.log.error('[PlaylistManager] Invalid current index: ' + this.currentIndex);
-      return false;
+      return 'failed';
     }
 
     this.stopCheckTimer();
 
     const song = this.songs[this.currentIndex];
-
-    // 检查服务器地址
-    const serverHost = getHostBaseUrl();
-    if (!serverHost) {
-      songloft.log.error('[PlaylistManager] Server host not configured');
-      return false;
+    if (!song.url && song.type === 'dynamic' && this.dynamicOptions.dynamicSongResolver) {
+      const resolved = await this.dynamicOptions.dynamicSongResolver(song);
+      if (resolved?.url) {
+        Object.assign(song, resolved);
+      }
     }
 
     // 读取是否强制 MP3
     const config = await this.configManager.getConfig();
+    const serverHost = await resolveHostBaseUrl(config.server_host);
+    if (!serverHost) {
+      songloft.log.error('[PlaylistManager] Songloft host URL not available');
+      return 'failed';
+    }
     const forceMp3 = !!config.force_mp3;
 
     // 构造播放URL
     const songURL = await URLBuilder.buildSongURL(song, { forceMp3 });
     if (!songURL) {
       songloft.log.error('[PlaylistManager] Failed to build song URL: ' + song.title);
-      return false;
+      return 'unplayable';
     }
 
     songloft.log.info(`[PlaylistManager] Playing song index=${this.currentIndex} title=${song.title} artist=${song.artist} duration=${song.duration}`);
@@ -481,7 +561,7 @@ export class PlaylistManager {
     const ok = await this.minaService.playURL(this.accountId, this.deviceId, songURL);
     if (!ok) {
       songloft.log.error('[PlaylistManager] Failed to play URL on device');
-      return false;
+      return 'failed';
     }
 
     this.clearVoiceSuspend();
@@ -495,7 +575,7 @@ export class PlaylistManager {
       songloft.log.warn('[PlaylistManager] Song duration invalid, no auto-next timer: ' + song.duration);
     }
 
-    return true;
+    return 'played';
   }
 
   /**
@@ -681,10 +761,15 @@ export class PlaylistManagerMap {
   private managers: Map<string, PlaylistManager> = new Map();
   private minaService: MinaService;
   private configManager: ConfigManager;
+  private dynamicOptions: DynamicPlaylistOptions = {};
 
   constructor(minaService: MinaService, configManager: ConfigManager) {
     this.minaService = minaService;
     this.configManager = configManager;
+  }
+
+  setDynamicPlaylistOptions(options: DynamicPlaylistOptions): void {
+    this.dynamicOptions = options;
   }
 
   /**
@@ -699,7 +784,7 @@ export class PlaylistManagerMap {
     }
 
     // 创建新的播放管理器
-    const manager = new PlaylistManager(accountId, deviceId, this.minaService, this.configManager);
+    const manager = new PlaylistManager(accountId, deviceId, this.minaService, this.configManager, this.dynamicOptions);
     this.managers.set(key, manager);
 
     // 尝试从配置中恢复播放列表状态（不自动播放）
@@ -763,11 +848,18 @@ export class PlaylistManagerMap {
       }
 
       // 使用 songloft.playlists.getSongs 桥接调用加载歌单歌曲
-      let songs: Song[] = [];
+      let songs: PlayerSong[] = [];
       try {
-        const result = await songloft.playlists.getSongs(devCfg.playlist_id, { limit: 100000 });
-        if (result && Array.isArray(result)) {
-          songs = result as any;
+        if (devCfg.playlist_id < 0 && this.dynamicOptions.dynamicPlaylistLoader) {
+          const result = await this.dynamicOptions.dynamicPlaylistLoader(devCfg.playlist_id);
+          if (result && Array.isArray(result)) {
+            songs = result;
+          }
+        } else {
+          const result = await songloft.playlists.getSongs(devCfg.playlist_id, { limit: 100000 });
+          if (result && Array.isArray(result)) {
+            songs = result as any;
+          }
         }
       } catch (e) {
         songloft.log.warn('[PlaylistManagerMap] Failed to load songs via bridge: ' + String(e));

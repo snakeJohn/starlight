@@ -50,6 +50,16 @@ function createService() {
       total: songs.length,
       payloads: songs.map((song) => ({ title: song.title, source_data: JSON.stringify(song.source_data) })),
     })),
+    importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => ({
+      total: songs.length,
+      skipped: 0,
+      payloads: songs.map((song) => ({ title: song.title, source_data: JSON.stringify(song.source_data) })),
+      errors: [],
+    })),
+    resolveSearchSong: vi.fn(async (title: string, artist?: string) => ({
+      ...(title === kgSong.title ? kgSong : kwSong),
+      artist: artist || (title === kgSong.title ? kgSong.artist : kwSong.artist),
+    })),
   } as unknown as BridgeService;
 
   return {
@@ -112,8 +122,8 @@ describe('CustomPlaylistService', () => {
     await expect(service.list()).resolves.toEqual([playlist]);
   });
 
-  it('imports network playlists with source metadata and full song source_data', async () => {
-    const { service } = createService();
+  it('imports network playlists with source metadata and portable song references only', async () => {
+    const { bridge, service } = createService();
 
     const imported = await service.importNetworkPlaylist({
       source: 'kg',
@@ -133,11 +143,112 @@ describe('CustomPlaylistService', () => {
       source_name: '酷狗',
       sourceListId: 'kg_8888',
     });
-    expect(imported.songs[0]?.source_data).toEqual(kgSong.source_data);
+    expect(imported.songs[0]).toMatchObject({
+      title: '为龙',
+      artist: '河图',
+    });
+    expect(imported.songs[0]).not.toHaveProperty('source_name');
+    expect(imported.songs[0]).not.toHaveProperty('source_data');
+    expect(bridge.importSongs).not.toHaveBeenCalled();
   });
 
-  it('returns the existing playlist when importing the same source and upstream id twice', async () => {
-    const { service } = createService();
+  it('stores imported playlist details without touching the Songloft song library', async () => {
+    const bridge = {
+      importSongs: vi.fn(async () => {
+        throw new Error('legacy import should not be used');
+      }),
+      importSongsBestEffort: vi.fn(async () => ({
+        total: 0,
+        skipped: 1,
+        payloads: [],
+        errors: [{ title: kgSong.title, message: '无法解析播放 URL' }],
+      })),
+      resolveSearchSong: vi.fn(),
+    } as unknown as BridgeService;
+    const service = new CustomPlaylistService(new CustomPlaylistStore(), bridge);
+
+    const imported = await service.importNetworkPlaylist({
+      source: 'kg',
+      sourceListId: 'kg_8888',
+      detail: {
+        name: '酷狗热歌',
+        cover_url: 'https://img.test/list.jpg',
+        songs: [kgSong],
+        total: 1,
+      },
+    });
+
+    expect(imported.songs).toHaveLength(1);
+    expect(imported.songs[0]?.title).toBe('为龙');
+    expect(bridge.importSongs).not.toHaveBeenCalled();
+    expect(bridge.importSongsBestEffort).not.toHaveBeenCalled();
+    await expect(service.list()).resolves.toEqual([imported]);
+  });
+
+  it('resolves portable playlist song references when adding them into an own playlist', async () => {
+    const { bridge, service } = createService();
+
+    const playlist = await service.addSong('古风', {
+      title: '为龙',
+      artist: '河图',
+      album: '为龙',
+      duration: 260,
+      cover_url: 'https://img.test/weilong.jpg',
+      stable_key: 'query:为龙:河图',
+    });
+
+    expect(bridge.resolveSearchSong).toHaveBeenCalledWith('为龙', '河图');
+    expect(bridge.importSongs).toHaveBeenCalledWith([kgSong]);
+    expect(playlist.songs[0]?.source_data).toEqual(kgSong.source_data);
+  });
+
+  it('syncs imported portable playlists into a native Songloft playlist on demand', async () => {
+    const bridge = {
+      importSongs: vi.fn(),
+      importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => ({
+        total: songs.length,
+        skipped: 0,
+        payloads: songs.map((song, index) => ({ id: index + 1, title: song.title })),
+        errors: [],
+      })),
+      resolveSearchSong: vi.fn(async (title: string) => (title === kgSong.title ? kgSong : null)),
+    } as unknown as BridgeService;
+    const nativePlaylists = {
+      create: vi.fn(async () => ({ id: 77 })),
+      addSongs: vi.fn(async () => undefined),
+    };
+    const service = new CustomPlaylistService(new CustomPlaylistStore(), bridge, nativePlaylists);
+    const imported = await service.importNetworkPlaylist({
+      source: 'kg',
+      sourceListId: 'kg_8888',
+      detail: {
+        name: '酷狗热歌',
+        cover_url: 'https://img.test/list.jpg',
+        songs: [kgSong],
+        total: 1,
+      },
+    });
+
+    await expect(service.syncToSongloftPlaylist(imported.id)).resolves.toMatchObject({
+      playlist: expect.objectContaining({ native_playlist_id: 77 }),
+      total: 1,
+      skipped: 0,
+    });
+
+    expect(bridge.resolveSearchSong).toHaveBeenCalledWith('为龙', '河图');
+    expect(bridge.importSongsBestEffort).toHaveBeenCalledWith([kgSong]);
+    expect(nativePlaylists.create).toHaveBeenCalledWith({ name: '酷狗热歌' });
+    expect(nativePlaylists.addSongs).toHaveBeenCalledWith(77, [expect.objectContaining({ title: '为龙' })]);
+    await expect(service.list()).resolves.toEqual([
+      expect.objectContaining({
+        id: imported.id,
+        native_playlist_id: 77,
+      }),
+    ]);
+  });
+
+  it('refreshes the existing playlist when importing the same source and upstream id twice', async () => {
+    const { bridge, service } = createService();
 
     const first = await service.importNetworkPlaylist({
       source: 'kw',
@@ -151,7 +262,9 @@ describe('CustomPlaylistService', () => {
     });
 
     expect(second.id).toBe(first.id);
-    expect(second.name).toBe('酷我歌单');
+    expect(second.name).toBe('新名字');
+    expect(second.songs.map((item) => item.title)).toEqual(['为龙']);
+    expect(bridge.importSongs).not.toHaveBeenCalled();
     await expect(service.list()).resolves.toHaveLength(1);
   });
 

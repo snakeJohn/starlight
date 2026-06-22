@@ -35,7 +35,7 @@ import { registerMusicHandlers } from './handlers/music';
 import { registerBridgeHandlers } from './handlers/bridge';
 import { registerCustomPlaylistHandlers } from './handlers/custom_playlists';
 import { registerHealthHandlers } from './handlers/health';
-import { setHostBaseUrl } from './utils/http';
+import { resolveHostBaseUrl } from './utils/http';
 
 const router = createRouter();
 
@@ -68,19 +68,21 @@ async function onInit(): Promise<void> {
   minaService = new MinaService(accountManager, configManager);
   playlistManagerMap = new PlaylistManagerMap(minaService, configManager);
 
-  // 从配置中读取服务器地址并设置宿主 API 基础 URL
+  // 自动设置宿主 API 基础 URL；旧配置存在时优先沿用。
   const pluginConfig = await configManager.getConfig();
-  if (pluginConfig.server_host) {
-    setHostBaseUrl(pluginConfig.server_host);
-    songloft.log.info('宿主 API 基础 URL 已设置: ' + pluginConfig.server_host);
-  }
+  const hostBaseUrl = await resolveHostBaseUrl(pluginConfig.server_host);
+  songloft.log.info('宿主 API 基础 URL 已设置: ' + hostBaseUrl);
 
   sourceManager = new SourceManager(new SourceStore());
   await sourceManager.init();
   runtimeManager = new RuntimeManager(sourceManager);
   platformRegistry = new PlatformRegistry();
-  bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService);
+  bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService, playlistManagerMap);
   customPlaylistService = new CustomPlaylistService(new CustomPlaylistStore(), bridgeService);
+  playlistManagerMap.setDynamicPlaylistOptions({
+    dynamicPlaylistLoader: (playlistId) => customPlaylistService.loadDynamicPlayerSongs(playlistId),
+    dynamicSongResolver: (song) => bridgeService.resolvePlayableSong(song.title, song.artist),
+  });
   indexingManager.setCustomPlaylistService(customPlaylistService);
 
   conversationMonitor = new ConversationMonitor(accountManager, configManager);
@@ -111,7 +113,7 @@ async function onInit(): Promise<void> {
   const miotRouter = prefixRouter(router, '/api/miot');
   registerAccountHandlers(miotRouter, accountManager, authService);
   registerAuthHandlers(miotRouter, authService, accountManager);
-  registerDeviceHandlers(miotRouter, minaService, accountManager);
+  registerDeviceHandlers(miotRouter, minaService, accountManager, playlistManagerMap);
   registerPlaylistHandlers(miotRouter, playlistManagerMap, minaService, configManager);
   registerConfigHandlers(miotRouter, configManager, conversationMonitor, scheduler, voiceEngine);
   registerConversationHandlers(miotRouter, conversationMonitor, configManager);

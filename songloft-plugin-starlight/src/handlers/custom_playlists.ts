@@ -1,6 +1,6 @@
 import type { HTTPResponse, Router } from '@songloft/plugin-sdk';
 import { CustomPlaylistService } from '../custom_playlists/service';
-import type { SongListDetail } from '../custom_playlists/types';
+import type { CustomPlaylistSong, SongListDetail } from '../custom_playlists/types';
 import type { PlatformRegistry } from '../music/platforms/registry';
 import type { MusicPlatformProvider } from '../music/platforms/types';
 import type { MusicPlatform, SearchResultSong } from '../music/types';
@@ -24,6 +24,9 @@ interface ImportBody {
   link?: unknown;
   url?: unknown;
 }
+
+const IMPORT_PAGE_SIZE = 100;
+const MAX_IMPORT_PAGES = 100;
 
 function handle(fn: () => unknown | Promise<unknown>, statusCode = 200): Promise<HTTPResponse> {
   return Promise.resolve()
@@ -72,22 +75,7 @@ function providerFor(platforms: PlatformRegistry, id: unknown): { provider: Musi
   return { provider, source };
 }
 
-function requireSong(value: unknown): SearchResultSong {
-  const song = objectField(value);
-  if (!song) {
-    throw new StarlightError('BAD_REQUEST', 'song is required');
-  }
-  const sourceData = objectField(song.source_data);
-  if (!sourceData) {
-    throw new StarlightError('BAD_REQUEST', 'song.source_data is required');
-  }
-  const platform = requireString(sourceData.platform, 'song.source_data.platform') as SearchResultSong['source_data']['platform'];
-  const quality = requireString(sourceData.quality, 'song.source_data.quality') as SearchResultSong['source_data']['quality'];
-  const songInfo = objectField(sourceData.songInfo);
-  if (!songInfo) {
-    throw new StarlightError('BAD_REQUEST', 'song.source_data.songInfo is required');
-  }
-
+function readSongBase(song: Record<string, unknown>): Omit<CustomPlaylistSong, 'stable_key'> {
   const rawDuration = song.duration;
   const duration =
     typeof rawDuration === 'number' && Number.isFinite(rawDuration)
@@ -102,6 +90,35 @@ function requireSong(value: unknown): SearchResultSong {
     album: stringishField(song.album),
     duration,
     cover_url: stringishField(song.cover_url),
+  };
+}
+
+function requireSong(value: unknown): SearchResultSong | CustomPlaylistSong {
+  const song = objectField(value);
+  if (!song) {
+    throw new StarlightError('BAD_REQUEST', 'song is required');
+  }
+  const base = readSongBase(song);
+  if (!base.title) {
+    throw new StarlightError('BAD_REQUEST', 'song.title is required');
+  }
+
+  const sourceData = objectField(song.source_data);
+  if (!sourceData) {
+    return {
+      ...base,
+      stable_key: `query:${base.title}:${base.artist}`,
+    };
+  }
+  const platform = requireString(sourceData.platform, 'song.source_data.platform') as SearchResultSong['source_data']['platform'];
+  const quality = requireString(sourceData.quality, 'song.source_data.quality') as SearchResultSong['source_data']['quality'];
+  const songInfo = objectField(sourceData.songInfo);
+  if (!songInfo) {
+    throw new StarlightError('BAD_REQUEST', 'song.source_data.songInfo is required');
+  }
+
+  return {
+    ...base,
     source_data: {
       platform,
       quality,
@@ -114,13 +131,41 @@ function importId(body: ImportBody): string {
   return requireString(body.id || body.sourceListId || body.source_list_id || body.link || body.url, 'id');
 }
 
+function numericTotal(value: unknown): number {
+  const total = Number(value);
+  return Number.isFinite(total) && total > 0 ? Math.floor(total) : 0;
+}
+
 async function loadSongListDetail(provider: MusicPlatformProvider, id: string): Promise<SongListDetail> {
-  const detail = await provider.songListDetail(id, 1, 100) as SongListDetail;
+  const first = await provider.songListDetail(id, 1, IMPORT_PAGE_SIZE) as SongListDetail;
+  const songs = Array.isArray(first.songs) ? [...first.songs] : [];
+  const total = numericTotal(first.total);
+
+  let page = 2;
+  while (
+    page <= MAX_IMPORT_PAGES
+    && (
+      (total > 0 && songs.length < total)
+      || (total === 0 && songs.length > 0 && songs.length % IMPORT_PAGE_SIZE === 0)
+    )
+  ) {
+    const detail = await provider.songListDetail(id, page, IMPORT_PAGE_SIZE) as SongListDetail;
+    const pageSongs = Array.isArray(detail.songs) ? detail.songs : [];
+    if (pageSongs.length === 0) {
+      break;
+    }
+    songs.push(...pageSongs);
+    if (pageSongs.length < IMPORT_PAGE_SIZE) {
+      break;
+    }
+    page += 1;
+  }
+
   return {
-    name: detail.name || id,
-    cover_url: detail.cover_url || detail.cover || detail.img || '',
-    songs: Array.isArray(detail.songs) ? detail.songs : [],
-    total: detail.total,
+    name: first.name || id,
+    cover_url: first.cover_url || first.cover || first.img || '',
+    songs: total > 0 ? songs.slice(0, total) : songs,
+    total: total || songs.length,
   };
 }
 
@@ -151,6 +196,9 @@ export function registerCustomPlaylistHandlers(
       const provider = providerFor(platforms, source).provider;
       return loadSongListDetail(provider, sourceListId);
     })));
+
+  router.post('/api/custom-playlists/:id/sync-songloft', async (_req, params) =>
+    handle(() => service.syncToSongloftPlaylist(requireString(params.id, 'id'))));
 
   router.post('/api/custom-playlists/:id/songs', async (req, params) =>
     handle(async () => {

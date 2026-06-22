@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 interface MusicActionsModule {
+  previewSong(song: Record<string, unknown>): Promise<unknown>;
   playSonglistOnSpeaker(songs: Array<Record<string, unknown>>): Promise<unknown>;
 }
 
@@ -29,6 +30,25 @@ function installToastDom() {
   vi.stubGlobal('window', {
     setTimeout: vi.fn(),
   });
+}
+
+function installMiniPlayerDom(audio: { play: ReturnType<typeof vi.fn> }) {
+  const node = { className: '', textContent: '', remove: vi.fn() };
+  const player = {
+    innerHTML: '',
+    querySelector: vi.fn((selector: string) => selector === 'audio' ? audio : null),
+  };
+  vi.stubGlobal('document', {
+    querySelector: vi.fn((selector: string) => selector === '#miniPlayer' ? player : null),
+    createElement: vi.fn(() => node),
+    body: {
+      appendChild: vi.fn(),
+    },
+  });
+  vi.stubGlobal('window', {
+    setTimeout: vi.fn(),
+  });
+  return player;
 }
 
 async function loadModules() {
@@ -68,6 +88,24 @@ describe('songlist speaker actions', () => {
       device_id: 'speaker-1',
       song: songs[0],
     });
+  });
+
+  it('starts page playback after resolving the preview URL', async () => {
+    const audio = { play: vi.fn(async () => undefined) };
+    const player = installMiniPlayerDom(audio);
+    const fetchMock = vi.fn(async () => okResponse({ url: 'https://audio.test/song.mp3' }) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const { music } = await loadModules();
+    const song = { title: '晴天', artist: '周杰伦', source_data: { platform: 'kw', quality: '320k', songInfo: {} } };
+
+    await music.previewSong(song);
+
+    expect(fetchMock).toHaveBeenCalledWith('api/bridge/preview-url', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ song }),
+    }));
+    expect(player.innerHTML).toContain('https://audio.test/song.mp3');
+    expect(audio.play).toHaveBeenCalled();
   });
 
   it('rejects empty songlists without calling bridge APIs', async () => {

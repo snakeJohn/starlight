@@ -83,15 +83,6 @@ export function registerPlaylistHandlers(
   // GET /playlists - 获取歌单列表
   router.get('/playlists', async (req: HTTPRequest) => {
     try {
-      const config = await configManager.getConfig();
-      if (!config.server_host) {
-        // 未配置服务器地址时返回空列表（附带提示信息），而不是 400 错误
-        return jsonResponse({ success: true, data: [], message: '未配置服务器地址，请先在「设置」中配置服务器地址。' });
-      }
-      if (isLoopbackAddress(config.server_host)) {
-        // 回环地址时返回空列表（附带提示信息），而不是 400 错误
-        return jsonResponse({ success: true, data: [], message: '服务器地址为本地回环地址（localhost/127.0.0.1），MIoT 智能音箱无法访问。请在「设置」中修改为局域网 IP 地址。' });
-      }
       const playlists = await songloft.playlists.list();
       return jsonResponse({ success: true, data: playlists });
     } catch (e: any) {
@@ -127,15 +118,6 @@ export function registerPlaylistHandlers(
       }
       if (!playlist_id) {
         return jsonResponse({ success: false, error: 'playlist_id is required' });
-      }
-
-      // 检查服务器地址
-      const config = await configManager.getConfig();
-      if (!config.server_host) {
-        return jsonResponse({ success: false, error: '未配置服务器地址，请先在「设置」中配置服务器地址。' });
-      }
-      if (isLoopbackAddress(config.server_host)) {
-        return jsonResponse({ success: false, error: '服务器地址为本地回环地址，MIoT 智能音箱无法访问。请在「设置」中修改为局域网 IP 地址。' });
       }
 
       const manager = await playlistManagerMap.getOrCreate(account_id, device_id);
@@ -226,15 +208,6 @@ export function registerPlaylistHandlers(
           });
         }
         // 如果 resumePlayback 失败，回退到重新播放
-      }
-
-      // 检查服务器地址
-      const config = await configManager.getConfig();
-      if (!config.server_host) {
-        return jsonResponse({ success: false, error: '未配置服务器地址，请先在「设置」中配置服务器地址。' });
-      }
-      if (isLoopbackAddress(config.server_host)) {
-        return jsonResponse({ success: false, error: '服务器地址为本地回环地址，MIoT 智能音箱无法访问。请在「设置」中修改为局域网 IP 地址。' });
       }
 
       // 处于 stopped 状态或 resumePlayback 失败，重新播放

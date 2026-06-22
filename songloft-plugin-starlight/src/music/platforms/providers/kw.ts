@@ -26,9 +26,22 @@ function parseKuwoTextJson(text: string): any {
   return JSON.parse(normalized);
 }
 
-function mapKwSong(item: any): SearchResultSong {
+function kwAlbumId(item: any): string {
+  return stringValue(item.ALBUMID || item.albumid || item.albumId);
+}
+
+function kwCover(item: any): string {
+  return stringValue(
+    item.pic
+    || item.albumpic
+    || item.prob_albumpic
+    || (item.web_albumpic_short ? `https://img4.kuwo.cn/star/albumcover/1000${item.web_albumpic_short}` : ''),
+  );
+}
+
+function mapKwSong(item: any, coverOverride = ''): SearchResultSong {
   const musicRid = stringValue(item.MUSICRID || item.rid || item.id).replace(/^MUSIC_/, '');
-  const cover = item.pic || item.albumpic || item.prob_albumpic || (item.web_albumpic_short ? `https://img4.kuwo.cn/star/albumcover/1000${item.web_albumpic_short}` : '');
+  const cover = coverOverride || kwCover(item);
   return normalizeSong('kw', {
     name: decodeHtml(item.SONGNAME || item.name),
     singer: decodeHtml(item.ARTIST || item.artist),
@@ -37,7 +50,7 @@ function mapKwSong(item: any): SearchResultSong {
     img: cover,
     musicId: musicRid,
     songmid: musicRid,
-    albumId: item.ALBUMID || item.albumid,
+    albumId: kwAlbumId(item),
     types: [],
   });
 }
@@ -55,6 +68,30 @@ function summarizeKwList(item: any): SongListSummary {
 export class KuwoProvider implements MusicPlatformProvider {
   readonly id = 'kw';
   readonly name = '酷我音乐';
+  private albumCoverCache = new Map<string, string>();
+
+  private async albumCover(albumId: string): Promise<string> {
+    if (!albumId) return '';
+    if (this.albumCoverCache.has(albumId)) {
+      return this.albumCoverCache.get(albumId) || '';
+    }
+    try {
+      const url = `http://search.kuwo.cn/r.s?stype=albuminfo&albumid=${encodeURIComponent(albumId)}&encoding=utf8&rformat=json`;
+      const text = await fetchText(url);
+      const body = parseKuwoTextJson(text);
+      const cover = stringValue(body.hts_img || body.img || body.pic);
+      this.albumCoverCache.set(albumId, cover);
+      return cover;
+    } catch {
+      this.albumCoverCache.set(albumId, '');
+      return '';
+    }
+  }
+
+  private async mapRankingSong(item: any): Promise<SearchResultSong> {
+    const cover = kwCover(item) || await this.albumCover(kwAlbumId(item));
+    return mapKwSong(item, cover);
+  }
 
   async search(keyword: string, page: number, pageSize: number): Promise<{ list: SearchResultSong[]; total: number }> {
     try {
@@ -83,7 +120,7 @@ export class KuwoProvider implements MusicPlatformProvider {
     }
   }
 
-  async songListDetail(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string }> {
+  async songListDetail(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string; cover_url?: string }> {
     try {
       const listId = id.startsWith('digest-') ? id.split('__')[1] : id.replace(/^.*\/playlist(?:_detail)?\/(\d+).*$/, '$1');
       const url = `http://nplserver.kuwo.cn/pl.svc?op=getlistinfo&pid=${encodeURIComponent(listId)}&pn=${page - 1}&rn=${pageSize}&encode=utf8&keyset=pl2012&identity=kuwo&pcmp4=1&vipver=MUSIC_9.0.5.0_W1&newver=1`;
@@ -92,6 +129,7 @@ export class KuwoProvider implements MusicPlatformProvider {
         songs: Array.isArray(body.musiclist) ? body.musiclist.map(mapKwSong) : [],
         total: numberValue(body.total),
         name: stringValue(body.title),
+        cover_url: stringValue(body.pic),
       };
     } catch {
       return { songs: [], total: 0, name: '' };
@@ -123,7 +161,7 @@ export class KuwoProvider implements MusicPlatformProvider {
       const body = await fetchJson<any>(url);
       const songs = Array.isArray(body.musiclist) ? body.musiclist : Array.isArray(body.list) ? body.list : [];
       return {
-        songs: songs.map(mapKwSong),
+        songs: await Promise.all(songs.map((song: any) => this.mapRankingSong(song))),
         total: numberValue(body.num || body.total || songs.length),
         name: BOARDS.find((board) => board.bangid === bangid)?.name || '',
       };

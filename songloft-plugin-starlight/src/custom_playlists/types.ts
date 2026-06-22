@@ -6,8 +6,8 @@ export interface CustomPlaylistSong {
   album: string;
   duration: number;
   cover_url: string;
-  source_name: string;
-  source_data: SearchResultSong['source_data'];
+  source_name?: string;
+  source_data?: SearchResultSong['source_data'];
   stable_key: string;
 }
 

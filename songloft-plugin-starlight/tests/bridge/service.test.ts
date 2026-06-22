@@ -9,6 +9,7 @@ import type { PlatformRegistry } from '../../src/music/platforms/registry';
 import type { MusicPlatformProvider } from '../../src/music/platforms/types';
 import type { RuntimeManager } from '../../src/music/runtime_manager';
 import type { SearchResultSong } from '../../src/music/types';
+import type { PlaylistManagerMap } from '../../src/player/manager';
 import type { MinaService } from '../../src/service/service';
 
 const song = {
@@ -21,6 +22,19 @@ const song = {
     platform: 'kw',
     quality: '320k',
     songInfo: { source: 'kw', name: 'Song', singer: 'Singer', album: 'Album', duration: 200, musicId: '123' },
+  },
+} satisfies SearchResultSong;
+
+const secondSong = {
+  ...song,
+  title: 'Second Song',
+  source_data: {
+    ...song.source_data,
+    songInfo: {
+      ...song.source_data.songInfo,
+      musicId: '456',
+      songmid: '456',
+    },
   },
 } satisfies SearchResultSong;
 
@@ -43,6 +57,7 @@ function request(method: string, path: string, body?: unknown): HTTPRequest {
 function createService(options: {
   url?: string | null;
   playResult?: boolean;
+  usePlaylistManager?: boolean;
   providers?: MusicPlatformProvider[];
 } = {}) {
   const runtimes = {
@@ -51,6 +66,12 @@ function createService(options: {
   const minaService = {
     playURL: vi.fn(async () => options.playResult ?? true),
   } as unknown as MinaService;
+  const playlistManager = {
+    playStandalone: vi.fn(async () => options.playResult ?? true),
+  };
+  const playlistManagerMap = {
+    getOrCreate: vi.fn(async () => playlistManager),
+  } as unknown as PlaylistManagerMap;
   const providers = options.providers ?? [];
   const platforms = {
     all: vi.fn(() => providers.map((provider) => ({ id: provider.id, name: provider.name }))),
@@ -58,9 +79,16 @@ function createService(options: {
   } as unknown as PlatformRegistry;
 
   return {
-    service: new BridgeService(platforms, runtimes, minaService),
+    service: new BridgeService(
+      platforms,
+      runtimes,
+      minaService,
+      options.usePlaylistManager ? playlistManagerMap : undefined,
+    ),
     runtimes,
     minaService,
+    playlistManager,
+    playlistManagerMap,
     platforms,
   };
 }
@@ -99,6 +127,34 @@ describe('BridgeService', () => {
     });
   });
 
+  it('imports songs best-effort and skips songs whose URLs cannot be resolved', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    globalThis.fetch = fetchMock;
+    const runtimes = {
+      getMusicUrl: vi.fn(async (_platform: string, _quality: string, songInfo: { musicId?: string }) =>
+        songInfo.musicId === '123' ? 'https://audio.test/song.mp3' : null),
+    } as unknown as RuntimeManager;
+    const platforms = {
+      all: vi.fn(() => []),
+      get: vi.fn(() => null),
+    } as unknown as PlatformRegistry;
+    const service = new BridgeService(platforms, runtimes, {} as MinaService);
+
+    await expect(service.importSongsBestEffort([song, secondSong])).resolves.toMatchObject({
+      total: 1,
+      skipped: 1,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const calls = fetchMock.mock.calls as unknown as Array<[string, { body: string }]>;
+    expect(JSON.parse(calls[0][1].body)).toEqual([
+      expect.objectContaining({
+        title: 'Song',
+        url: 'https://audio.test/song.mp3',
+      }),
+    ]);
+  });
+
   it('imports resolved remote songs into Songloft', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
     globalThis.fetch = fetchMock;
@@ -132,6 +188,54 @@ describe('BridgeService', () => {
     });
   });
 
+  it('includes upstream response text when Songloft remote import fails', async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      text: vi.fn(async () => '{"error":"plugin call failed"}'),
+    }) as unknown as Response);
+    const { service } = createService();
+
+    await expect(service.importSongs([song])).rejects.toMatchObject({
+      code: 'INTERNAL_ERROR',
+      message: '导入 Songloft 歌曲失败: 500 {"error":"plugin call failed"}',
+      details: {
+        upstream: 'songloft_remote_import',
+        status: 500,
+        body: '{"error":"plugin call failed"}',
+      },
+    });
+  });
+
+  it('retries duplicate-conflicting remote imports one by one and treats existing songs as imported', async () => {
+    const duplicateBody = '{"detail":"constraint failed: UNIQUE constraint failed: songs.plugin_entry_path, songs.dedup_key (2067)"}';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: vi.fn(async () => duplicateBody),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: vi.fn(async () => duplicateBody),
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+      } as Response);
+    globalThis.fetch = fetchMock;
+    const { service } = createService();
+
+    await expect(service.importSongs([song, secondSong])).resolves.toMatchObject({ total: 2 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const calls = fetchMock.mock.calls as unknown as Array<[string, { body: string }]>;
+    expect(JSON.parse(calls[0][1].body)).toHaveLength(2);
+    expect(JSON.parse(calls[1][1].body)).toHaveLength(1);
+    expect(JSON.parse(calls[2][1].body)).toHaveLength(1);
+  });
+
   it('returns an empty import result without fetching Songloft for an explicit empty song list', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
     globalThis.fetch = fetchMock;
@@ -153,6 +257,25 @@ describe('BridgeService', () => {
     expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/song.mp3');
   });
 
+  it('loads speaker songs into a temporary single-song playlist when a playlist manager is available', async () => {
+    const { service, minaService, playlistManager, playlistManagerMap } = createService({ usePlaylistManager: true });
+
+    await expect(service.playOnSpeaker('acc-1', 'dev-1', song)).resolves.toEqual({
+      url: 'https://audio.test/song.mp3',
+    });
+
+    expect(playlistManagerMap.getOrCreate).toHaveBeenCalledWith('acc-1', 'dev-1');
+    expect(playlistManager.playStandalone).toHaveBeenCalledWith([
+      expect.objectContaining({
+        title: 'Song',
+        artist: 'Singer',
+        duration: 200,
+        url: 'https://audio.test/song.mp3',
+      }),
+    ], 0, 'single');
+    expect(minaService.playURL).not.toHaveBeenCalled();
+  });
+
   it('throws DEVICE_OFFLINE when MIoT speaker playback fails', async () => {
     const { service } = createService({ playResult: false });
 
@@ -170,6 +293,48 @@ describe('BridgeService', () => {
 
     expect(emptyProvider.search).toHaveBeenCalledWith('Song', 1, 5);
     expect(hitProvider.search).toHaveBeenCalledWith('Song', 1, 5);
+  });
+
+  it('resolves a playable search song by title and artist across providers', async () => {
+    const emptyProvider = createProvider('kw', []);
+    const hitProvider = createProvider('kg', [secondSong]);
+    const { service, runtimes } = createService({ providers: [emptyProvider, hitProvider] });
+
+    await expect(service.resolveSearchSong('Second Song', 'Singer')).resolves.toBe(secondSong);
+
+    expect(emptyProvider.search).toHaveBeenCalledWith('Second Song Singer', 1, 5);
+    expect(hitProvider.search).toHaveBeenCalledWith('Second Song Singer', 1, 5);
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', secondSong.source_data.songInfo);
+  });
+
+  it('skips provider search hits whose playback URL cannot be resolved', async () => {
+    const brokenSong = {
+      ...song,
+      title: 'Broken Song',
+      source_data: {
+        ...song.source_data,
+        songInfo: { ...song.source_data.songInfo, musicId: 'broken' },
+      },
+    } satisfies SearchResultSong;
+    const workingSong = {
+      ...secondSong,
+      title: 'Broken Song',
+    } satisfies SearchResultSong;
+    const runtimes = {
+      getMusicUrl: vi.fn(async (_platform: string, _quality: string, songInfo: { musicId?: string }) =>
+        songInfo.musicId === 'broken' ? null : 'https://audio.test/fallback.mp3'),
+    } as unknown as RuntimeManager;
+    const providers = [createProvider('kw', [brokenSong]), createProvider('kg', [workingSong])];
+    const platforms = {
+      all: vi.fn(() => providers.map((provider) => ({ id: provider.id, name: provider.name }))),
+      get: vi.fn((id: string) => providers.find((provider) => provider.id === id) ?? null),
+    } as unknown as PlatformRegistry;
+    const service = new BridgeService(platforms, runtimes, {} as MinaService);
+
+    await expect(service.resolvePlayableSong('Broken Song', 'Singer')).resolves.toMatchObject({
+      title: 'Broken Song',
+      url: 'https://audio.test/fallback.mp3',
+    });
   });
 
   it('continues external search when one provider throws', async () => {

@@ -55,6 +55,7 @@ function createHarness() {
     delete: vi.fn(async (id: string) => ({ id })),
     addSong: vi.fn(async () => ({ ...playlist, songs: [] })),
     importNetworkPlaylist: vi.fn(async () => ({ ...playlist, source: 'kw', sourceListId: '3360244412' })),
+    syncToSongloftPlaylist: vi.fn(async (id: string) => ({ playlist: { ...playlist, id, native_playlist_id: 77 }, total: 1, skipped: 0, errors: [] })),
     refreshNetworkPlaylist: vi.fn(async (_id: string, loader: (source: 'kw', sourceListId: string) => Promise<unknown>) => {
       await loader('kw', '3360244412');
       return { ...playlist, source: 'kw', sourceListId: '3360244412' };
@@ -114,6 +115,25 @@ describe('registerCustomPlaylistHandlers', () => {
     expect(service.addSong).toHaveBeenCalledWith('古风', song);
   });
 
+  it('accepts portable imported playlist songs without source_data when adding to a custom playlist', async () => {
+    const { router, service } = createHarness();
+    const portableSong = {
+      title: '父亲',
+      artist: '筷子兄弟',
+      album: '',
+      duration: 300,
+      cover_url: 'https://img.test/fuqin.jpg',
+    };
+
+    const response = await router.handle(request('POST', '/api/custom-playlists/custom_1/songs', { song: portableSong }));
+
+    expect(response.statusCode).toBe(200);
+    expect(service.addSong).toHaveBeenCalledWith('古风', expect.objectContaining({
+      ...portableSong,
+      stable_key: 'query:父亲:筷子兄弟',
+    }));
+  });
+
   it('imports an LX Server-style network playlist by source and playlist id', async () => {
     const { router, service, provider } = createHarness();
 
@@ -134,6 +154,47 @@ describe('registerCustomPlaylistHandlers', () => {
         total: 1,
       },
     });
+  });
+
+  it('loads every songlist page when importing a large network playlist', async () => {
+    const { router, service, provider } = createHarness();
+    const songs = Array.from({ length: 323 }, (_, index) => ({
+      ...song,
+      title: `歌曲 ${index + 1}`,
+      source_data: {
+        ...song.source_data,
+        songInfo: {
+          ...song.source_data.songInfo,
+          musicId: `kw-${index + 1}`,
+          songmid: `kw-${index + 1}`,
+        },
+      },
+    }));
+    provider.songListDetail = vi.fn(async (_id: string, page: number, pageSize: number) => {
+      const start = (page - 1) * pageSize;
+      return {
+        name: '323 首歌单',
+        cover_url: 'https://img.test/list.jpg',
+        songs: songs.slice(start, start + pageSize),
+        total: songs.length,
+      };
+    });
+
+    const response = await router.handle(request('POST', '/api/custom-playlists/import', {
+      source_id: 'kw',
+      id: '3360244412',
+    }));
+
+    expect(response.statusCode).toBe(201);
+    expect(provider.songListDetail).toHaveBeenCalledTimes(4);
+    expect(provider.songListDetail).toHaveBeenNthCalledWith(1, '3360244412', 1, 100);
+    expect(provider.songListDetail).toHaveBeenNthCalledWith(4, '3360244412', 4, 100);
+    expect(service.importNetworkPlaylist).toHaveBeenCalledWith(expect.objectContaining({
+      detail: expect.objectContaining({
+        songs,
+        total: 323,
+      }),
+    }));
   });
 
   it('validates import source and link/id before loading details', async () => {
@@ -157,5 +218,19 @@ describe('registerCustomPlaylistHandlers', () => {
     expect(response.statusCode).toBe(200);
     expect(service.refreshNetworkPlaylist).toHaveBeenCalledWith('custom_1', expect.any(Function));
     expect(provider.songListDetail).toHaveBeenCalledWith('3360244412', 1, 100);
+  });
+
+  it('syncs imported playlists into Songloft playlists on demand', async () => {
+    const { router, service } = createHarness();
+
+    const response = await router.handle(request('POST', '/api/custom-playlists/imported_1/sync-songloft'));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response).data).toMatchObject({
+      playlist: { native_playlist_id: 77 },
+      total: 1,
+      skipped: 0,
+    });
+    expect(service.syncToSongloftPlaylist).toHaveBeenCalledWith('imported_1');
   });
 });

@@ -1,0 +1,76 @@
+name: Build and Release Starlight
+
+on:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build plugin and publish release
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: songloft-plugin-starlight
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: songloft-plugin-starlight/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Validate plugin
+        run: npm run validate
+
+      - name: Read package metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $manifest = Get-Content plugin.json | ConvertFrom-Json
+          $zipPath = "dist/$($manifest.entryPath).jsplugin.zip"
+          $zipHash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
+          "entry=$($manifest.entryPath)" >> $env:GITHUB_OUTPUT
+          "version=$($manifest.version)" >> $env:GITHUB_OUTPUT
+          "zip_path=$zipPath" >> $env:GITHUB_OUTPUT
+          "zip_hash=$zipHash" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: starlight-jsplugin
+          path: songloft-plugin-starlight/${{ steps.meta.outputs.zip_path }}
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: starlight-${{ github.sha }}
+          name: Starlight ${{ steps.meta.outputs.version }} (${{ github.sha }})
+          target_commitish: ${{ github.sha }}
+          files: songloft-plugin-starlight/${{ steps.meta.outputs.zip_path }}
+          fail_on_unmatched_files: true
+          body: |
+            Automated release for commit `${{ github.sha }}`.
+
+            - Plugin version: `${{ steps.meta.outputs.version }}`
+            - Entry: `${{ steps.meta.outputs.entry }}`
+            - zipHash: `${{ steps.meta.outputs.zip_hash }}`

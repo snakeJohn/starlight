@@ -44,4 +44,66 @@ describe('MiguProvider', () => {
     });
     expect((init.headers as Record<string, string>).sign).not.toBe('');
   });
+
+  test('resolves c.migu.cn short playlist links before loading songs', async () => {
+    const shortLink = 'https://c.migu.cn/00DbQM?ifrom=45400458358ff67ed138b9dbdc4c3c9b';
+    const finalUrl = 'https://h5.nf.migu.cn/app/v4/p/share/playlist/index.html?id=234913063&channel=0146921&appId=music';
+    const cryptoMd5 = vi.fn(() => 'migu-sign');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = String(input);
+      if (url === shortLink) {
+        const response = new Response('', { status: 200 });
+        Object.defineProperty(response, 'url', { configurable: true, value: finalUrl });
+        return response;
+      }
+      if (url.includes('playlist/song/v2.0')) {
+        return new Response(JSON.stringify({
+          data: {
+            totalCount: 1,
+            songList: [{
+              name: '稻花香',
+              singerList: [{ name: '周杰伦' }],
+              album: '魔杰座',
+              duration: 180,
+              img1: '/cover.jpg',
+              songId: 'mg-song-1',
+            }],
+          },
+        }));
+      }
+      if (url.includes('resource/playlist/v2.0')) {
+        expect(url).toContain('playlistId=234913063');
+        return new Response(JSON.stringify({
+          code: '000000',
+          data: {
+            title: '测试歌单',
+            imgItem: { img: 'https://img.test/mg-list.jpg' },
+            summary: '咪咕测试',
+          },
+        }));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: { md5: cryptoMd5 },
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await new MiguProvider().songListDetail(shortLink, 1, 30);
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain(shortLink);
+    expect(String(fetchMock.mock.calls[1][0])).toContain('playlistId=234913063');
+    expect(result).toMatchObject({
+      name: '测试歌单',
+      cover_url: 'https://img.test/mg-list.jpg',
+      total: 1,
+      songs: [{
+        title: '稻花香',
+        artist: '周杰伦',
+        cover_url: 'http://d.musicapp.migu.cn/cover.jpg',
+      }],
+    });
+  });
 });

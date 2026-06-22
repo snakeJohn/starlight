@@ -23,6 +23,13 @@ interface ExternalSearchBody {
   keyword?: unknown;
 }
 
+interface ResolvedPlayBody {
+  account_id?: unknown;
+  device_id?: unknown;
+  title?: unknown;
+  artist?: unknown;
+}
+
 function handle(fn: () => unknown | Promise<unknown>): Promise<HTTPResponse> {
   return Promise.resolve()
     .then(fn)
@@ -155,6 +162,17 @@ export function registerBridgeHandlers(router: Router, bridge: BridgeService): v
         requireString(body.account_id, 'account_id'),
         requireString(body.device_id, 'device_id'),
         requireSong(body.song),
+      );
+    }));
+
+  router.post('/api/bridge/play-resolved-url', async (req) =>
+    handle(() => {
+      const body = parseJsonBody<ResolvedPlayBody>(req);
+      return bridge.playResolvedOnSpeaker(
+        requireString(body.account_id, 'account_id'),
+        requireString(body.device_id, 'device_id'),
+        requireString(body.title, 'title'),
+        stringishField(body.artist),
       );
     }));
 

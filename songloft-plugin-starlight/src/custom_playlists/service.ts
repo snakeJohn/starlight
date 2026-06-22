@@ -1,8 +1,10 @@
 import type { BridgeService } from '../bridge/service';
 import { StarlightError } from '../system/errors';
 import type { MusicPlatform, SearchResultSong } from '../music/types';
+import type { PlayerSong } from '../player/manager';
 import { CustomPlaylistStore } from './store';
 import type { CustomPlaylist, CustomPlaylistSong, ImportNetworkPlaylistInput, SongListDetail } from './types';
+import { customPlaylistIndexFromSyntheticId, syntheticSongId } from './synthetic';
 
 type NativePlaylists = Record<string, unknown>;
 
@@ -22,14 +24,26 @@ function normalizeName(name: string): string {
   return name.trim();
 }
 
+function normalizeKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 function createId(prefix = 'custom'): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function stableSongTextKey(song: Pick<CustomPlaylistSong, 'title' | 'artist'>): string {
+  return `query:${normalizeKey(song.title)}:${normalizeKey(song.artist)}`;
 }
 
 function stableSongId(song: SearchResultSong): string {
   const info = song.source_data.songInfo;
   const id = info.musicId || info.songmid || info.hash || info.copyrightId || info.strMediaMid || `${song.title}:${song.artist}`;
   return `${song.source_data.platform}:${id}`;
+}
+
+function hasSourceData(song: SearchResultSong | CustomPlaylistSong): song is SearchResultSong {
+  return Boolean((song as SearchResultSong).source_data?.platform && (song as SearchResultSong).source_data?.songInfo);
 }
 
 function toPlaylistSong(song: SearchResultSong): CustomPlaylistSong {
@@ -42,6 +56,17 @@ function toPlaylistSong(song: SearchResultSong): CustomPlaylistSong {
     source_name: SOURCE_NAMES[song.source_data.platform] || song.source_data.platform,
     source_data: song.source_data,
     stable_key: stableSongId(song),
+  };
+}
+
+function toPortablePlaylistSong(song: SearchResultSong): CustomPlaylistSong {
+  return {
+    title: song.title,
+    artist: song.artist,
+    album: song.album,
+    duration: song.duration,
+    cover_url: song.cover_url,
+    stable_key: stableSongTextKey(song),
   };
 }
 
@@ -68,7 +93,7 @@ function nativeId(value: unknown): string | number | undefined {
 export class CustomPlaylistService {
   constructor(
     private readonly store: CustomPlaylistStore,
-    private readonly bridge: Pick<BridgeService, 'importSongs'>,
+    private readonly bridge: Pick<BridgeService, 'importSongs' | 'importSongsBestEffort' | 'resolveSearchSong'>,
     private readonly nativePlaylists: NativePlaylists = songloft.playlists as unknown as NativePlaylists,
   ) {}
 
@@ -103,18 +128,19 @@ export class CustomPlaylistService {
     return playlist;
   }
 
-  async addSong(playlistName: string, song: SearchResultSong): Promise<CustomPlaylist> {
+  async addSong(playlistName: string, song: SearchResultSong | CustomPlaylistSong): Promise<CustomPlaylist> {
     const playlist = await this.create(playlistName);
-    if (playlist.songs.some((item) => item.stable_key === stableSongId(song))) {
+    const resolved = await this.resolveSongForOwnPlaylist(song);
+    if (playlist.songs.some((item) => item.stable_key === stableSongId(resolved))) {
       return playlist;
     }
 
-    const imported = await this.bridge.importSongs([song]);
+    const imported = await this.bridge.importSongs([resolved]);
     const updated: CustomPlaylist = {
       ...playlist,
-      cover_url: playlist.cover_url || song.cover_url,
+      cover_url: playlist.cover_url || resolved.cover_url,
       updated_at: nowIso(),
-      songs: [...playlist.songs, toPlaylistSong(song)],
+      songs: [...playlist.songs, toPlaylistSong(resolved)],
     };
     await this.tryNativeAddSongs(updated, imported.payloads ?? []);
     await this.replace(updated);
@@ -152,10 +178,21 @@ export class CustomPlaylistService {
     const playlists = await this.store.loadAll();
     const existing = playlists.find((playlist) => playlist.source === input.source && playlist.sourceListId === sourceListId);
     if (existing) {
-      return existing;
+      const { native_playlist_id: _nativePlaylistId, ...existingWithoutNative } = existing;
+      const refreshed: CustomPlaylist = {
+        ...existingWithoutNative,
+        name: input.detail.name || existing.name,
+        cover_url: detailCover(input.detail) || existing.cover_url,
+        source: input.source,
+        source_name: SOURCE_NAMES[input.source] || input.source,
+        sourceListId,
+        updated_at: nowIso(),
+        songs: input.detail.songs.map(toPortablePlaylistSong),
+      };
+      await this.store.saveAll(playlists.map((playlist) => (playlist.id === existing.id ? refreshed : playlist)));
+      return refreshed;
     }
 
-    const imported = await this.bridge.importSongs(input.detail.songs);
     const timestamp = nowIso();
     const playlist: CustomPlaylist = {
       id: createId('imported'),
@@ -166,10 +203,8 @@ export class CustomPlaylistService {
       sourceListId,
       imported_at: timestamp,
       updated_at: timestamp,
-      songs: input.detail.songs.map(toPlaylistSong),
+      songs: input.detail.songs.map(toPortablePlaylistSong),
     };
-    playlist.native_playlist_id = await this.tryNativeCreate(playlist.name);
-    await this.tryNativeAddSongs(playlist, imported.payloads ?? []);
     playlists.push(playlist);
     await this.store.saveAll(playlists);
     return playlist;
@@ -186,22 +221,107 @@ export class CustomPlaylistService {
     }
 
     const detail = await detailLoader(existing.source, existing.sourceListId);
-    const imported = await this.bridge.importSongs(detail.songs);
+    const { native_playlist_id: _nativePlaylistId, ...existingWithoutNative } = existing;
     const refreshed: CustomPlaylist = {
-      ...existing,
+      ...existingWithoutNative,
       name: detail.name || existing.name,
       cover_url: detailCover(detail) || existing.cover_url,
       updated_at: nowIso(),
-      songs: detail.songs.map(toPlaylistSong),
+      songs: detail.songs.map(toPortablePlaylistSong),
     };
-    await this.tryNativeAddSongs(refreshed, imported.payloads ?? []);
     await this.store.saveAll(playlists.map((playlist) => (playlist.id === id ? refreshed : playlist)));
     return refreshed;
+  }
+
+  async loadDynamicPlayerSongs(playlistId: number): Promise<PlayerSong[] | null> {
+    const playlists = await this.store.loadAll();
+    const index = customPlaylistIndexFromSyntheticId(playlistId);
+    if (index < 0 || index >= playlists.length) {
+      return null;
+    }
+    const playlist = playlists[index];
+    if (playlist.native_playlist_id !== undefined) {
+      return null;
+    }
+    return playlist.songs.map((song, songIndex) => ({
+      id: syntheticSongId(index, songIndex),
+      type: 'dynamic',
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      duration: song.duration,
+      file_path: '',
+      url: '',
+      cover_path: '',
+      cover_url: song.cover_url,
+      lyric_url: '',
+      file_size: 0,
+      format: '',
+      bit_rate: 0,
+      sample_rate: 0,
+      is_live: false,
+      cache_hash: '',
+    }));
+  }
+
+  async syncToSongloftPlaylist(id: string): Promise<{
+    playlist: CustomPlaylist;
+    total: number;
+    skipped: number;
+    errors: Array<{ title: string; message: string }>;
+  }> {
+    const playlists = await this.store.loadAll();
+    const playlist = playlists.find((item) => item.id === id);
+    if (!playlist) {
+      throw new StarlightError('BAD_REQUEST', 'playlist not found');
+    }
+
+    const resolvedSongs: SearchResultSong[] = [];
+    const errors: Array<{ title: string; message: string }> = [];
+    for (const song of playlist.songs) {
+      try {
+        resolvedSongs.push(await this.resolveSongForOwnPlaylist(song));
+      } catch (error) {
+        errors.push({
+          title: song.title,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const imported = await this.bridge.importSongsBestEffort(resolvedSongs);
+    const nativePlaylistId = playlist.native_playlist_id ?? await this.tryNativeCreate(playlist.name);
+    const updated: CustomPlaylist = {
+      ...playlist,
+      ...(nativePlaylistId !== undefined ? { native_playlist_id: nativePlaylistId } : {}),
+      updated_at: nowIso(),
+    };
+    await this.tryNativeAddSongs(updated, imported.payloads ?? []);
+    await this.replace(updated);
+
+    return {
+      playlist: updated,
+      total: imported.total,
+      skipped: errors.length + imported.skipped,
+      errors: [...errors, ...imported.errors],
+    };
   }
 
   private async replace(updated: CustomPlaylist): Promise<void> {
     const playlists = await this.store.loadAll();
     await this.store.saveAll(playlists.map((playlist) => (playlist.id === updated.id ? updated : playlist)));
+  }
+
+  private async resolveSongForOwnPlaylist(song: SearchResultSong | CustomPlaylistSong): Promise<SearchResultSong> {
+    if (hasSourceData(song)) {
+      return song;
+    }
+
+    const resolved = await this.bridge.resolveSearchSong(song.title, song.artist);
+    if (!resolved) {
+      throw new StarlightError('PLAY_URL_RESOLVE_FAILED', `未找到可用音源：${song.title}${song.artist ? ` - ${song.artist}` : ''}`, true);
+    }
+    return resolved;
   }
 
   private async tryNativeCreate(name: string): Promise<string | number | undefined> {

@@ -28,12 +28,100 @@ const builtinPlatformNames = {
     wy: '网易云',
 };
 
+const pageSizes = {
+    search: 30,
+    songlist: 30,
+    songlistDetail: 50,
+    ranking: 50,
+    customPlaylistDetail: 50,
+};
+
+let artworkFallbackInstalled = false;
+
 export function sourceDisplayName(id) {
     return state.platforms.find(item => item.id === id)?.name || builtinPlatformNames[id] || id || '未知';
 }
 
 function platformName(id) {
     return sourceDisplayName(id);
+}
+
+function clampPage(page, totalPages) {
+    const value = Number(page);
+    if (!Number.isFinite(value)) return 1;
+    return Math.min(Math.max(1, Math.floor(value)), Math.max(1, totalPages));
+}
+
+function pageCount(total, pageSize) {
+    return Math.max(1, Math.ceil(Math.max(0, Number(total) || 0) / Math.max(1, Number(pageSize) || 1)));
+}
+
+export function renderPagination({ scope, page, total, pageSize }) {
+    const totalPages = pageCount(total, pageSize);
+    const currentPage = clampPage(page, totalPages);
+    const escapedScope = escapeHtml(scope);
+    return `
+        <nav class="pagination-bar" data-pagination="${escapedScope}" data-page="${currentPage}" data-total-pages="${totalPages}">
+            <button type="button" data-page-action="prev"${currentPage <= 1 ? ' disabled' : ''}>上一页</button>
+            <span>第 ${currentPage} / ${totalPages} 页</span>
+            <button type="button" data-page-action="next"${currentPage >= totalPages ? ' disabled' : ''}>下一页</button>
+            <label>
+                <span>指定页</span>
+                <input data-role="${escapedScope}-page-input" type="number" min="1" max="${totalPages}" value="${currentPage}">
+            </label>
+            <button type="button" data-page-action="jump">跳转</button>
+        </nav>
+    `;
+}
+
+function renderPaginationInto(role, options) {
+    const node = $(`[data-role="${role}"]`);
+    if (!node) return;
+    node.innerHTML = renderPagination(options);
+}
+
+function clearPagination(role) {
+    const node = $(`[data-role="${role}"]`);
+    if (node) node.innerHTML = '';
+}
+
+function pageFromPagination(root, action) {
+    const current = Number(root.dataset.page || 1);
+    const totalPages = Number(root.dataset.totalPages || 1);
+    if (action === 'prev') return clampPage(current - 1, totalPages);
+    if (action === 'next') return clampPage(current + 1, totalPages);
+    const input = root.querySelector(`[data-role="${root.dataset.pagination}-page-input"]`);
+    return clampPage(input?.value || current, totalPages);
+}
+
+function bindPagination(role, loadPage) {
+    const host = $(`[data-role="${role}"]`);
+    if (!host) return;
+    host.addEventListener('click', async event => {
+        const button = event.target.closest('[data-page-action]');
+        if (!button || button.disabled) return;
+        const root = button.closest('[data-pagination]');
+        if (!root) return;
+        button.disabled = true;
+        try {
+            await loadPage(pageFromPagination(root, button.dataset.pageAction));
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+    host.addEventListener('keydown', async event => {
+        if (event.key !== 'Enter' || !event.target.matches('input[data-role$="-page-input"]')) return;
+        event.preventDefault();
+        const root = event.target.closest('[data-pagination]');
+        if (!root) return;
+        try {
+            await loadPage(pageFromPagination(root, 'jump'));
+        } catch (error) {
+            toast(error.message, 'error');
+        }
+    });
 }
 
 function songTitle(song) {
@@ -57,30 +145,101 @@ function sourceMeta(song) {
         .join(' · ');
 }
 
+function decodeHtmlEntities(value) {
+    return String(value ?? '')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+}
+
+export function cleanDisplayText(value) {
+    return decodeHtmlEntities(value)
+        .replace(/\\\\u003c/gi, '<')
+        .replace(/\\\\u003e/gi, '>')
+        .replace(/\\u003c/gi, '<')
+        .replace(/\\u003e/gi, '>')
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function firstText(...values) {
+    for (const value of values) {
+        const text = cleanDisplayText(value);
+        if (text) return text;
+    }
+    return '';
+}
+
 export function mediaCoverUrl(item = {}) {
     const sourceData = item?.source_data || {};
-    return item.cover_url
-        || item.coverUrl
-        || item.img
-        || item.pic
-        || item.cover
-        || item.image
-        || item.albumPic
-        || sourceData.cover_url
-        || sourceData.coverUrl
-        || sourceData.img
-        || sourceData.pic
-        || sourceData.cover
-        || sourceData.image
-        || '';
+    const songInfo = sourceData.songInfo || {};
+    return firstText(
+        item.cover_url,
+        item.coverUrl,
+        item.picUrl,
+        item.pic_url,
+        item.imgurl,
+        item.imgUrl,
+        item.album_img,
+        item.album_sizable_cover,
+        item.albumPic,
+        item.img,
+        item.pic,
+        item.cover,
+        item.image,
+        sourceData.cover_url,
+        sourceData.coverUrl,
+        sourceData.picUrl,
+        sourceData.pic_url,
+        sourceData.imgurl,
+        sourceData.imgUrl,
+        sourceData.album_img,
+        sourceData.album_sizable_cover,
+        sourceData.albumPic,
+        sourceData.img,
+        sourceData.pic,
+        sourceData.cover,
+        sourceData.image,
+        songInfo.cover_url,
+        songInfo.coverUrl,
+        songInfo.picUrl,
+        songInfo.pic_url,
+        songInfo.imgurl,
+        songInfo.imgUrl,
+        songInfo.album_img,
+        songInfo.album_sizable_cover,
+        songInfo.albumPic,
+        songInfo.img,
+        songInfo.pic,
+        songInfo.cover,
+        songInfo.image,
+    ).replace('{size}', '400');
 }
 
 function renderArtwork(item, alt) {
     const cover = mediaCoverUrl(item);
     if (cover) {
-        return `<img class="media-artwork" src="${escapeHtml(cover)}" alt="${escapeHtml(alt)}">`;
+        return `<img class="media-artwork" src="${escapeHtml(cover)}" alt="" title="${escapeHtml(alt)}" loading="lazy" referrerpolicy="no-referrer">`;
     }
     return `<span class="media-artwork media-artwork-placeholder" aria-hidden="true">♪</span>`;
+}
+
+function installArtworkFallback() {
+    if (artworkFallbackInstalled || typeof document === 'undefined') return;
+    artworkFallbackInstalled = true;
+    document.addEventListener('error', event => {
+        const image = event.target;
+        if (!image?.matches?.('img.media-artwork')) return;
+        const placeholder = document.createElement('span');
+        placeholder.className = 'media-artwork media-artwork-placeholder';
+        placeholder.setAttribute('aria-hidden', 'true');
+        placeholder.textContent = '♪';
+        image.replaceWith(placeholder);
+    }, true);
 }
 
 function actionButton(action, index, text) {
@@ -101,8 +260,8 @@ export function renderSongRow(song, index, extraActions = '') {
                 <span class="row-meta">${escapeHtml(sourceMeta(song))}</span>
             </div>
             <div class="row-actions">
-                ${actionButton('preview', index, '试听')}
-                ${actionButton('import', index, '导入')}
+                ${actionButton('preview', index, '播放')}
+                ${actionButton('import', index, '导入 Songloft 歌曲库')}
                 ${actionButton('speaker', index, '音箱')}
                 ${customPlaylistAction(index)}
                 ${extraActions}
@@ -163,7 +322,7 @@ async function importSource(file) {
     toast('音源已导入，按需手动启用');
 }
 
-async function previewSong(song) {
+export async function previewSong(song) {
     const result = await api.post('/bridge/preview-url', { song });
     if (result?.url) {
         const player = $('#miniPlayer');
@@ -173,10 +332,18 @@ async function previewSong(song) {
                     <strong>${escapeHtml(songTitle(song))}</strong>
                     <span>${escapeHtml(songArtist(song))}</span>
                 </div>
-                <audio controls src="${escapeHtml(result.url)}"></audio>
+                <audio controls autoplay src="${escapeHtml(result.url)}"></audio>
             `;
+            const audio = player.querySelector?.('audio');
+            try {
+                await audio?.play?.();
+                toast('页面播放中');
+            } catch {
+                toast('浏览器阻止了自动播放，请点击底部播放器播放', 'error');
+            }
+        } else {
+            toast('页面播放器不可用', 'error');
         }
-        toast('试听地址已解析');
     }
     return result;
 }
@@ -190,10 +357,23 @@ async function importSongs(songs) {
 async function playOnSpeaker(song) {
     const payload = selectedDevicePayload();
     if (!payload.account_id || !payload.device_id) {
-        toast('请先在音箱页选择账号和设备', 'error');
-        return null;
+        throw new Error('请先在音箱页选择账号和设备');
     }
     const result = await api.post('/bridge/play-url', { ...payload, song });
+    toast('已发送到音箱播放');
+    return result;
+}
+
+async function playResolvedSongOnSpeaker(song) {
+    const payload = selectedDevicePayload();
+    if (!payload.account_id || !payload.device_id) {
+        throw new Error('请先在音箱页选择账号和设备');
+    }
+    const result = await api.post('/bridge/play-resolved-url', {
+        ...payload,
+        title: songTitle(song),
+        artist: songArtist(song),
+    });
     toast('已发送到音箱播放');
     return result;
 }
@@ -216,6 +396,23 @@ export async function addSongToCustomPlaylist(playlistId, song) {
     return result;
 }
 
+export async function addSelectedSongsToCustomPlaylist(playlistId, songs) {
+    if (!playlistId) {
+        throw new Error('请先选择歌单');
+    }
+    const selectedSongs = asArray(songs);
+    if (!selectedSongs.length) {
+        throw new Error('请先选择歌曲');
+    }
+    const results = [];
+    for (const song of selectedSongs) {
+        results.push(await api.post(`/custom-playlists/${encodeURIComponent(playlistId)}/songs`, { song }));
+    }
+    toast(`已加入 ${selectedSongs.length} 首歌曲`);
+    await loadCustomPlaylists().catch(error => toast(error.message, 'error'));
+    return results;
+}
+
 async function createCustomPlaylist(name) {
     const result = await api.post('/custom-playlists', { name });
     toast('歌单已创建');
@@ -230,10 +427,60 @@ export async function importCustomPlaylistFromSource(sourceId, listId) {
     return result;
 }
 
+export async function favoriteSongListFromSource(sourceId, listId) {
+    return importCustomPlaylistFromSource(sourceId, listId);
+}
+
 export async function refreshCustomPlaylist(playlistId) {
     const result = await api.post(`/custom-playlists/${encodeURIComponent(playlistId)}/refresh`);
     toast('歌单已刷新');
     await loadCustomPlaylists();
+    return result;
+}
+
+export async function syncCustomPlaylistToSongloft(playlistId) {
+    const result = await api.post(`/custom-playlists/${encodeURIComponent(playlistId)}/sync-songloft`);
+    toast(`已同步 ${result?.total ?? 0} 首到 Songloft 歌单${result?.skipped ? `，跳过 ${result.skipped} 首` : ''}`);
+    await loadCustomPlaylists().catch(error => toast(error.message, 'error'));
+    return result;
+}
+
+export function nextCustomPlaylistDetailId(currentId, playlistId) {
+    return currentId === playlistId ? '' : playlistId;
+}
+
+function nativePlaylistId(playlist) {
+    const id = Number(playlist?.native_playlist_id);
+    return Number.isFinite(id) && id !== 0 ? id : 0;
+}
+
+export function customPlaylistPlayableId(playlist) {
+    const nativeId = nativePlaylistId(playlist);
+    if (nativeId) return nativeId;
+    const index = (state.customPlaylists || []).findIndex(item => item.id === playlist?.id);
+    return index >= 0 ? -100000 - index : 0;
+}
+
+export async function playCustomPlaylistOnSpeaker(playlist) {
+    const payload = selectedDevicePayload();
+    if (!payload.account_id || !payload.device_id) {
+        throw new Error('请先在音箱页选择账号和设备');
+    }
+    const playlistId = customPlaylistPlayableId(playlist);
+    if (!playlistId) {
+        throw new Error('歌单不可播放，请刷新歌单列表后重试');
+    }
+    if (!Array.isArray(playlist?.songs) || playlist.songs.length === 0) {
+        throw new Error('歌单没有可播放歌曲');
+    }
+    const result = await api.post('/miot/player/play', {
+        ...payload,
+        playlist_id: playlistId,
+        start_index: 0,
+        play_mode: 'order',
+    });
+    setState({ playbackState: 'playing' });
+    toast('歌单已发送到音箱播放');
     return result;
 }
 
@@ -271,14 +518,66 @@ function selectedCustomPlaylistId() {
     return select?.value || state.customPlaylistId || '';
 }
 
+function isOwnCustomPlaylist(playlist) {
+    return Boolean(playlist?.id && !playlist?.source && !playlist?.sourceListId);
+}
+
+function targetCustomPlaylists() {
+    return (state.customPlaylists || []).filter(isOwnCustomPlaylist);
+}
+
+function currentViewedCustomPlaylist() {
+    return (state.customPlaylists || []).find(playlist => playlist.id === state.customPlaylistDetailId);
+}
+
 function playlistSongLabel(song) {
     return `${song?.title || '未知歌曲'} - ${song?.artist || '未知歌手'}${song?.source_name ? `（${song.source_name}）` : ''}`;
+}
+
+function customPlaylistSongMeta(song) {
+    const source = song?.source_name || platformName(song?.source_data?.platform);
+    return [source, song?.source_data?.quality, durationLabel(song?.duration)]
+        .filter(Boolean)
+        .join(' · ');
+}
+
+function renderCustomPlaylistSongRow(song, index) {
+    const hasSourceData = Boolean(song?.source_data?.platform);
+    return `
+        <article class="song-row media-row custom-playlist-song-row">
+            <label class="song-check" title="选择歌曲">
+                <input type="checkbox" data-role="custom-playlist-song-check" data-index="${index}">
+            </label>
+            ${renderArtwork(song, songTitle(song))}
+            <div class="row-main">
+                <strong>${escapeHtml(songTitle(song))}</strong>
+                <span>${escapeHtml(songArtist(song))} · ${escapeHtml(songAlbum(song))}</span>
+                <span class="row-meta">${escapeHtml(customPlaylistSongMeta(song))}</span>
+            </div>
+            <div class="row-actions">
+                ${hasSourceData ? `<button type="button" data-action="play-custom-playlist-song" data-index="${index}">播放</button>` : ''}
+                <button type="button" data-action="speaker-custom-playlist-song" data-index="${index}">音箱播放</button>
+                <button type="button" data-action="add-custom-playlist-song" data-index="${index}">加入歌单</button>
+            </div>
+        </article>
+    `;
+}
+
+function updateTargetPlaylistLabels() {
+    const selected = targetCustomPlaylists().find(playlist => playlist.id === state.customPlaylistId);
+    const label = selected ? selected.name : '未选择自建歌单';
+    $$('[data-role="target-playlist-label"]').forEach(node => {
+        node.textContent = label;
+    });
 }
 
 export function renderCustomPlaylistItem(playlist) {
     const songs = Array.isArray(playlist?.songs) ? playlist.songs : [];
     const meta = [playlist?.source_name, `${songs.length} 首`].filter(Boolean).join(' · ');
     const songPreview = songs.slice(0, 3).map(song => `<span>${escapeHtml(playlistSongLabel(song))}</span>`).join('');
+    const selected = playlist?.id && playlist.id === state.customPlaylistId;
+    const viewed = playlist?.id && playlist.id === state.customPlaylistDetailId;
+    const selectable = isOwnCustomPlaylist(playlist);
     return `
         <article class="data-row custom-playlist-row" data-playlist-id="${escapeHtml(playlist?.id || '')}">
             ${renderArtwork(playlist, playlist?.name || '歌单')}
@@ -288,33 +587,78 @@ export function renderCustomPlaylistItem(playlist) {
                 ${songPreview ? `<span class="row-meta">${songPreview}</span>` : ''}
             </div>
             <div class="row-actions">
+                <button type="button" class="${viewed ? 'selected-action' : ''}" data-action="view-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">${viewed ? '正在查看' : '查看歌曲'}</button>
                 ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="refresh-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">刷新</button>` : ''}
-                <button type="button" data-action="select-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">选择</button>
+                ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="sync-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">同步 Songloft 歌单</button>` : ''}
+                ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="play-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">播放歌单</button>` : ''}
+                ${selectable ? `<button type="button" class="${selected ? 'selected-action' : ''}" data-action="select-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">${selected ? '已选目标' : '设为目标'}</button>` : ''}
                 <button type="button" data-action="delete-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">删除</button>
             </div>
         </article>
     `;
 }
 
+export function renderCustomPlaylistDetail(playlist, page = state.customPlaylistDetailPage || 1) {
+    if (!playlist) {
+        return '<div class="empty-state">选择一个歌单后可查看歌曲明细，并将选中的歌曲加入自建歌单。</div>';
+    }
+    const songs = Array.isArray(playlist.songs) ? playlist.songs : [];
+    const meta = [playlist.source_name, `${songs.length} 首`].filter(Boolean).join(' · ');
+    const totalPages = pageCount(songs.length, pageSizes.customPlaylistDetail);
+    const currentPage = clampPage(page, totalPages);
+    const start = (currentPage - 1) * pageSizes.customPlaylistDetail;
+    const pageSongs = songs.slice(start, start + pageSizes.customPlaylistDetail);
+    return `
+        <section class="custom-playlist-detail-panel">
+            <div class="section-bar">
+                <div>
+                    <h2>${escapeHtml(playlist.name || '未命名歌单')}</h2>
+                    <span>${escapeHtml(meta)}</span>
+                </div>
+                ${songs.length ? `<button class="primary-button" type="button" data-action="add-selected-custom-playlist-songs">加入选中歌曲</button>` : ''}
+            </div>
+            ${songs.length
+                ? `<div class="list-stack tight">${pageSongs.map((song, index) => renderCustomPlaylistSongRow(song, start + index)).join('')}</div>
+                    ${renderPagination({ scope: 'custom-playlist-detail', page: currentPage, total: songs.length, pageSize: pageSizes.customPlaylistDetail })}`
+                : '<div class="empty-state">这个歌单还没有歌曲。</div>'}
+        </section>
+    `;
+}
+
+function renderCustomPlaylistDetailInto() {
+    const detail = $('[data-role="custom-playlist-detail"]');
+    if (!detail) return;
+    detail.innerHTML = state.customPlaylistDetailId
+        ? renderCustomPlaylistDetail(currentViewedCustomPlaylist())
+        : '';
+}
+
 function renderCustomPlaylists() {
     const list = $('[data-role="custom-playlist-list"]');
     const select = $('[data-role="custom-playlist-select"]');
     const playlists = state.customPlaylists || [];
+    const targetPlaylists = playlists.filter(isOwnCustomPlaylist);
     if (select) {
-        select.innerHTML = playlists.length
-            ? playlists.map(playlist => `<option value="${escapeHtml(playlist.id)}">${escapeHtml(playlist.name)}</option>`).join('')
-            : '<option value="">无可用歌单</option>';
-        if (state.customPlaylistId && playlists.some(playlist => playlist.id === state.customPlaylistId)) {
-            select.value = state.customPlaylistId;
-        } else if (playlists[0]) {
-            select.value = playlists[0].id;
-            setState({ customPlaylistId: playlists[0].id });
+        select.innerHTML = targetPlaylists.length
+            ? targetPlaylists.map(playlist => `<option value="${escapeHtml(playlist.id)}">${escapeHtml(playlist.name)}</option>`).join('')
+            : '<option value="">请先新建自建歌单</option>';
+        const nextPlaylistId = state.customPlaylistId && targetPlaylists.some(playlist => playlist.id === state.customPlaylistId)
+            ? state.customPlaylistId
+            : targetPlaylists[0]?.id || '';
+        select.value = nextPlaylistId;
+        if (nextPlaylistId !== state.customPlaylistId) {
+            setState({ customPlaylistId: nextPlaylistId });
         }
+    }
+    if (state.customPlaylistDetailId && !playlists.some(playlist => playlist.id === state.customPlaylistDetailId)) {
+        setState({ customPlaylistDetailId: '', customPlaylistDetailPage: 1 });
     }
     if (!list) return;
     list.innerHTML = playlists.length
         ? playlists.map(playlist => renderCustomPlaylistItem(playlist)).join('')
         : '<div class="empty-state">暂无自建歌单。</div>';
+    renderCustomPlaylistDetailInto();
+    updateTargetPlaylistLabels();
 }
 
 async function loadCustomPlaylists() {
@@ -329,6 +673,7 @@ function bindCustomPlaylists() {
     const importForm = $('[data-role="custom-playlist-import-form"]');
     const select = $('[data-role="custom-playlist-select"]');
     const list = $('[data-role="custom-playlist-list"]');
+    const detail = $('[data-role="custom-playlist-detail"]');
 
     createForm?.addEventListener('submit', async event => {
         event.preventDefault();
@@ -364,6 +709,7 @@ function bindCustomPlaylists() {
 
     select?.addEventListener('change', () => {
         setState({ customPlaylistId: select.value });
+        updateTargetPlaylistLabels();
     });
 
     list?.addEventListener('click', async event => {
@@ -376,9 +722,24 @@ function bindCustomPlaylists() {
             if (button.dataset.action === 'select-custom-playlist') {
                 setState({ customPlaylistId: playlistId });
                 renderCustomPlaylists();
+                updateTargetPlaylistLabels();
+            }
+            if (button.dataset.action === 'view-custom-playlist') {
+                setState({
+                    customPlaylistDetailId: nextCustomPlaylistDetailId(state.customPlaylistDetailId, playlistId),
+                    customPlaylistDetailPage: 1,
+                });
+                renderCustomPlaylists();
             }
             if (button.dataset.action === 'refresh-custom-playlist') {
                 await refreshCustomPlaylist(playlistId);
+            }
+            if (button.dataset.action === 'sync-custom-playlist') {
+                await syncCustomPlaylistToSongloft(playlistId);
+            }
+            if (button.dataset.action === 'play-custom-playlist') {
+                const playlist = (state.customPlaylists || []).find(item => item.id === playlistId);
+                await playCustomPlaylistOnSpeaker(playlist);
             }
             if (button.dataset.action === 'delete-custom-playlist') {
                 await deleteCustomPlaylist(playlistId);
@@ -390,9 +751,85 @@ function bindCustomPlaylists() {
         }
     });
 
+    detail?.addEventListener('click', async event => {
+        const pageButton = event.target.closest('[data-page-action]');
+        if (pageButton && !pageButton.disabled) {
+            const root = pageButton.closest('[data-pagination]');
+            if (!root) return;
+            setState({ customPlaylistDetailPage: pageFromPagination(root, pageButton.dataset.pageAction) });
+            renderCustomPlaylistDetailInto();
+            return;
+        }
+
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const playlist = currentViewedCustomPlaylist();
+        if (!playlist) return;
+        const songs = Array.isArray(playlist.songs) ? playlist.songs : [];
+        if (!['play-custom-playlist-song', 'speaker-custom-playlist-song', 'add-custom-playlist-song', 'add-selected-custom-playlist-songs'].includes(button.dataset.action)) return;
+        button.disabled = true;
+        try {
+            if (button.dataset.action === 'play-custom-playlist-song') {
+                const song = songs[Number(button.dataset.index)];
+                if (song) await previewSong(song);
+            }
+            if (button.dataset.action === 'speaker-custom-playlist-song') {
+                const song = songs[Number(button.dataset.index)];
+                if (song) {
+                    if (song?.source_data?.platform) await playOnSpeaker(song);
+                    else await playResolvedSongOnSpeaker(song);
+                }
+            }
+            if (button.dataset.action === 'add-custom-playlist-song') {
+                const song = songs[Number(button.dataset.index)];
+                if (song) await addSelectedSongsToCustomPlaylist(selectedCustomPlaylistId(), [song]);
+            }
+            if (button.dataset.action === 'add-selected-custom-playlist-songs') {
+                const selectedSongs = $$('[data-role="custom-playlist-song-check"]:checked', detail)
+                    .map(input => songs[Number(input.dataset.index)])
+                    .filter(Boolean);
+                await addSelectedSongsToCustomPlaylist(selectedCustomPlaylistId(), selectedSongs);
+            }
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    detail?.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' || !event.target.matches('input[data-role="custom-playlist-detail-page-input"]')) return;
+        event.preventDefault();
+        const root = event.target.closest('[data-pagination]');
+        if (!root) return;
+        setState({ customPlaylistDetailPage: pageFromPagination(root, 'jump') });
+        renderCustomPlaylistDetailInto();
+    });
+
     $('[data-action="refresh-custom-playlists"]')?.addEventListener('click', () => {
         loadCustomPlaylists().catch(error => toast(error.message, 'error'));
     });
+}
+
+async function loadSearchPage(page = 1) {
+    const list = $('[data-role="search-results"]');
+    const query = state.searchQuery;
+    if (!list || !query?.keyword) return;
+    list.innerHTML = '<div class="empty-state">正在搜索...</div>';
+    const data = await api.post('/music/search', {
+        keyword: query.keyword,
+        source_id: query.platform,
+        page,
+        page_size: pageSizes.search,
+    });
+    const songs = asArray(data);
+    const total = resultCount(data);
+    setState({ searchResults: songs, searchPage: page, searchTotal: total, platform: query.platform, quality: query.quality });
+    $('[data-role="search-total"]').textContent = String(total);
+    list.innerHTML = songs.length
+        ? songs.map((song, index) => renderSongRow(song, index)).join('')
+        : '<div class="empty-state">没有找到匹配歌曲。</div>';
+    renderPaginationInto('search-pagination', { scope: 'search', page, total, pageSize: pageSizes.search });
 }
 
 function bindSearch() {
@@ -411,28 +848,25 @@ function bindSearch() {
         const body = Object.fromEntries(new FormData(form).entries());
         if (!body.keyword?.trim()) return;
         submit.disabled = true;
-        list.innerHTML = '<div class="empty-state">正在搜索...</div>';
         try {
-            const data = await api.post('/music/search', {
-                keyword: body.keyword.trim(),
-                source_id: body.source_id || state.platform,
-                page: 1,
-                page_size: 30,
+            setState({
+                searchQuery: {
+                    keyword: body.keyword.trim(),
+                    platform: body.source_id || state.platform,
+                    quality: body.quality || state.quality,
+                },
             });
-            const songs = asArray(data);
-            setState({ searchResults: songs, platform: body.source_id || state.platform, quality: body.quality || state.quality });
-            $('[data-role="search-total"]').textContent = String(resultCount(data));
-            list.innerHTML = songs.length
-                ? songs.map((song, index) => renderSongRow(song, index)).join('')
-                : '<div class="empty-state">没有找到匹配歌曲。</div>';
+            await loadSearchPage(1);
         } catch (error) {
             list.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+            clearPagination('search-pagination');
             toast(error.message, 'error');
         } finally {
             submit.disabled = false;
         }
     });
 
+    bindPagination('search-pagination', loadSearchPage);
     bindSongActions(list, index => state.searchResults[index]);
 }
 
@@ -480,7 +914,7 @@ function bindSources() {
 }
 
 function songListTitle(item) {
-    return item?.name || item?.title || item?.songlist_name || '未命名歌单';
+    return cleanDisplayText(item?.name || item?.title || item?.songlist_name) || '未命名歌单';
 }
 
 function songListId(item) {
@@ -489,24 +923,29 @@ function songListId(item) {
 
 function songListSummary(item) {
     const playCount = item?.play_count || item?.playCount || item?.total || item?.count;
-    return item?.author
-        || item?.creator
-        || item?.desc
-        || item?.description
-        || item?.tag
-        || (playCount ? `${playCount} 次播放` : '')
-        || '';
+    return firstText(
+        item?.author,
+        item?.creator,
+        item?.desc,
+        item?.description,
+        item?.tag,
+        playCount ? `${playCount} 次播放` : '',
+    );
 }
 
 export function renderSongListItem(item, index) {
     return `
-        <button class="songlist-row media-row" type="button" data-action="songlist-detail" data-index="${index}">
+        <article class="songlist-row media-row" data-index="${index}">
             ${renderArtwork(item, songListTitle(item))}
-            <span class="row-main">
+            <div class="row-main">
                 <strong>${escapeHtml(songListTitle(item))}</strong>
                 <span>${escapeHtml(songListSummary(item))}</span>
-            </span>
-        </button>
+            </div>
+            <div class="row-actions">
+                <button type="button" data-action="songlist-detail" data-index="${index}">查看</button>
+                <button type="button" data-action="favorite-songlist" data-index="${index}">收藏</button>
+            </div>
+        </article>
     `;
 }
 
@@ -525,14 +964,45 @@ async function loadSongListDetail(item) {
         toast('歌单缺少 ID，无法解析', 'error');
         return;
     }
-    const data = await api.get(`/music/songlist/detail?source_id=${encodeURIComponent(platform)}&id=${encodeURIComponent(id)}&page=1&page_size=50`);
+    setState({
+        songlistDetailContext: {
+            id,
+            platform,
+            title: songListTitle(item),
+        },
+    });
+    await loadSongListDetailPage(1);
+}
+
+async function loadSongListDetailPage(page = 1) {
+    const context = state.songlistDetailContext;
+    if (!context?.id) return;
+    const data = await api.get(`/music/songlist/detail?source_id=${encodeURIComponent(context.platform)}&id=${encodeURIComponent(context.id)}&page=${page}&page_size=${pageSizes.songlistDetail}`);
     const songs = asArray(data);
-    setState({ songlistSongs: songs });
-    $('[data-role="songlist-title"]').textContent = songListTitle(item);
+    const total = resultCount(data);
+    setState({ songlistSongs: songs, songlistDetailPage: page, songlistDetailTotal: total });
+    $('[data-role="songlist-title"]').textContent = context.title;
     const detail = $('[data-role="songlist-detail"]');
     detail.innerHTML = songs.length
         ? `${songs.map((song, index) => renderSongRow(song, index)).join('')}<div class="inline-actions"><button class="primary-button" type="button" data-action="play-songlist">播放整个歌单</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button></div>`
         : '<div class="empty-state">歌单没有可显示歌曲。</div>';
+    renderPaginationInto('songlist-detail-pagination', { scope: 'songlist-detail', page, total, pageSize: pageSizes.songlistDetail });
+}
+
+async function loadSongListsPage(page = 1) {
+    const list = $('[data-role="songlist-list"]');
+    const query = state.songlistQuery;
+    if (!list || !query) return;
+    list.innerHTML = '<div class="empty-state">正在加载...</div>';
+    const data = query.mode === 'recommended'
+        ? await api.get(`/music/songlist/list?source_id=${encodeURIComponent(query.platform)}&page=${page}&page_size=${pageSizes.songlist}`)
+        : await api.post('/music/songlist/search', { keyword: query.keyword || '热门', source_id: query.platform, page, page_size: pageSizes.songlist });
+    const items = asArray(data);
+    const total = resultCount(data);
+    setState({ songlists: items, songlistPage: page, songlistTotal: total, platform: query.platform });
+    $('[data-role="songlist-total"]').textContent = String(total);
+    renderSongLists(items);
+    renderPaginationInto('songlist-pagination', { scope: 'songlist', page, total, pageSize: pageSizes.songlist });
 }
 
 function bindSongLists() {
@@ -547,32 +1017,56 @@ function bindSongLists() {
         const body = Object.fromEntries(new FormData(form).entries());
         const platform = body.source_id || state.platform;
         const mode = submitter?.value || 'search';
-        list.innerHTML = '<div class="empty-state">正在加载...</div>';
+        const title = $('[data-role="songlist-title"]');
         try {
-            const data = mode === 'recommended'
-                ? await api.get(`/music/songlist/list?source_id=${encodeURIComponent(platform)}&page=1&page_size=30`)
-                : await api.post('/music/songlist/search', { keyword: body.keyword || '热门', source_id: platform, page: 1, page_size: 30 });
-            const items = asArray(data);
-            setState({ songlists: items, platform });
-            $('[data-role="songlist-total"]').textContent = String(resultCount(data));
-            renderSongLists(items);
+            setState({
+                songlistQuery: {
+                    mode,
+                    platform,
+                    keyword: String(body.keyword || '热门'),
+                },
+                songlistDetailContext: null,
+                songlistSongs: [],
+            });
+            if (title) title.textContent = '详情';
+            detail.innerHTML = '';
+            clearPagination('songlist-detail-pagination');
+            await loadSongListsPage(1);
         } catch (error) {
             list.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+            clearPagination('songlist-pagination');
             toast(error.message, 'error');
         }
     });
 
     list.addEventListener('click', async event => {
-        const button = event.target.closest('[data-action="songlist-detail"]');
+        const button = event.target.closest('[data-action="songlist-detail"], [data-action="favorite-songlist"]');
         if (!button) return;
+        const item = state.songlists?.[Number(button.dataset.index)];
+        if (!item) return;
+        const id = songListId(item);
+        const platform = state.songlistQuery?.platform || $('[data-role="songlist-platform"]')?.value || state.platform;
         try {
-            await loadSongListDetail(state.songlists?.[Number(button.dataset.index)]);
+            if (button.dataset.action === 'songlist-detail') {
+                await loadSongListDetail(item);
+                return;
+            }
+            if (!id) {
+                toast('歌单缺少 ID，无法收藏', 'error');
+                return;
+            }
+            button.disabled = true;
+            await favoriteSongListFromSource(platform, id);
         } catch (error) {
             toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
         }
     });
 
     bindSongActions(detail, index => state.songlistSongs?.[index]);
+    bindPagination('songlist-pagination', loadSongListsPage);
+    bindPagination('songlist-detail-pagination', loadSongListDetailPage);
     detail.addEventListener('click', async event => {
         const playButton = event.target.closest('[data-action="play-songlist"]');
         const importButton = event.target.closest('[data-action="import-songlist"]');
@@ -614,6 +1108,22 @@ export function renderRankingBoard(board, index) {
     `;
 }
 
+async function loadRankingPage(page = 1) {
+    const context = state.rankingContext;
+    const songsNode = $('[data-role="ranking-songs"]');
+    if (!context?.id || !songsNode) return;
+    songsNode.innerHTML = '<div class="empty-state">正在加载歌曲...</div>';
+    const data = await api.get(`/music/leaderboard/list?source_id=${encodeURIComponent(context.platform)}&id=${encodeURIComponent(context.id)}&page=${page}&page_size=${pageSizes.ranking}`);
+    const songs = asArray(data);
+    const total = resultCount(data);
+    setState({ rankingSongs: songs, rankingPage: page, rankingTotal: total });
+    $('[data-role="ranking-title"]').textContent = context.title;
+    songsNode.innerHTML = songs.length
+        ? songs.map((song, index) => renderSongRow(song, index)).join('')
+        : '<div class="empty-state">榜单没有可显示歌曲。</div>';
+    renderPaginationInto('ranking-pagination', { scope: 'ranking', page, total, pageSize: pageSizes.ranking });
+}
+
 function bindRankings() {
     const boardsNode = $('[data-role="ranking-list"]');
     const songsNode = $('[data-role="ranking-songs"]');
@@ -625,10 +1135,12 @@ function bindRankings() {
         try {
             const data = await api.get(`/music/leaderboard/boards?source_id=${encodeURIComponent(platform)}`);
             const boards = asArray(data);
-            setState({ rankingBoards: boards, platform });
+            setState({ rankingBoards: boards, rankingContext: null, rankingSongs: [], platform });
             boardsNode.innerHTML = boards.length
                 ? boards.map((board, index) => renderRankingBoard(board, index)).join('')
                 : '<div class="empty-state">暂无榜单。</div>';
+            songsNode.innerHTML = '';
+            clearPagination('ranking-pagination');
         } catch (error) {
             boardsNode.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
             toast(error.message, 'error');
@@ -645,25 +1157,28 @@ function bindRankings() {
             toast('榜单缺少 ID，无法加载', 'error');
             return;
         }
-        songsNode.innerHTML = '<div class="empty-state">正在加载歌曲...</div>';
         try {
-            const data = await api.get(`/music/leaderboard/list?source_id=${encodeURIComponent(platform)}&id=${encodeURIComponent(id)}&page=1&page_size=50`);
-            const songs = asArray(data);
-            setState({ rankingSongs: songs });
-            $('[data-role="ranking-title"]').textContent = boardTitle(board);
-            songsNode.innerHTML = songs.length
-                ? songs.map((song, index) => renderSongRow(song, index)).join('')
-                : '<div class="empty-state">榜单没有可显示歌曲。</div>';
+            setState({
+                rankingContext: {
+                    id,
+                    platform,
+                    title: boardTitle(board),
+                },
+            });
+            await loadRankingPage(1);
         } catch (error) {
             songsNode.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+            clearPagination('ranking-pagination');
             toast(error.message, 'error');
         }
     });
 
+    bindPagination('ranking-pagination', loadRankingPage);
     bindSongActions(songsNode, index => state.rankingSongs?.[index]);
 }
 
 export async function initMusicUI() {
+    installArtworkFallback();
     bindSearch();
     bindSources();
     bindSongLists();
