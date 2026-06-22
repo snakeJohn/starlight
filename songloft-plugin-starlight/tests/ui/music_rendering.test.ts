@@ -1,0 +1,76 @@
+import { describe, expect, it } from 'vitest';
+
+interface MusicRenderingModule {
+  mediaCoverUrl(item: Record<string, unknown>): string;
+  renderSongRow(song: Record<string, unknown>, index: number, extraActions?: string): string;
+  renderSongListItem(item: Record<string, unknown>, index: number): string;
+  renderRankingBoard(board: Record<string, unknown>, index: number): string;
+}
+
+async function loadMusicModule(): Promise<MusicRenderingModule> {
+  return await import('../../static/js/music.js') as MusicRenderingModule;
+}
+
+describe('music media rendering', () => {
+  it('renders song rows with cover artwork and without stable provider ids', async () => {
+    const { renderSongRow } = await loadMusicModule();
+
+    const html = renderSongRow({
+      title: '晴天',
+      artist: '周杰伦',
+      album: '叶惠美',
+      duration: 269,
+      cover_url: 'https://img.test/song.jpg',
+      source_data: {
+        platform: 'kw',
+        songmid: '228908',
+        quality: '320k',
+      },
+    }, 0);
+
+    expect(html).toContain('https://img.test/song.jpg');
+    expect(html).toContain('晴天');
+    expect(html).toContain('周杰伦');
+    expect(html).not.toContain('228908');
+  });
+
+  it('renders discovered songlists with cover artwork while hiding raw ids', async () => {
+    const { renderSongListItem } = await loadMusicModule();
+
+    const html = renderSongListItem({
+      id: '3360244412',
+      name: '华语热歌',
+      cover_url: 'https://img.test/list.jpg',
+      creator: '洛雪精选',
+    }, 0);
+
+    expect(html).toContain('https://img.test/list.jpg');
+    expect(html).toContain('华语热歌');
+    expect(html).toContain('洛雪精选');
+    expect(html).not.toContain('3360244412');
+  });
+
+  it('renders ranking boards with a placeholder and hides provider ids', async () => {
+    const { renderRankingBoard } = await loadMusicModule();
+
+    const html = renderRankingBoard({
+      id: 'kw__16',
+      name: '酷我热歌榜',
+      desc: '每日更新',
+    }, 0);
+
+    expect(html).toContain('media-artwork');
+    expect(html).toContain('酷我热歌榜');
+    expect(html).toContain('每日更新');
+    expect(html).not.toContain('kw__16');
+  });
+
+  it('normalizes common cover fields from LX source results', async () => {
+    const { mediaCoverUrl } = await loadMusicModule();
+
+    expect(mediaCoverUrl({ img: 'https://img.test/img.jpg' })).toBe('https://img.test/img.jpg');
+    expect(mediaCoverUrl({ pic: 'https://img.test/pic.jpg' })).toBe('https://img.test/pic.jpg');
+    expect(mediaCoverUrl({ cover: 'https://img.test/cover.jpg' })).toBe('https://img.test/cover.jpg');
+    expect(mediaCoverUrl({ source_data: { img: 'https://img.test/source.jpg' } })).toBe('https://img.test/source.jpg');
+  });
+});

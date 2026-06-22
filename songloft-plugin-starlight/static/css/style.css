@@ -403,6 +403,30 @@ textarea:focus {
     align-items: center;
 }
 
+.media-row {
+    min-height: 68px;
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.media-artwork {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius);
+    object-fit: cover;
+    background: var(--surface-muted);
+    border: 1px solid var(--surface-line);
+}
+
+.media-artwork-placeholder {
+    display: inline-grid;
+    place-items: center;
+    color: var(--muted);
+    font-weight: 800;
+}
+
 .song-row,
 .source-row,
 .data-row,
@@ -786,6 +810,15 @@ legend {
     .song-row,
     .source-row {
         grid-template-columns: minmax(0, 1fr);
+    }
+
+    .media-row {
+        grid-template-columns: 48px minmax(0, 1fr);
+    }
+
+    .media-row .row-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
     }
 
     .data-row,

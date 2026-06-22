@@ -19,8 +19,20 @@ function resultCount(value) {
     return value?.total ?? value?.list?.length ?? asArray(value).length ?? 0;
 }
 
+const builtinPlatformNames = {
+    kw: '酷我',
+    kg: '酷狗',
+    tx: 'QQ 音乐',
+    mg: '咪咕',
+    wy: '网易云',
+};
+
+export function sourceDisplayName(id) {
+    return state.platforms.find(item => item.id === id)?.name || builtinPlatformNames[id] || id || '未知';
+}
+
 function platformName(id) {
-    return state.platforms.find(item => item.id === id)?.name || id || '未知';
+    return sourceDisplayName(id);
 }
 
 function songTitle(song) {
@@ -44,22 +56,51 @@ function sourceMeta(song) {
         .join(' · ');
 }
 
+export function mediaCoverUrl(item = {}) {
+    const sourceData = item?.source_data || {};
+    return item.cover_url
+        || item.coverUrl
+        || item.img
+        || item.pic
+        || item.cover
+        || item.image
+        || item.albumPic
+        || sourceData.cover_url
+        || sourceData.coverUrl
+        || sourceData.img
+        || sourceData.pic
+        || sourceData.cover
+        || sourceData.image
+        || '';
+}
+
+function renderArtwork(item, alt) {
+    const cover = mediaCoverUrl(item);
+    if (cover) {
+        return `<img class="media-artwork" src="${escapeHtml(cover)}" alt="${escapeHtml(alt)}">`;
+    }
+    return `<span class="media-artwork media-artwork-placeholder" aria-hidden="true">♪</span>`;
+}
+
 function actionButton(action, index, text) {
     return `<button type="button" data-action="${action}" data-index="${index}">${text}</button>`;
 }
 
-function renderSongRow(song, index, extraActions = '') {
+export function renderSongRow(song, index, extraActions = '') {
     return `
-        <article class="song-row">
+        <article class="song-row media-row">
+            ${renderArtwork(song, songTitle(song))}
             <div class="row-main">
                 <strong>${escapeHtml(songTitle(song))}</strong>
                 <span>${escapeHtml(songArtist(song))} · ${escapeHtml(songAlbum(song))}</span>
                 <span class="row-meta">${escapeHtml(sourceMeta(song))}</span>
             </div>
-            ${actionButton('preview', index, '试听')}
-            ${actionButton('import', index, '导入')}
-            ${actionButton('speaker', index, '音箱')}
-            ${extraActions}
+            <div class="row-actions">
+                ${actionButton('preview', index, '试听')}
+                ${actionButton('import', index, '导入')}
+                ${actionButton('speaker', index, '音箱')}
+                ${extraActions}
+            </div>
         </article>
     `;
 }
@@ -264,19 +305,34 @@ function songListId(item) {
     return item?.id || item?.list_id || item?.songlist_id || item?.source_id || item?.play_count;
 }
 
+function songListSummary(item) {
+    const playCount = item?.play_count || item?.playCount || item?.total || item?.count;
+    return item?.author
+        || item?.creator
+        || item?.desc
+        || item?.description
+        || item?.tag
+        || (playCount ? `${playCount} 次播放` : '')
+        || '';
+}
+
+export function renderSongListItem(item, index) {
+    return `
+        <button class="songlist-row media-row" type="button" data-action="songlist-detail" data-index="${index}">
+            ${renderArtwork(item, songListTitle(item))}
+            <span class="row-main">
+                <strong>${escapeHtml(songListTitle(item))}</strong>
+                <span>${escapeHtml(songListSummary(item))}</span>
+            </span>
+        </button>
+    `;
+}
+
 function renderSongLists(items) {
     const list = $('[data-role="songlist-list"]');
     if (!list) return;
     list.innerHTML = items.length
-        ? items.map((item, index) => `
-            <button class="songlist-row" type="button" data-action="songlist-detail" data-index="${index}">
-                <span class="row-main">
-                    <strong>${escapeHtml(songListTitle(item))}</strong>
-                    <span>${escapeHtml(item.author || item.creator || item.desc || '')}</span>
-                </span>
-                <span class="row-meta">${escapeHtml(songListId(item) || '')}</span>
-            </button>
-        `).join('')
+        ? items.map((item, index) => renderSongListItem(item, index)).join('')
         : '<div class="empty-state">暂无歌单。</div>';
 }
 
@@ -353,6 +409,22 @@ function boardId(board) {
     return board?.id || board?.board_id || board?.source_id || board?.bangid || board?.榜单id;
 }
 
+function boardSummary(board) {
+    return board?.desc || board?.description || board?.updateTime || board?.source_name || board?.source || '';
+}
+
+export function renderRankingBoard(board, index) {
+    return `
+        <button class="ranking-row media-row" type="button" data-action="ranking-detail" data-index="${index}">
+            ${renderArtwork(board, boardTitle(board))}
+            <span class="row-main">
+                <strong>${escapeHtml(boardTitle(board))}</strong>
+                <span>${escapeHtml(boardSummary(board))}</span>
+            </span>
+        </button>
+    `;
+}
+
 function bindRankings() {
     const boardsNode = $('[data-role="ranking-list"]');
     const songsNode = $('[data-role="ranking-songs"]');
@@ -366,15 +438,7 @@ function bindRankings() {
             const boards = asArray(data);
             setState({ rankingBoards: boards, platform });
             boardsNode.innerHTML = boards.length
-                ? boards.map((board, index) => `
-                    <button class="ranking-row" type="button" data-action="ranking-detail" data-index="${index}">
-                        <span class="row-main">
-                            <strong>${escapeHtml(boardTitle(board))}</strong>
-                            <span>${escapeHtml(board.desc || board.updateTime || '')}</span>
-                        </span>
-                        <span class="row-meta">${escapeHtml(boardId(board) || '')}</span>
-                    </button>
-                `).join('')
+                ? boards.map((board, index) => renderRankingBoard(board, index)).join('')
                 : '<div class="empty-state">暂无榜单。</div>';
         } catch (error) {
             boardsNode.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
