@@ -90,15 +90,18 @@ function createHarness() {
     loadEnabledSources: vi.fn(async () => {}),
     getMusicUrl: vi.fn(async () => 'https://cdn.example/song.mp3'),
   } as unknown as RuntimeManager;
+  const downloadRuntimes = {
+    getMusicUrl: vi.fn(async () => 'https://download.example/song.flac'),
+  } as unknown as RuntimeManager;
 
   const platforms = {
     all: vi.fn(() => [{ id: 'kw', name: '酷我音乐' }]),
     get: vi.fn((id: string) => (id === 'kw' ? provider : null)),
   } as unknown as PlatformRegistry;
 
-  registerMusicHandlers(router, sources, runtimes, platforms);
+  registerMusicHandlers(router, sources, runtimes, platforms, { downloadRuntimes });
 
-  return { router, sources, runtimes, platforms, provider };
+  return { router, sources, runtimes, downloadRuntimes, platforms, provider };
 }
 
 describe('registerMusicHandlers', () => {
@@ -221,7 +224,7 @@ describe('registerMusicHandlers', () => {
     expect(provider.search).toHaveBeenLastCalledWith('hello', 9, 100);
   });
 
-  test('URL route validates source_data and resolves through runtime', async () => {
+  test('URL route validates source_data and returns native Songloft music/url payload', async () => {
     const { router, runtimes } = createHarness();
     const sourceData = {
       platform: 'kw',
@@ -233,11 +236,28 @@ describe('registerMusicHandlers', () => {
 
     expect(response.statusCode).toBe(200);
     expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', sourceData.songInfo);
-    expect(parseResponseBody(response).data).toEqual({ url: 'https://cdn.example/song.mp3' });
+    expect(parseResponseBody(response)).toEqual({ url: 'https://cdn.example/song.mp3' });
 
     const invalid = await router.handle(request('POST', '/api/music/url', {}));
     expect(invalid.statusCode).toBe(400);
     expect(parseResponseBody(invalid).error.code).toBe('BAD_REQUEST');
+  });
+
+  test('URL route uses the dedicated download runtime for download-sourced Songloft callbacks', async () => {
+    const { router, runtimes, downloadRuntimes } = createHarness();
+    const sourceData = {
+      platform: 'kw',
+      quality: 'flac',
+      songInfo: { source: 'kw', name: 'Song', singer: 'Artist', album: '', duration: 1 },
+      starlight: { purpose: 'download' },
+    };
+
+    const response = await router.handle(request('POST', '/api/music/url', { source_data: sourceData }));
+
+    expect(response.statusCode).toBe(200);
+    expect(downloadRuntimes.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', sourceData.songInfo);
+    expect(runtimes.getMusicUrl).not.toHaveBeenCalled();
+    expect(parseResponseBody(response)).toEqual({ url: 'https://download.example/song.flac' });
   });
 
   test('URL route rejects unsupported platforms before resolving through runtime', async () => {

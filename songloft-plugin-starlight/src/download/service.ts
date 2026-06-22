@@ -7,6 +7,7 @@ import type { SearchResultSong } from '../music/types';
 import { StarlightError } from '../system/errors';
 
 const SETTINGS_KEY = 'starlight:download:settings';
+const STARLIGHT_PLUGIN_ENTRY_PATH = 'starlight';
 const DEFAULT_SETTINGS: DownloadSettings = {
   path_template: 'downloads/{artist}-{album}/{title}',
   embed_metadata: true,
@@ -77,8 +78,8 @@ export class DownloadService {
 
   async downloadSong(song: SearchResultSong): Promise<DownloadResult> {
     const settings = await this.getSettings();
-    const url = await this.resolveDownloadUrl(song);
-    const nativeSong = await this.importDownloadRemoteSong(song, url);
+    await this.resolveDownloadUrl(song);
+    const nativeSong = await this.importDownloadRemoteSong(song);
     const songId = numericSongId(nativeSong);
     if (!songId) {
       throw new StarlightError('INTERNAL_ERROR', 'Songloft 未返回可下载的歌曲 ID', true, { upstream: 'songloft_remote_import' });
@@ -149,12 +150,12 @@ export class DownloadService {
     return url;
   }
 
-  private async importDownloadRemoteSong(song: SearchResultSong, url: string): Promise<SongloftRemoteSong> {
+  private async importDownloadRemoteSong(song: SearchResultSong): Promise<SongloftRemoteSong> {
     const token = await songloft.plugin.getToken();
     const host = await songloft.plugin.getHostUrl();
-    const payload = toRemoteSong(song, url, {
-      pluginEntryPath: '',
-      includeSourceData: false,
+    const payload = toRemoteSong(song, '', {
+      pluginEntryPath: STARLIGHT_PLUGIN_ENTRY_PATH,
+      sourceData: downloadSourceData(song),
       dedupKey: '',
     });
     const imported = await postRemoteSongs(host, token, [payload]);
@@ -229,6 +230,13 @@ function safeJson(value: string): unknown {
 function numericSongId(song: SongloftRemoteSong): number {
   const id = Number(song.id);
   return Number.isFinite(id) && id > 0 ? id : 0;
+}
+
+function downloadSourceData(song: SearchResultSong): SearchResultSong['source_data'] & { starlight: { purpose: 'download' } } {
+  return {
+    ...song.source_data,
+    starlight: { purpose: 'download' },
+  };
 }
 
 function sleep(ms: number): Promise<void> {

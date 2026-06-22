@@ -15,6 +15,7 @@ export interface RemoteSongPayload {
 export interface RemoteSongOptions {
   pluginEntryPath?: string;
   includeSourceData?: boolean;
+  sourceData?: unknown;
   dedupKey?: string;
 }
 
@@ -33,7 +34,7 @@ export function toRemoteSong(song: SearchResultSong, url: string, options: Remot
     duration: song.duration,
     url,
     plugin_entry_path: options.pluginEntryPath ?? 'starlight-playback',
-    source_data: options.includeSourceData === false ? '' : JSON.stringify(song.source_data),
+    source_data: options.includeSourceData === false ? '' : JSON.stringify(options.sourceData ?? song.source_data),
     dedup_key: options.dedupKey ?? remoteSongDedupKey(song),
   };
 }
