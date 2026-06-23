@@ -49,6 +49,15 @@ function createHarness() {
       sourcesList = [...sourcesList, imported];
       return imported;
     }),
+    importManyFromJS: vi.fn(async (files: Array<{ filename: string; content: string }>) => {
+      const imported = files.map((file, index) => sourceMeta({
+        id: `imported-download-${index + 1}`,
+        filename: file.filename,
+        name: `Imported Download ${index + 1}`,
+      }));
+      sourcesList = [...sourcesList, ...imported];
+      return { total: files.length, imported, skipped: [], failed: [] };
+    }),
     setEnabled: vi.fn(async (id: string, enabled: boolean) => {
       sourcesList = sourcesList.map((source) => source.id === id ? { ...source, enabled } : source);
     }),
@@ -87,9 +96,31 @@ describe('registerDownloadHandlers', () => {
     expect(imported.statusCode).toBe(201);
     expect(sources.importFromJS).toHaveBeenCalledWith('dl.js', 'lx.send("inited")');
 
+    const batchImported = await router.handle(request('POST', '/api/download/sources/import', {
+      files: [
+        { filename: 'one.js', content: 'one' },
+        { filename: 'two.js', content: 'two' },
+      ],
+    }));
+    expect(batchImported.statusCode).toBe(201);
+    expect(sources.importManyFromJS).toHaveBeenCalledWith([
+      { filename: 'one.js', content: 'one' },
+      { filename: 'two.js', content: 'two' },
+    ]);
+
     const toggled = await router.handle(request('POST', '/api/download/sources/toggle', { id: 'download-source', enabled: true }));
     expect(toggled.statusCode).toBe(200);
     expect(sources.setEnabled).toHaveBeenCalledWith('download-source', true);
+    expect(runtimes.loadEnabledSources).toHaveBeenCalledTimes(1);
+
+    vi.mocked(runtimes.loadEnabledSources).mockClear();
+    const batchToggled = await router.handle(request('POST', '/api/download/sources/batch-toggle', {
+      ids: ['download-source', 'imported-download-1'],
+      enabled: false,
+    }));
+    expect(batchToggled.statusCode).toBe(200);
+    expect(sources.setEnabled).toHaveBeenCalledWith('download-source', false);
+    expect(sources.setEnabled).toHaveBeenCalledWith('imported-download-1', false);
     expect(runtimes.loadEnabledSources).toHaveBeenCalledTimes(1);
 
     const deleted = await router.handle(request('DELETE', '/api/download/sources/download-source'));

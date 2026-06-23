@@ -11,6 +11,30 @@ interface SourceMetadataTags {
   repository?: string;
 }
 
+export interface SourceImportFile {
+  filename: string;
+  content: string;
+}
+
+export interface SourceImportSkipped {
+  filename: string;
+  name: string;
+  existingName: string;
+  reason: 'duplicate';
+}
+
+export interface SourceImportFailed {
+  filename: string;
+  message: string;
+}
+
+export interface SourceImportManyResult {
+  total: number;
+  imported: MusicSourceMeta[];
+  skipped: SourceImportSkipped[];
+  failed: SourceImportFailed[];
+}
+
 const JSDOC_COMMENT_RE = /\/\*(?:!|\*)[\s\S]*?\*\//;
 
 function parseSourceMetadata(script: string): SourceMetadataTags {
@@ -138,6 +162,46 @@ export class SourceManager {
     this.sources = nextSources.map(cloneMeta);
 
     return cloneMeta(meta);
+  }
+
+  async importManyFromJS(files: SourceImportFile[]): Promise<SourceImportManyResult> {
+    const result: SourceImportManyResult = {
+      total: files.length,
+      imported: [],
+      skipped: [],
+      failed: [],
+    };
+    const importedNames = new Set(this.sources.map((source) => source.name.trim()).filter(Boolean));
+
+    for (const file of files) {
+      const filename = file.filename;
+      const content = file.content;
+      const tags = parseSourceMetadata(content);
+      const name = (tags.name || filenameStem(filename) || 'Imported Source').trim();
+
+      if (importedNames.has(name)) {
+        result.skipped.push({
+          filename,
+          name,
+          existingName: name,
+          reason: 'duplicate',
+        });
+        continue;
+      }
+
+      try {
+        const meta = await this.importFromJS(filename, content);
+        importedNames.add(meta.name.trim());
+        result.imported.push(meta);
+      } catch (error) {
+        result.failed.push({
+          filename,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return result;
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<void> {

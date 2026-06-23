@@ -6,7 +6,7 @@ import { apiError, apiOk } from '../system/response';
 import type { PlatformRegistry } from '../music/platforms/registry';
 import type { MusicPlatformProvider } from '../music/platforms/types';
 import type { RuntimeManager } from '../music/runtime_manager';
-import type { SourceManager } from '../music/source_manager';
+import type { SourceImportFile, SourceManager } from '../music/source_manager';
 import type { LxSongInfo } from '../music/types';
 
 interface SearchBody {
@@ -20,10 +20,16 @@ interface SearchBody {
 interface SourceImportBody {
   filename?: unknown;
   content?: unknown;
+  files?: unknown;
 }
 
 interface SourceToggleBody {
   id?: unknown;
+  enabled?: unknown;
+}
+
+interface SourceBatchToggleBody {
+  ids?: unknown;
   enabled?: unknown;
 }
 
@@ -138,6 +144,36 @@ function requireId(value: unknown, name = 'id'): string {
   return id;
 }
 
+function sourceImportFiles(value: unknown): SourceImportFile[] {
+  if (!Array.isArray(value)) {
+    throw new StarlightError('BAD_REQUEST', 'files must be an array');
+  }
+
+  return value.map((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new StarlightError('BAD_REQUEST', 'files entries must be objects');
+    }
+    const record = entry as Record<string, unknown>;
+    const filename = requireId(record.filename, 'filename');
+    const content = typeof record.content === 'string' ? record.content : '';
+    if (!content) {
+      throw new StarlightError('BAD_REQUEST', 'content is required');
+    }
+    return { filename, content };
+  });
+}
+
+function sourceIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw new StarlightError('BAD_REQUEST', 'ids must be an array');
+  }
+  const ids = value.map((entry) => requireId(entry));
+  if (ids.length === 0) {
+    throw new StarlightError('BAD_REQUEST', 'ids must not be empty');
+  }
+  return ids;
+}
+
 function reloadRuntimesInBackground(runtimes: RuntimeManager): void {
   runtimes.loadEnabledSources().catch((error) => {
     songloft.log.warn('Failed to reload music source runtimes: ' + String(error));
@@ -182,6 +218,10 @@ export function registerMusicHandlers(
   router.post('/api/music/sources/import', async (req) =>
     handle(() => {
       const body = parseJsonBody<SourceImportBody>(req);
+      if (body.files !== undefined) {
+        return sources.importManyFromJS(sourceImportFiles(body.files));
+      }
+
       const filename = requireId(body.filename, 'filename');
       const content = typeof body.content === 'string' ? body.content : '';
       if (!content) {
@@ -200,6 +240,19 @@ export function registerMusicHandlers(
       reloadRuntimesInBackground(runtimes);
 
       return sources.listSources().find((source) => source.id === id) || { id, enabled };
+    }));
+
+  router.post('/api/music/sources/batch-toggle', async (req) =>
+    handle(async () => {
+      const body = parseJsonBody<SourceBatchToggleBody>(req);
+      const ids = sourceIds(body.ids);
+      const enabled = boolField(body.enabled);
+      for (const id of ids) {
+        await sources.setEnabled(id, enabled);
+      }
+      reloadRuntimesInBackground(runtimes);
+
+      return { ids, enabled };
     }));
 
   router.delete('/api/music/sources/:id', async (_req, params) =>

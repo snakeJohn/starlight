@@ -453,6 +453,15 @@ textarea:focus {
     align-items: center;
 }
 
+.merged-source-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.source-check {
+    display: inline-grid;
+    place-items: center;
+}
+
 .media-artwork {
     width: 48px;
     height: 48px;
@@ -617,6 +626,16 @@ textarea:focus {
     color: var(--muted);
     font-weight: 500;
     line-height: 1.35;
+}
+
+.server-host-warning {
+    border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--surface-line));
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    background: color-mix(in srgb, var(--warning) 10%, var(--surface-solid));
+    color: var(--warning);
+    font-size: 12px;
+    line-height: 1.4;
 }
 
 .target-playlist-banner {

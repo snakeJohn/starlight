@@ -78,6 +78,15 @@ function createHarness() {
       sourcesList = [...sourcesList, imported];
       return imported;
     }),
+    importManyFromJS: vi.fn(async (files: Array<{ filename: string; content: string }>) => {
+      const imported = files.map((file, index) => sourceMeta({
+        id: `imported-${index + 1}`,
+        name: `Imported ${index + 1}`,
+        filename: file.filename,
+      }));
+      sourcesList = [...sourcesList, ...imported];
+      return { total: files.length, imported, skipped: [], failed: [] };
+    }),
     setEnabled: vi.fn(async (id: string, enabled: boolean) => {
       sourcesList = sourcesList.map((source) => (source.id === id ? { ...source, enabled } : source));
     }),
@@ -132,6 +141,35 @@ describe('registerMusicHandlers', () => {
     expect(parseResponseBody(response).data).toMatchObject({ id: 'imported', filename: 'new.js' });
   });
 
+  test('imports multiple music source scripts and reports skipped duplicates', async () => {
+    const { router, sources } = createHarness();
+    vi.mocked(sources.importManyFromJS).mockResolvedValueOnce({
+      total: 2,
+      imported: [sourceMeta({ id: 'new-source', name: 'New Source', filename: 'new.js' })],
+      skipped: [{ filename: 'duplicate.js', name: 'Star Source', existingName: 'Star Source', reason: 'duplicate' }],
+      failed: [],
+    });
+
+    const response = await router.handle(request('POST', '/api/music/sources/import', {
+      files: [
+        { filename: 'new.js', content: 'new source' },
+        { filename: 'duplicate.js', content: 'duplicate source' },
+      ],
+    }));
+
+    expect(response.statusCode).toBe(201);
+    expect(sources.importManyFromJS).toHaveBeenCalledWith([
+      { filename: 'new.js', content: 'new source' },
+      { filename: 'duplicate.js', content: 'duplicate source' },
+    ]);
+    expect(parseResponseBody(response).data).toMatchObject({
+      total: 2,
+      imported: [expect.objectContaining({ id: 'new-source' })],
+      skipped: [expect.objectContaining({ filename: 'duplicate.js', reason: 'duplicate' })],
+      failed: [],
+    });
+  });
+
   test('toggles source, reloads runtimes, and returns updated source data', async () => {
     const { router, sources, runtimes } = createHarness();
 
@@ -141,6 +179,21 @@ describe('registerMusicHandlers', () => {
     expect(sources.setEnabled).toHaveBeenCalledWith('star', true);
     expect(runtimes.loadEnabledSources).toHaveBeenCalledTimes(1);
     expect(parseResponseBody(response).data).toMatchObject({ id: 'star', enabled: true });
+  });
+
+  test('batch toggles music sources and reloads runtimes once', async () => {
+    const { router, sources, runtimes } = createHarness();
+
+    const response = await router.handle(request('POST', '/api/music/sources/batch-toggle', {
+      ids: ['star', 'imported'],
+      enabled: true,
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(sources.setEnabled).toHaveBeenCalledWith('star', true);
+    expect(sources.setEnabled).toHaveBeenCalledWith('imported', true);
+    expect(runtimes.loadEnabledSources).toHaveBeenCalledTimes(1);
+    expect(parseResponseBody(response).data).toMatchObject({ ids: ['star', 'imported'], enabled: true });
   });
 
   test('toggle source does not wait for slow runtime reloads', async () => {

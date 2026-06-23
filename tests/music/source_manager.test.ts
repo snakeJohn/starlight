@@ -148,6 +148,39 @@ describe('SourceManager', () => {
     expect(manager.listSources()).toHaveLength(2);
   });
 
+  test('batch import skips duplicate source names and keeps processing later files', async () => {
+    const manager = await createInitializedManager();
+    await manager.importFromJS('existing.js', sourceScript);
+
+    const result = await manager.importManyFromJS([
+      { filename: 'duplicate-name.js', content: sourceScript },
+      { filename: 'new-source.js', content: repositoryScript },
+      { filename: 'empty.js', content: '   ' },
+    ]);
+
+    expect(result).toMatchObject({
+      total: 3,
+      imported: [
+        expect.objectContaining({ name: 'Repository Source', filename: 'new-source.js' }),
+      ],
+      skipped: [
+        expect.objectContaining({
+          filename: 'duplicate-name.js',
+          name: 'Test Source',
+          existingName: 'Test Source',
+          reason: 'duplicate',
+        }),
+      ],
+      failed: [
+        expect.objectContaining({
+          filename: 'empty.js',
+          message: 'Music source script is empty',
+        }),
+      ],
+    });
+    expect(manager.listSources().map((source) => source.name)).toEqual(['Test Source', 'Repository Source']);
+  });
+
   test('Chinese source names produce readable unique IDs', async () => {
     const manager = await createInitializedManager();
 

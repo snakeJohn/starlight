@@ -44,12 +44,13 @@ describe('settings config helpers', () => {
     vi.unstubAllGlobals();
   });
 
-  it('only saves the four visible setting toggles', async () => {
+  it('saves visible speaker settings including the Songloft access host', async () => {
     installDom();
     const { configFromForm } = await loadAutomationModule();
 
     const payload = configFromForm({
       elements: {
+        server_host: { value: '  http://192.168.31.63:18191/api/v1  ' },
         conversation_monitor_enabled: { checked: true },
         voice_command_enabled: { checked: false },
         scheduled_tasks_enabled: { checked: false },
@@ -58,6 +59,7 @@ describe('settings config helpers', () => {
     });
 
     expect(payload).toEqual({
+      server_host: 'http://192.168.31.63:18191/api/v1',
       conversation_monitor_enabled: true,
       voice_command_enabled: false,
       scheduled_tasks_enabled: false,
@@ -105,6 +107,7 @@ describe('settings config helpers', () => {
     expect(payload).toEqual({
       scheduled_tasks_enabled: true,
     });
+    expect(payload).not.toHaveProperty('server_host');
     expect(payload).not.toHaveProperty('conversation_monitor_enabled');
     expect(payload).not.toHaveProperty('voice_command_enabled');
     expect(payload).not.toHaveProperty('force_mp3');

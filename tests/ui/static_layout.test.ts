@@ -84,14 +84,22 @@ describe('static UI layout copy', () => {
     expect(searchPlaylists).toBeGreaterThan(importPlaylists);
   });
 
-  it('hides the server host configuration from the settings page', () => {
+  it('shows the Songloft access host in the speaker settings only', () => {
     const html = indexHtml();
+    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
+    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
+    const speakerHtml = html.slice(speakerStart, songlistsStart);
+    const automationHtml = html.slice(
+      html.indexOf('<section class="tab-panel" id="tab-automation">'),
+      html.indexOf('</main>'),
+    );
 
-    expect(html).not.toContain('Songloft 访问地址');
-    expect(html).not.toContain('小爱音箱访问 Songloft 播放接口用的局域网地址');
-    expect(html).not.toContain('data-role="host-url"');
-    expect(html).not.toContain('<span>服务器地址</span>');
-    expect(html).not.toContain('name="server_host"');
+    expect(speakerHtml).toContain('Songloft 访问地址');
+    expect(speakerHtml).toContain('音箱访问 Songloft 播放接口用的局域网或公网地址');
+    expect(speakerHtml).toContain('data-role="server-host-warning"');
+    expect(speakerHtml).toContain('name="server_host"');
+    expect(automationHtml).not.toContain('name="server_host"');
+    expect(html).not.toContain('id="tab-settings"');
   });
 
   it('uses an interactive voice command editor instead of a JSON textarea', () => {
@@ -174,15 +182,51 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('@media (max-width: 760px)');
   });
 
-  it('replaces the plugin mini player with download source management UI', () => {
+  it('keeps download settings and progress separate from merged source management', () => {
     const html = indexHtml();
+    const downloadStart = html.indexOf('<section class="tab-panel" id="tab-download">');
+    const logsStart = html.indexOf('<section class="tab-panel" id="tab-logs">');
+    const downloadHtml = html.slice(downloadStart, logsStart);
 
     expect(html).not.toContain('id="miniPlayer"');
-    expect(html).toContain('data-role="download-source-file"');
-    expect(html).toContain('data-role="download-source-list"');
-    expect(html).toContain('data-role="download-settings-form"');
-    expect(html).toContain('data-role="download-progress"');
-    expect(html).toContain('下载音源');
+    expect(downloadHtml).toContain('data-role="download-settings-form"');
+    expect(downloadHtml).toContain('data-role="download-progress"');
+    expect(downloadHtml).not.toContain('data-role="download-source-file"');
+    expect(downloadHtml).not.toContain('data-role="download-source-list"');
+    expect(downloadHtml).not.toContain('<h2>下载音源</h2>');
+  });
+
+  it('merges playback and download source management into one paged selectable control', () => {
+    const html = indexHtml();
+    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+    const sourcesStart = html.indexOf('<section class="tab-panel" id="tab-sources">');
+    const downloadStart = html.indexOf('<section class="tab-panel" id="tab-download">');
+    const sourcesHtml = html.slice(sourcesStart, downloadStart);
+
+    expect(sourcesHtml).toContain('data-action="enable-selected-playback-sources"');
+    expect(sourcesHtml).toContain('data-action="disable-selected-playback-sources"');
+    expect(sourcesHtml).toContain('data-action="enable-selected-download-sources"');
+    expect(sourcesHtml).toContain('data-action="disable-selected-download-sources"');
+    expect(sourcesHtml).toContain('data-role="source-pagination"');
+    expect(sourcesHtml).toContain('data-role="source-list"');
+    expect(sourcesHtml).not.toContain('data-role="download-source-pagination"');
+    expect(music).toContain('const sourcePageSize = 10');
+    expect(music).toContain('data-role="${selectRole}"');
+    expect(music).toContain('mergeSourceRows');
+    expect(music).toContain("'toggle-playback-source'");
+    expect(music).toContain("'toggle-download-source'");
+    expect(music).toContain('/music/sources/batch-toggle');
+    expect(music).toContain('/download/sources/batch-toggle');
+  });
+
+  it('imports zip packages by extracting contained JavaScript source files', () => {
+    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+
+    expect(music).toContain("import { readJavaScriptSourceFiles } from './zip_sources.js'");
+    expect(music).toContain('files: await readJavaScriptSourceFiles(file)');
+    expect(music).toContain('sourceImportSummary');
+    expect(music).toContain("api.post('/music/sources/import'");
+    expect(music).toContain("api.post('/download/sources/import'");
   });
 
   it('hides the top status platform chip', () => {
@@ -269,6 +313,7 @@ describe('static UI layout copy', () => {
     expect(speakerHtml).toContain('name="conversation_monitor_enabled" type="checkbox"');
     expect(speakerHtml).toContain('name="voice_command_enabled" type="checkbox" disabled');
     expect(speakerHtml).toContain('name="force_mp3" type="checkbox"');
+    expect(speakerHtml).toContain('name="server_host"');
     expect(speakerHtml).not.toContain('name="scheduled_tasks_enabled"');
     expect(automationHtml).toContain('data-role="schedule-config-form"');
     expect(automationHtml).toContain('name="scheduled_tasks_enabled" type="checkbox"');

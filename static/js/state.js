@@ -47,6 +47,7 @@ export const state = {
     customPlaylistDetailPage: 1,
     platforms: [],
     sources: [],
+    sourcePage: 1,
     downloadSources: [],
     downloadSettings: null,
     downloadProgress: null,

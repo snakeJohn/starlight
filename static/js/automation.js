@@ -362,12 +362,27 @@ function setField(form, name, value) {
     }
 }
 
+function updateServerHostWarning(form, statusOrHost) {
+    const warning = form?.querySelector?.('[data-role="server-host-warning"]');
+    if (!warning) return;
+    const value = String(statusOrHost || '').trim().toLowerCase();
+    const loopback = value === 'loopback'
+        || value.includes('localhost')
+        || /^https?:\/\/127\./.test(value)
+        || /^127\./.test(value);
+    warning.hidden = !loopback;
+    warning.textContent = loopback
+        ? '当前地址是本地回环地址，MIoT 智能音箱可能无法访问，请填写局域网或公网可访问地址。'
+        : '';
+}
+
 async function loadConfig() {
     const config = await api.get('/miot/config');
     const forms = $$('[data-config-form]');
     if (forms.length === 0) return;
     for (const form of forms) {
         for (const name of [
+            'server_host',
             'conversation_monitor_enabled',
             'voice_command_enabled',
             'scheduled_tasks_enabled',
@@ -375,6 +390,7 @@ async function loadConfig() {
         ]) {
             setField(form, name, config[name]);
         }
+        updateServerHostWarning(form, config.server_host_status || config.server_host);
         setConfigState('已加载', form);
     }
     savedConversationMonitorEnabled = !!config.conversation_monitor_enabled;
@@ -383,6 +399,9 @@ async function loadConfig() {
 
 export function configFromForm(form) {
     const payload = {};
+    if (hasField(form, 'server_host')) {
+        payload.server_host = textValue(form, 'server_host');
+    }
     for (const name of [
         'conversation_monitor_enabled',
         'voice_command_enabled',
@@ -433,6 +452,7 @@ async function saveConfig(event) {
         ? '已保存，可启用语音口令'
         : '已保存';
     setConfigState(result?.warning || savedMessage, form);
+    updateServerHostWarning(form, result?.warning ? 'loopback' : textValue(form, 'server_host'));
     toast(result?.warning || '设置已保存', result?.warning ? 'error' : 'success');
 }
 
@@ -461,6 +481,9 @@ function bindAutomation() {
                 toast(error.message, 'error');
             });
         });
+    });
+    $$('[name="server_host"]').forEach(input => {
+        input.addEventListener('input', event => updateServerHostWarning(event.currentTarget.closest?.('form'), event.currentTarget.value));
     });
 
     $('[data-role="voice-command-list"]')?.addEventListener('change', event => {

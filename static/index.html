@@ -210,6 +210,12 @@
                                 <h2>音箱设置</h2>
                                 <button class="ghost-button" type="button" data-action="load-config">加载</button>
                             </div>
+                            <label class="wide-field">
+                                <span>Songloft 访问地址</span>
+                                <input name="server_host" data-role="server-host-input" placeholder="例如: http://192.168.31.63:18191">
+                                <small class="field-help">音箱访问 Songloft 播放接口用的局域网或公网地址，留空时自动识别当前 Songloft 地址。</small>
+                            </label>
+                            <div class="server-host-warning" data-role="server-host-warning" hidden></div>
                             <div class="toggle-grid">
                                 <label class="toggle-line"><input name="conversation_monitor_enabled" type="checkbox"><span>对话监听</span></label>
                                 <label class="toggle-line"><input name="voice_command_enabled" type="checkbox" disabled><span>语音口令</span></label>
@@ -389,10 +395,24 @@
                 </div>
                 <section class="surface-section">
                     <div class="section-bar">
-                        <h2>已导入</h2>
-                        <button class="ghost-button" type="button" data-action="refresh-sources">刷新</button>
+                        <div>
+                            <h2>已导入音源</h2>
+                            <span class="section-caption">播放与下载分别启停，导入文件会同时写入两类音源库。</span>
+                        </div>
+                        <div class="inline-actions">
+                            <button class="ghost-button" type="button" data-action="refresh-sources">刷新</button>
+                        </div>
+                    </div>
+                    <div class="batch-actions" data-role="source-batch-actions">
+                        <button class="ghost-button" type="button" data-action="select-source-page">全选当前页</button>
+                        <button class="ghost-button" type="button" data-action="clear-source-selection">取消选择</button>
+                        <button class="ghost-button" type="button" data-action="enable-selected-playback-sources">批量播放启用</button>
+                        <button class="ghost-button" type="button" data-action="disable-selected-playback-sources">批量播放停用</button>
+                        <button class="ghost-button" type="button" data-action="enable-selected-download-sources">批量下载启用</button>
+                        <button class="ghost-button" type="button" data-action="disable-selected-download-sources">批量下载停用</button>
                     </div>
                     <div class="list-stack" data-role="source-list"></div>
+                    <div data-role="source-pagination"></div>
                 </section>
             </section>
 
@@ -402,10 +422,6 @@
                         <p class="eyebrow">Downloader</p>
                         <h1>下载</h1>
                     </div>
-                    <label class="file-button">
-                        <input type="file" data-role="download-source-file" accept=".js,.zip,application/javascript,application/zip">
-                        <span>导入下载音源</span>
-                    </label>
                 </div>
                 <section class="surface-section">
                     <div class="section-bar">
@@ -427,13 +443,6 @@
                         </label>
                         <button class="primary-button" type="submit">保存下载设置</button>
                     </form>
-                </section>
-                <section class="surface-section">
-                    <div class="section-bar">
-                        <h2>下载音源</h2>
-                        <button class="ghost-button" type="button" data-action="refresh-download-sources">刷新</button>
-                    </div>
-                    <div class="list-stack" data-role="download-source-list"></div>
                 </section>
                 <section class="surface-section">
                     <div class="section-bar">
