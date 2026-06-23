@@ -54,6 +54,26 @@ function flattenDevices(groups) {
     return rows;
 }
 
+export function restoreSavedDeviceSelection(groups) {
+    if (state.deviceId) return false;
+
+    const rows = flattenDevices(groups);
+    for (const group of groups) {
+        const savedDeviceId = group?.last_selected_device_id || '';
+        const groupAccountId = group?.account_id || '';
+        if (!savedDeviceId || !groupAccountId) continue;
+        if (state.accountId && state.accountId !== groupAccountId) continue;
+
+        const row = rows.find(item => item.account_id === groupAccountId && deviceId(item.device) === savedDeviceId);
+        if (!row) continue;
+
+        selectDevice(groupAccountId, savedDeviceId, deviceName(row.device));
+        return true;
+    }
+
+    return false;
+}
+
 function selectedPayload(extra = {}) {
     const payload = { ...selectedDevicePayload(), ...extra };
     if (!payload.account_id || !payload.device_id) {
@@ -224,14 +244,19 @@ export function clearSelectedDevice() {
 
 export async function selectAndPersistDevice(accountId, deviceIdValue, name = '') {
     selectDevice(accountId, deviceIdValue, name);
+    await persistSelectedDeviceSelection();
+}
+
+export async function persistSelectedDeviceSelection() {
+    const payload = selectedPayload();
     await api.post('/miot/mina/device/managed', {
-        account_id: accountId,
-        device_id: deviceIdValue,
+        account_id: payload.account_id,
+        device_id: payload.device_id,
         managed: true,
     });
     await api.post('/miot/mina/last_selection', {
-        account_id: accountId,
-        device_id: deviceIdValue,
+        account_id: payload.account_id,
+        device_id: payload.device_id,
     });
 }
 
@@ -363,16 +388,20 @@ async function loadAccounts() {
     renderAccounts(merged);
 }
 
-async function loadDevices() {
+async function loadDevices(options = {}) {
+    const shouldRestoreSaved = options.restoreSaved !== false;
     const path = state.accountId ? `/miot/mina/devices?account_id=${encodeURIComponent(state.accountId)}` : '/miot/mina/devices';
     const groups = asArray(await api.get(path));
     setState({ deviceGroups: groups });
+    if (shouldRestoreSaved) {
+        restoreSavedDeviceSelection(groups);
+    }
     renderDevices(groups);
 }
 
-async function refreshSpeaker() {
+async function refreshSpeaker(options = {}) {
     await loadAccounts().catch(error => toast(error.message, 'error'));
-    await loadDevices().catch(error => toast(error.message, 'error'));
+    await loadDevices({ restoreSaved: options.restoreSavedDevice }).catch(error => toast(error.message, 'error'));
 }
 
 async function reloginAccount(accountIdValue) {
@@ -558,7 +587,7 @@ async function pollQRCodeStatus(accountId) {
                 stopQrPolling();
                 hideQRCodeAfterLogin();
                 toast('扫码登录成功');
-                await refreshSpeaker();
+                await refreshSpeaker({ restoreSavedDevice: false });
                 return;
             }
 
@@ -652,10 +681,10 @@ function bindDeviceSelection() {
                 toast('已取消设备选择');
                 return;
             }
-            await selectAndPersistDevice(state.accountId, event.target.value);
+            selectDevice(state.accountId, event.target.value);
             renderDevices(state.deviceGroups);
             refreshPlayerStatus().catch(() => null);
-            toast('设备已选择');
+            toast('设备已选择，点击保存设备后刷新仍会保留');
         } catch (error) {
             toast(error.message, 'error');
         }
@@ -671,16 +700,29 @@ function bindDeviceSelection() {
         }
         const row = findDeviceRow(accountIdValue, deviceIdValue);
         try {
-            await selectAndPersistDevice(accountIdValue, deviceIdValue, row ? deviceName(row.device) : '');
+            selectDevice(accountIdValue, deviceIdValue, row ? deviceName(row.device) : '');
             const accountSelect = $('[data-role="account-select"]');
             const deviceSelect = $('[data-role="device-select"]');
             if (accountSelect) accountSelect.value = state.accountId;
             renderDevices(state.deviceGroups);
             if (deviceSelect) deviceSelect.value = state.deviceId;
             await refreshPlayerStatus().catch(() => null);
-            toast('播放设备已选择');
+            toast('播放设备已选择，点击保存设备后刷新仍会保留');
         } catch (error) {
             toast(error.message, 'error');
+        }
+    });
+
+    $('[data-action="save-device-selection"]')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        if (button) button.disabled = true;
+        try {
+            await persistSelectedDeviceSelection();
+            toast('设备选择已保存');
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            if (button) button.disabled = false;
         }
     });
 
@@ -731,14 +773,14 @@ function bindDeviceSelection() {
                 toast('已取消设备选择');
                 return;
             }
-            await selectAndPersistDevice(button.dataset.accountId, button.dataset.deviceId, button.dataset.deviceName);
+            selectDevice(button.dataset.accountId, button.dataset.deviceId, button.dataset.deviceName);
             const accountSelect = $('[data-role="account-select"]');
             const deviceSelect = $('[data-role="device-select"]');
             if (accountSelect) accountSelect.value = state.accountId;
             renderDevices(state.deviceGroups);
             if (deviceSelect) deviceSelect.value = state.deviceId;
             refreshPlayerStatus().catch(() => null);
-            toast('设备已选择');
+            toast('设备已选择，点击保存设备后刷新仍会保留');
         } catch (error) {
             toast(error.message, 'error');
         } finally {

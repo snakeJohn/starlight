@@ -5,6 +5,7 @@ interface SpeakerControlsModule {
   normalizeDeviceName(device: Record<string, unknown>): string;
   renderAccountRow(account: Record<string, unknown>): string;
   renderDeviceRow(row: Record<string, unknown>): string;
+  restoreSavedDeviceSelection(groups: Array<Record<string, unknown>>): boolean;
   selectAndPersistDevice(accountId: string, deviceId: string, name?: string): Promise<void>;
   clearSelectedDevice(): void;
   renderVoiceRecordList(records: Array<Record<string, unknown>>, now?: number): string;
@@ -129,6 +130,22 @@ describe('speaker controls helpers', () => {
       method: 'POST',
       body: JSON.stringify({ account_id: 'miot-account', device_id: 'speaker-1' }),
     }));
+  });
+
+  it('restores the saved speaker device from loaded device groups', async () => {
+    installDom();
+    const { speaker, state } = await loadModules();
+
+    const restored = speaker.restoreSavedDeviceSelection([{
+      account_id: 'miot-account',
+      account_name: '小米账号',
+      last_selected_device_id: 'speaker-1',
+      devices: [{ device_id: 'speaker-1', name: '客厅音箱' }],
+    }]);
+
+    expect(restored).toBe(true);
+    expect(state.accountId).toBe('miot-account');
+    expect(state.deviceId).toBe('speaker-1');
   });
 
   it('renders only the last 12 hours of speaker conversations newest first', async () => {
