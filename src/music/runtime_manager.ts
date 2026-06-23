@@ -122,6 +122,25 @@ export class RuntimeManager {
           `music URL source timed out after ${this.musicUrlTimeoutMs}ms`,
         );
         if (url) {
+          const invalidUrlReason = invalidResolvedMusicUrlReason(url);
+          if (invalidUrlReason) {
+            lastFailure = invalidUrlReason;
+            sourceDiagnostics.record({
+              operation: options.operation || 'playback',
+              stage: 'resolve',
+              status: 'failed',
+              sourceId: source?.id || '',
+              sourceName: source?.name || source?.id || '',
+              platform: String(platform),
+              quality: String(quality),
+              title: options.title || normalizedSongInfo.name,
+              artist: options.artist || normalizedSongInfo.singer,
+              durationMs: Date.now() - startedAt,
+              message: lastFailure,
+            });
+            continue;
+          }
+
           sourceDiagnostics.record({
             operation: options.operation || 'playback',
             stage: 'resolve',
@@ -251,6 +270,32 @@ function hasResolvableSongId(songInfo: LxSongInfo): boolean {
 
 function stringValue(value: unknown): string {
   return value === null || value === undefined ? '' : String(value).trim();
+}
+
+function invalidResolvedMusicUrlReason(url: string): string | null {
+  const unresolvedValueMatch = url.match(/[?&]([^=&#]+)=([^&#]*)/g)
+    ?.map((part) => {
+      const [name, value = ''] = part.slice(1).split('=');
+      return {
+        name: decodeUrlPart(name),
+        value: decodeUrlPart(value).trim().toLowerCase(),
+      };
+    })
+    .find((part) => part.value === 'undefined' || part.value === 'null');
+
+  if (!unresolvedValueMatch) {
+    return null;
+  }
+
+  return `音源返回无效 URL：参数 ${unresolvedValueMatch.name}=${unresolvedValueMatch.value}`;
+}
+
+function decodeUrlPart(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, ' '));
+  } catch {
+    return value;
+  }
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

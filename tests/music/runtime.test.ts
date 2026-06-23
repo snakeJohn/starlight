@@ -903,6 +903,61 @@ describe('RuntimeManager', () => {
     }));
   });
 
+  test('getMusicUrl rejects unresolved URL parameters and continues to later sources', async () => {
+    const managerSource = fakeSourceManager(() => [
+      sourceMeta('bad-quality-source', true),
+      sourceMeta('working-source', true),
+    ], {
+      'bad-quality-source': 'bad-script',
+      'working-source': 'working-script',
+    });
+    installJsenvMock((name, code, _timeoutMs, waitEvents) => {
+      if (waitEvents.includes('inited')) {
+        return result([initedEvent({ kg: {} })]);
+      }
+
+      if (name.includes('bad-quality-source')) {
+        return result([dispatchResultEvent(code, 'https://music.example/kg.php?type=mp3&id=abc&level=undefined')]);
+      }
+
+      return result([dispatchResultEvent(code, 'https://cdn.invalid/working.flac')]);
+    });
+    const manager = new RuntimeManager(managerSource);
+    await manager.loadEnabledSources();
+
+    await expect(manager.getMusicUrl('kg', 'flac24bit', {
+      ...songInfo,
+      source: 'kg',
+      hash: 'kg-hash',
+    }, {
+      operation: 'playback',
+      title: 'Synthetic Song',
+      artist: 'Synthetic Artist',
+    })).resolves.toBe('https://cdn.invalid/working.flac');
+
+    expect(sourceDiagnostics.list()).toEqual([
+      expect.objectContaining({
+        operation: 'playback',
+        status: 'failed',
+        sourceId: 'bad-quality-source',
+        platform: 'kg',
+        quality: 'flac24bit',
+        message: expect.stringContaining('undefined'),
+      }),
+      expect.objectContaining({
+        operation: 'playback',
+        status: 'success',
+        sourceId: 'working-source',
+        platform: 'kg',
+        quality: 'flac24bit',
+      }),
+    ]);
+    expect(manager.getLastMusicUrlAttempt()).toEqual({
+      attemptedSources: 2,
+      lastFailure: expect.stringContaining('undefined'),
+    });
+  });
+
   test('getMusicUrl continues to later enabled sources when one source times out', async () => {
     const manager = new RuntimeManager(fakeSourceManager(() => [], {}), { musicUrlTimeoutMs: 5 });
     const slowRuntime = {
