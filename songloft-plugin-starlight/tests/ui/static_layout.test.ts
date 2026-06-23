@@ -230,4 +230,17 @@ describe('static UI layout copy', () => {
     expect(speakerHtml).toContain('data-action="refresh-voice-records"');
     expect(speakerHtml).toContain('12 小时');
   });
+
+  it('mounts Songloft library controls for songs, playlists, and local songs', () => {
+    const html = indexHtml();
+
+    expect(html).toContain('<h2>Songloft 曲库</h2>');
+    expect(html).toContain('data-action="load-songloft-songs"');
+    expect(html).toContain('data-action="load-songloft-local-songs"');
+    expect(html).toContain('data-action="load-songloft-playlists"');
+    expect(html).toContain('data-role="songloft-songs"');
+    expect(html).toContain('data-role="songloft-local-songs"');
+    expect(html).toContain('data-role="songloft-playlists"');
+    expect(html).toContain('data-role="songloft-playlist-songs"');
+  });
 });

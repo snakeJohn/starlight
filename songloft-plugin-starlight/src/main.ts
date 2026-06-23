@@ -137,7 +137,7 @@ async function onInit(): Promise<void> {
   registerBridgeHandlers(router, bridgeService);
   registerDownloadHandlers(router, downloadSourceManager, downloadRuntimeManager, downloadService);
   registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);
-  registerSongloftLibraryHandlers(router);
+  registerSongloftLibraryHandlers(router, { playlistManagerMap });
   registerHealthHandlers(router, sourceManager, runtimeManager);
 
   runtimeManager.loadEnabledSources().catch(e => {

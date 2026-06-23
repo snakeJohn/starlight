@@ -143,6 +143,14 @@ function songAlbum(song) {
     return song?.album || song?.albumName || '未知专辑';
 }
 
+function songloftTypeLabel(song) {
+    const type = String(song?.type || '').trim().toLowerCase();
+    if (type === 'local') return '本地';
+    if (type === 'remote') return '网络';
+    if (type === 'radio') return '电台';
+    return type || 'Songloft';
+}
+
 function sourceMeta(song) {
     const data = song?.source_data || {};
     return [data.platform && platformName(data.platform), data.quality, durationLabel(song?.duration)]
@@ -514,6 +522,21 @@ export async function playSonglistOnSpeaker(songs) {
     }
     await importSongs(songs);
     return playOnSpeaker(songs[0]);
+}
+
+export async function playSongloftSongOnSpeaker(song) {
+    const payload = selectedDevicePayload();
+    if (!payload.account_id || !payload.device_id) {
+        throw new Error('请先在音箱页选择账号和设备');
+    }
+    const result = await api.post('/songloft/player/song', { ...payload, song });
+    setState({
+        playbackState: 'playing',
+        playerSongTitle: songTitle(song),
+        playerSongMeta: `${songArtist(song)} · Songloft`,
+    });
+    toast('Songloft 歌曲已发送到音箱播放');
+    return result;
 }
 
 export async function addSongToCustomPlaylist(playlistId, song) {
@@ -1182,6 +1205,151 @@ function bindDownloads() {
     });
 }
 
+async function loadSongloftSongs() {
+    const node = $('[data-role="songloft-songs"]');
+    if (node) node.innerHTML = '<div class="empty-state">正在加载 Songloft 歌曲库...</div>';
+    const data = await api.get('/songloft/songs');
+    const songs = asArray(data);
+    setState({ songloftSongs: songs });
+    $('[data-role="songloft-songs-total"]').textContent = String(resultCount(data));
+    renderSongloftSongList('songloft-songs', songs, 'Songloft 歌曲库为空。');
+    return songs;
+}
+
+async function loadSongloftLocalSongs() {
+    const node = $('[data-role="songloft-local-songs"]');
+    if (node) node.innerHTML = '<div class="empty-state">正在加载本地歌曲...</div>';
+    const data = await api.get('/songloft/local-songs');
+    const songs = asArray(data);
+    setState({ songloftLocalSongs: songs });
+    $('[data-role="songloft-local-total"]').textContent = String(resultCount(data));
+    renderSongloftSongList('songloft-local-songs', songs, '没有找到本地歌曲。');
+    return songs;
+}
+
+async function loadSongloftPlaylists() {
+    const node = $('[data-role="songloft-playlists"]');
+    if (node) node.innerHTML = '<div class="empty-state">正在加载 Songloft 歌单...</div>';
+    const data = await api.get('/songloft/playlists');
+    const playlists = asArray(data);
+    setState({ songloftPlaylists: playlists });
+    $('[data-role="songloft-playlists-total"]').textContent = String(resultCount(data));
+    renderSongloftPlaylists(playlists);
+    return playlists;
+}
+
+async function loadSongloftPlaylistSongs(playlist, index) {
+    const id = playlist?.id ?? playlist?.playlist_id ?? playlist?.playlistId;
+    if (!id) throw new Error('Songloft 歌单缺少 ID');
+    const node = $('[data-role="songloft-playlist-songs"]');
+    if (node) node.innerHTML = '<div class="empty-state">正在加载歌单歌曲...</div>';
+    const data = await api.get(`/songloft/playlists/${encodeURIComponent(id)}/songs`);
+    const songs = asArray(data);
+    setState({
+        songloftPlaylistSongs: songs,
+        songloftPlaylistTitle: songloftPlaylistTitle(playlist),
+        songloftPlaylistIndex: index,
+    });
+    $('[data-role="songloft-playlist-title"]').textContent = songloftPlaylistTitle(playlist);
+    $('[data-role="songloft-playlist-songs-total"]').textContent = String(resultCount(data));
+    renderSongloftSongList('songloft-playlist-songs', songs, '这个 Songloft 歌单没有歌曲。');
+    return songs;
+}
+
+function bindSongloftLibrary() {
+    $('[data-action="load-songloft-songs"]')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await loadSongloftSongs();
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    $('[data-action="load-songloft-local-songs"]')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await loadSongloftLocalSongs();
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    $('[data-action="load-songloft-playlists"]')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await loadSongloftPlaylists();
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    $('[data-role="songloft-songs"]')?.addEventListener('click', async event => {
+        const button = event.target.closest('[data-action="speaker-songloft-song"]');
+        if (!button) return;
+        button.disabled = true;
+        try {
+            const song = state.songloftSongs?.[Number(button.dataset.index)];
+            if (song) await playSongloftSongOnSpeaker(song);
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    $('[data-role="songloft-local-songs"]')?.addEventListener('click', async event => {
+        const button = event.target.closest('[data-action="speaker-songloft-song"]');
+        if (!button) return;
+        button.disabled = true;
+        try {
+            const song = state.songloftLocalSongs?.[Number(button.dataset.index)];
+            if (song) await playSongloftSongOnSpeaker(song);
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    $('[data-role="songloft-playlists"]')?.addEventListener('click', async event => {
+        const button = event.target.closest('[data-action="view-songloft-playlist"]');
+        if (!button) return;
+        button.disabled = true;
+        try {
+            const playlist = state.songloftPlaylists?.[Number(button.dataset.index)];
+            if (playlist) await loadSongloftPlaylistSongs(playlist, Number(button.dataset.index));
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    $('[data-role="songloft-playlist-songs"]')?.addEventListener('click', async event => {
+        const button = event.target.closest('[data-action="speaker-songloft-song"]');
+        if (!button) return;
+        button.disabled = true;
+        try {
+            const song = state.songloftPlaylistSongs?.[Number(button.dataset.index)];
+            if (song) await playSongloftSongOnSpeaker(song);
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+}
+
 function songListTitle(item) {
     return cleanDisplayText(item?.name || item?.title || item?.songlist_name) || '未命名歌单';
 }
@@ -1216,6 +1384,62 @@ export function renderSongListItem(item, index) {
             </div>
         </article>
     `;
+}
+
+function songloftPlaylistTitle(playlist) {
+    return playlist?.name || playlist?.title || '未命名歌单';
+}
+
+function songloftPlaylistSummary(playlist) {
+    const count = playlist?.song_count ?? playlist?.songCount ?? playlist?.count ?? playlist?.total;
+    return [playlist?.type, Number.isFinite(Number(count)) ? `${count} 首` : ''].filter(Boolean).join(' · ');
+}
+
+export function renderSongloftSongRow(song, index) {
+    return `
+        <article class="song-row media-row">
+            ${renderArtwork(song, songTitle(song))}
+            <div class="row-main">
+                <strong>${escapeHtml(songTitle(song))}</strong>
+                <span>${escapeHtml(songArtist(song))} · ${escapeHtml(songAlbum(song))}</span>
+                <span class="row-meta">${escapeHtml([songloftTypeLabel(song), durationLabel(song?.duration)].filter(Boolean).join(' · '))}</span>
+            </div>
+            <div class="row-actions">
+                <button type="button" data-action="speaker-songloft-song" data-index="${index}">音箱播放</button>
+            </div>
+        </article>
+    `;
+}
+
+function renderSongloftPlaylistRow(playlist, index) {
+    return `
+        <article class="songlist-row media-row">
+            ${renderArtwork(playlist, songloftPlaylistTitle(playlist))}
+            <div class="row-main">
+                <strong>${escapeHtml(songloftPlaylistTitle(playlist))}</strong>
+                <span>${escapeHtml(songloftPlaylistSummary(playlist))}</span>
+            </div>
+            <div class="row-actions">
+                <button type="button" data-action="view-songloft-playlist" data-index="${index}">查看歌曲</button>
+            </div>
+        </article>
+    `;
+}
+
+function renderSongloftSongList(role, songs, emptyText) {
+    const node = $(`[data-role="${role}"]`);
+    if (!node) return;
+    node.innerHTML = songs.length
+        ? renderListScroller(songs.map((song, index) => renderSongloftSongRow(song, index)).join(''), `${role}-scroll`)
+        : `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+}
+
+function renderSongloftPlaylists(playlists) {
+    const node = $('[data-role="songloft-playlists"]');
+    if (!node) return;
+    node.innerHTML = playlists.length
+        ? renderListScroller(playlists.map((playlist, index) => renderSongloftPlaylistRow(playlist, index)).join(''), 'songloft-playlists-scroll')
+        : '<div class="empty-state">暂无 Songloft 歌单。</div>';
 }
 
 function renderSongLists(items) {
@@ -1453,6 +1677,7 @@ export async function initMusicUI() {
     bindSearch();
     bindSources();
     bindDownloads();
+    bindSongloftLibrary();
     bindSongLists();
     bindRankings();
     bindCustomPlaylists();

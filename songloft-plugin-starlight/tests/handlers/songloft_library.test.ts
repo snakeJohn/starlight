@@ -24,9 +24,9 @@ function parseResponseBody(response: HTTPResponse): any {
   return JSON.parse(text);
 }
 
-function createHarness() {
+function createHarness(options: Parameters<typeof registerSongloftLibraryHandlers>[1] = {}) {
   const router = createRouter();
-  registerSongloftLibraryHandlers(router);
+  registerSongloftLibraryHandlers(router, options);
   return { router };
 }
 
@@ -111,6 +111,51 @@ describe('registerSongloftLibraryHandlers', () => {
         { id: 'local-3', title: 'Local C', local: true },
       ],
       total: 3,
+    });
+  });
+
+  it('pushes a Songloft library song to the selected speaker through the playlist manager', async () => {
+    const playStandalone = vi.fn(async () => true);
+    const getOrCreate = vi.fn(async () => ({ playStandalone }));
+    const { router } = createHarness({
+      playlistManagerMap: { getOrCreate } as any,
+    });
+    const body = JSON.stringify({
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+      song: {
+        id: 501,
+        type: 'local',
+        title: '本地歌曲',
+        artist: '歌手',
+        album: '专辑',
+        duration: 188,
+        cover_url: 'https://img.test/local.jpg',
+      },
+    });
+
+    const response = await router.handle({
+      ...request('POST', '/api/songloft/player/song'),
+      body,
+    } as HTTPRequest);
+
+    expect(response.statusCode).toBe(200);
+    expect(getOrCreate).toHaveBeenCalledWith('acc-1', 'dev-1');
+    expect(playStandalone).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 501,
+        type: 'local',
+        title: '本地歌曲',
+        artist: '歌手',
+        album: '专辑',
+        duration: 188,
+        url: '/api/v1/songs/501/play',
+        cover_url: 'https://img.test/local.jpg',
+      }),
+    ], 0, 'single');
+    expect(parseResponseBody(response).data).toEqual({
+      message: 'song started',
+      current_song: expect.objectContaining({ title: '本地歌曲' }),
     });
   });
 

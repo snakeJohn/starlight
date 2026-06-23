@@ -552,6 +552,11 @@ textarea:focus {
     margin-bottom: 0;
 }
 
+.compact-bar {
+    margin-top: 12px;
+    margin-bottom: 8px;
+}
+
 .custom-playlist-detail-panel .section-bar > div {
     min-width: 0;
     display: grid;
