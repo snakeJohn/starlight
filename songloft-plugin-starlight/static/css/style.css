@@ -14,6 +14,7 @@
     --danger: #c4362e;
     --radius: 8px;
     --shadow-soft: 0 18px 52px rgba(22, 33, 54, 0.12);
+    --bottom-tabs-height: calc(72px + env(safe-area-inset-bottom));
 }
 
 * {
@@ -771,7 +772,7 @@ textarea:focus {
 
 .voice-record-list {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
     gap: 10px;
 }
 
@@ -862,42 +863,6 @@ textarea:focus {
 
 .speaker-operations-layout .metric-grid {
     grid-template-columns: 1fr;
-}
-
-.speaker-side-stack,
-.speaker-player-panel {
-    min-width: 0;
-    display: grid;
-    gap: 14px;
-}
-
-.speaker-player-actions {
-    align-items: stretch;
-}
-
-.speaker-player-actions button {
-    flex: 1 1 76px;
-}
-
-.player-status-card {
-    min-width: 0;
-    display: grid;
-    gap: 4px;
-    border: 1px solid var(--surface-line);
-    border-radius: var(--radius);
-    padding: 9px 10px;
-    background: var(--surface-muted);
-}
-
-.player-status-card strong,
-.player-status-card span {
-    min-width: 0;
-    overflow-wrap: anywhere;
-}
-
-.player-status-card span {
-    color: var(--muted);
-    font-size: 12px;
 }
 
 .schedule-settings-form {
@@ -1152,7 +1117,7 @@ legend {
 @media (max-width: 760px) {
     .app-shell {
         grid-template-columns: 1fr;
-        padding-bottom: 72px;
+        padding-bottom: var(--bottom-tabs-height);
     }
 
     .side-rail {
@@ -1191,7 +1156,7 @@ legend {
         z-index: 40;
         display: grid;
         grid-template-columns: repeat(7, 1fr);
-        min-height: 64px;
+        min-height: var(--bottom-tabs-height);
         padding: 6px max(6px, env(safe-area-inset-left)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-right));
         border-top: 1px solid var(--surface-line);
         background: var(--surface-glass);

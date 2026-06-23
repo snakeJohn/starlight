@@ -10,6 +10,18 @@ function appJs(): string {
   return readFileSync(resolve(process.cwd(), 'static/js/app.js'), 'utf8');
 }
 
+function stateJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/state.js'), 'utf8');
+}
+
+function automationJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/automation.js'), 'utf8');
+}
+
+function speakerJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/speaker.js'), 'utf8');
+}
+
 function css(): string {
   return readFileSync(resolve(process.cwd(), 'static/css/style.css'), 'utf8');
 }
@@ -24,17 +36,25 @@ describe('static UI layout copy', () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
-  it('uses Chinese playback controls', () => {
+  it('does not render visible speaker playback controls', () => {
     const html = indexHtml();
+    const speaker = speakerJs();
+    const stylesheet = css();
 
-    expect(html).toContain('>上一首</button>');
-    expect(html).toContain('data-action="speaker-player-toggle"');
-    expect(html).toContain('>暂停</button>');
-    expect(html).toContain('>停止</button>');
-    expect(html).toContain('>下一首</button>');
+    expect(html).not.toContain('speaker-player-panel');
+    expect(html).not.toContain('data-role="speaker-player-device"');
+    expect(html).not.toContain('data-action="speaker-player-previous"');
+    expect(html).not.toContain('data-action="speaker-player-toggle"');
+    expect(html).not.toContain('data-action="speaker-player-stop"');
+    expect(html).not.toContain('data-action="speaker-player-next"');
+    expect(html).not.toContain('data-action="speaker-player-mode"');
+    expect(html).not.toContain('data-action="speaker-player-refresh"');
     expect(html).not.toContain('>Prev</button>');
     expect(html).not.toContain('>Stop</button>');
     expect(html).not.toContain('>Next</button>');
+    expect(speaker).not.toContain('speaker-player');
+    expect(stylesheet).not.toContain('.speaker-player');
+    expect(stylesheet).not.toContain('.player-status-card');
   });
 
   it('separates playlist import from custom playlist management and explains the target playlist', () => {
@@ -154,7 +174,7 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('white-space: normal');
   });
 
-  it('moves player and index controls into the speaker page', () => {
+  it('keeps index controls in the speaker page without a playback control panel', () => {
     const html = indexHtml();
     const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
     const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
@@ -166,10 +186,8 @@ describe('static UI layout copy', () => {
         : html.indexOf('</main>'),
     );
 
-    expect(speakerHtml).toContain('<h2>音箱控制</h2>');
-    expect(speakerHtml).toContain('data-role="speaker-player-device"');
-    expect(speakerHtml).toContain('data-action="speaker-player-previous"');
-    expect(speakerHtml).toContain('data-action="speaker-player-toggle"');
+    expect(speakerHtml).not.toContain('<h2>音箱控制</h2>');
+    expect(speakerHtml).not.toContain('speaker-player');
     expect(speakerHtml).toContain('<h2>索引</h2>');
     expect(speakerHtml).toContain('data-action="refresh-index"');
     expect(automationHtml).not.toContain('<h2>音箱控制</h2>');
@@ -222,6 +240,38 @@ describe('static UI layout copy', () => {
     expect(stylesheet).not.toContain('.global-player');
   });
 
+  it('does not retain dead handlers for hidden speaker and automation controls', () => {
+    const speaker = speakerJs();
+    const automation = automationJs();
+
+    expect(speaker).not.toContain('password-login-form');
+    expect(speaker).not.toContain('token-login-form');
+    expect(speaker).not.toContain('data-auth-mode');
+    expect(speaker).not.toContain('volume-form');
+    expect(speaker).not.toContain('url-play-form');
+    expect(automation).not.toContain('automation-player');
+    expect(automation).not.toContain('AutomationPlayer');
+  });
+
+  it('does not retain hidden settings field plumbing in automation config code', () => {
+    const automation = automationJs();
+
+    expect(automation).not.toContain('timezone');
+    expect(automation).not.toContain('external_search_url');
+    expect(automation).not.toContain('external_search_token');
+    expect(automation).not.toContain('extra_music_api_models');
+    expect(automation).not.toContain('indicator_light_enabled');
+    expect(automation).not.toContain('interrupt_tts_hint');
+    expect(automation).not.toContain('ai_config');
+    expect(automation).not.toContain('host-url');
+  });
+
+  it('does not retain local player state fields', () => {
+    expect(stateJs()).not.toContain('selectedSong');
+    expect(stateJs()).not.toContain('playbackState');
+    expect(readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8')).not.toContain('playbackState');
+  });
+
   it('does not render visible buttons labelled as playback', () => {
     const html = indexHtml();
     const js = appJs();
@@ -258,5 +308,14 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-role="songloft-local-songs"');
     expect(html).toContain('data-role="songloft-playlists"');
     expect(html).toContain('data-role="songloft-playlist-songs"');
+  });
+
+  it('keeps mobile voice records and bottom tabs within the viewport', () => {
+    const stylesheet = css();
+
+    expect(stylesheet).toContain('--bottom-tabs-height');
+    expect(stylesheet).toContain('padding-bottom: var(--bottom-tabs-height)');
+    expect(stylesheet).toContain('minmax(min(100%, 280px), 1fr)');
+    expect(stylesheet).not.toContain('grid-template-columns: repeat(auto-fit, minmax(280px, 1fr))');
   });
 });

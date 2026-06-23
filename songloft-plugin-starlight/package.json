@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "version:stamp": "node scripts/update-version.mjs",
-    "publish:release": "songloft-plugin publish",
+    "release:manifest": "node scripts/sync-release-manifest.mjs",
     "fetch:holidays": "node scripts/fetch-holidays.mjs"
   },
   "devDependencies": {

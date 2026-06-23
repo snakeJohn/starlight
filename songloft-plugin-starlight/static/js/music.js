@@ -554,7 +554,6 @@ export async function playSongloftSongOnSpeaker(song) {
         throw new Error('请先在音箱页选择账号和设备');
     }
     const result = await api.post('/songloft/player/song', { ...payload, song });
-    setState({ playbackState: 'playing' });
     toast('Songloft 歌曲已推送到音箱');
     return result;
 }
@@ -652,7 +651,6 @@ export async function playCustomPlaylistOnSpeaker(playlist) {
         start_index: 0,
         play_mode: 'order',
     });
-    setState({ playbackState: 'playing' });
     toast('歌单已推送到音箱');
     return result;
 }

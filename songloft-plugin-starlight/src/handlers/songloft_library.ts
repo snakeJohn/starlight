@@ -2,6 +2,7 @@ import type { HTTPResponse, Router } from '@songloft/plugin-sdk';
 import { apiError, apiOk } from '../system/response';
 import { StarlightError } from '../system/errors';
 import type { PlaylistManagerMap, PlayerSong } from '../player/manager';
+import { isPlayMode } from '../player/modes';
 import type { PlayMode } from '../types';
 
 interface NormalizedList {
@@ -19,7 +20,8 @@ async function handle(fn: () => unknown | Promise<unknown>): Promise<HTTPRespons
   try {
     return apiOk(await fn());
   } catch (error) {
-    return apiError(error);
+    const statusCode = error instanceof StarlightError && error.code === 'BAD_REQUEST' ? 400 : 500;
+    return apiError(error, statusCode);
   }
 }
 
@@ -208,7 +210,11 @@ export function registerSongloftLibraryHandlers(router: Router, options: Songlof
       const body = parseBody(req);
       const accountId = requireId(body.account_id, 'account_id');
       const deviceId = requireId(body.device_id, 'device_id');
-      const playMode = (stringValue(body.play_mode) || 'single') as PlayMode;
+      const requestedPlayMode = stringValue(body.play_mode);
+      if (requestedPlayMode && !isPlayMode(requestedPlayMode)) {
+        throw new StarlightError('BAD_REQUEST', 'invalid play_mode');
+      }
+      const playMode: PlayMode = requestedPlayMode ? requestedPlayMode as PlayMode : 'single';
       const song = toPlayerSong(body.song);
       const manager = await options.playlistManagerMap.getOrCreate(accountId, deviceId);
       const ok = await manager.playStandalone([song], 0, playMode);

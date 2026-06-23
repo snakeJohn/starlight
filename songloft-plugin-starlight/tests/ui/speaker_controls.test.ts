@@ -5,8 +5,6 @@ interface SpeakerControlsModule {
   normalizeDeviceName(device: Record<string, unknown>): string;
   renderAccountRow(account: Record<string, unknown>): string;
   selectAndPersistDevice(accountId: string, deviceId: string, name?: string): Promise<void>;
-  runPlayerAction(action: string): Promise<Record<string, unknown>>;
-  togglePlayerPlayback(): Promise<Record<string, unknown>>;
   renderVoiceRecordList(records: Array<Record<string, unknown>>, now?: number): string;
 }
 
@@ -64,38 +62,6 @@ describe('speaker controls helpers', () => {
 
     expect(speaker.normalizeDeviceId({ deviceID: 'xiaomi-device-1' })).toBe('xiaomi-device-1');
     expect(speaker.normalizeDeviceName({ name: '厨房音箱', deviceID: 'xiaomi-device-1' })).toBe('厨房音箱');
-  });
-
-  it('toggles playlist playback through the player toggle endpoint', async () => {
-    installDom();
-    const fetchMock = vi.fn(async () => okResponse({ state: 'paused', message: 'playlist paused' }) as Response);
-    vi.stubGlobal('fetch', fetchMock);
-    const { speaker, state } = await loadModules();
-    state.accountId = 'miot-account';
-    state.deviceId = 'speaker-1';
-
-    await expect(speaker.togglePlayerPlayback()).resolves.toMatchObject({ state: 'paused' });
-
-    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/toggle', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({ account_id: 'miot-account', device_id: 'speaker-1' }),
-    }));
-  });
-
-  it('runs speaker page player controls against the selected speaker', async () => {
-    installDom();
-    const fetchMock = vi.fn(async () => okResponse({ message: 'playing next song' }) as Response);
-    vi.stubGlobal('fetch', fetchMock);
-    const { speaker, state } = await loadModules();
-    state.accountId = 'miot-account';
-    state.deviceId = 'speaker-1';
-
-    await expect(speaker.runPlayerAction('speaker-player-next')).resolves.toMatchObject({ message: 'playing next song' });
-
-    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/next', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({ account_id: 'miot-account', device_id: 'speaker-1' }),
-    }));
   });
 
   it('renders selected account rows with relogin and delete actions', async () => {

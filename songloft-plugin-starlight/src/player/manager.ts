@@ -38,15 +38,6 @@ export interface DynamicPlaylistOptions {
   dynamicSongResolver?: (song: PlayerSong) => Promise<PlayerSong | null>;
 }
 
-/** 宿主API歌单歌曲响应 */
-interface PlaylistSongsResponse {
-  code: number;
-  data: {
-    songs: PlayerSong[];
-    total: number;
-  };
-}
-
 // ===== PlaylistManager - 单设备播放管理器 =====
 
 /**
@@ -65,7 +56,6 @@ export class PlaylistManager {
   private songs: PlayerSong[] = [];
   private currentIndex: number = 0;
   private checkTimer: any = null;       // 定时器ID（基于歌曲时长的切歌定时器）
-  private totalSongs: number = 0;
   private playStartTimeMs: number = 0;  // 当前歌曲开始播放的时间戳(ms)
   private randomPlayed: Set<number> = new Set(); // 随机模式已播放索引
   private voiceSuspendedAt: number = 0; // suspendForVoiceInteraction 首次调用时间戳
@@ -147,7 +137,6 @@ export class PlaylistManager {
     }
 
     this.songs = songs;
-    this.totalSongs = songs.length;
     this.playlistId = 0;
     this.currentIndex = startIndex >= 0 && startIndex < songs.length ? startIndex : 0;
     this.playMode = mode;
@@ -451,7 +440,6 @@ export class PlaylistManager {
    */
   initWithSongs(songs: PlayerSong[], startIndex: number, playMode: PlayMode, playlistId: number): void {
     this.songs = songs;
-    this.totalSongs = songs.length;
     this.currentIndex = (startIndex >= 0 && startIndex < songs.length) ? startIndex : 0;
     this.playMode = playMode;
     this.playlistId = playlistId;
@@ -473,7 +461,6 @@ export class PlaylistManager {
           return false;
         }
         this.songs = songs;
-        this.totalSongs = songs.length;
         return songs.length > 0;
       }
 
@@ -485,7 +472,6 @@ export class PlaylistManager {
         return false;
       }
       this.songs = songs as any;
-      this.totalSongs = songs.length;
       return songs.length > 0;
     } catch (e) {
       songloft.log.error('[PlaylistManager] Failed to load playlist songs: ' + String(e));

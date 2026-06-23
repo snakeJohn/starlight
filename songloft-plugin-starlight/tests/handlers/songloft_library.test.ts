@@ -168,6 +168,32 @@ describe('registerSongloftLibraryHandlers', () => {
     });
   });
 
+  it('rejects invalid play modes when pushing a Songloft library song to the speaker', async () => {
+    const playStandalone = vi.fn(async () => true);
+    const getOrCreate = vi.fn(async () => ({ playStandalone }));
+    const { router } = createHarness({
+      playlistManagerMap: { getOrCreate } as any,
+    });
+
+    const response = await router.handle({
+      ...request('POST', '/api/songloft/player/song'),
+      body: JSON.stringify({
+        account_id: 'acc-1',
+        device_id: 'dev-1',
+        play_mode: 'shuffle_all',
+        song: {
+          id: 501,
+          title: '本地歌曲',
+        },
+      }),
+    } as unknown as HTTPRequest);
+
+    expect(response.statusCode).toBe(400);
+    expect(parseResponseBody(response).success).toBe(false);
+    expect(getOrCreate).not.toHaveBeenCalled();
+    expect(playStandalone).not.toHaveBeenCalled();
+  });
+
   it('registers Songloft library routes during plugin init', async () => {
     vi.resetModules();
     (songloft.songs as unknown as SongloftSongsStub).list = vi.fn(async () => [{ id: 'song-main', title: 'From Main' }]);

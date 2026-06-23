@@ -3,8 +3,7 @@ import { LX_SHIM } from '../../src/music/lx_shim';
 import { RuntimeManager } from '../../src/music/runtime_manager';
 import { SourceRuntime } from '../../src/music/runtime';
 import type { SourceManager } from '../../src/music/source_manager';
-import type { LxSongInfo, MusicPlatform, MusicQuality, MusicSourceMeta } from '../../src/music/types';
-import { StarlightError } from '../../src/system/errors';
+import type { LxSongInfo, MusicSourceMeta } from '../../src/music/types';
 
 interface JsenvEvent {
   name: string;

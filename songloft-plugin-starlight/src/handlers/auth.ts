@@ -4,7 +4,6 @@
 import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { AuthService } from '../auth/service';
-import { AccountManager } from '../account/manager';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
 function parseBody(req: HTTPRequest): any {
@@ -33,7 +32,6 @@ function parseBody(req: HTTPRequest): any {
 export function registerAuthHandlers(
   router: Router,
   authService: AuthService,
-  accountManager: AccountManager,
 ): void {
 
   // POST /auth/login - 密码登录

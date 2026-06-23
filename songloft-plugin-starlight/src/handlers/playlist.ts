@@ -5,7 +5,7 @@ import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { PlaylistManagerMap } from '../player/manager';
 import { MinaService } from '../service/service';
-import { ConfigManager } from '../config/manager';
+import { isPlayMode } from '../player/modes';
 import type { PlayMode } from '../types';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
@@ -19,21 +19,6 @@ function parseBody(req: HTTPRequest): any {
   } catch {
     return {};
   }
-}
-
-/** 判断是否为本地回环地址 */
-function isLoopbackAddress(host: string): boolean {
-  if (!host) return false;
-  let hostname = host;
-  const protoIdx = host.indexOf('://');
-  if (protoIdx >= 0) {
-    const rest = host.slice(protoIdx + 3);
-    const slashIdx = rest.indexOf('/');
-    const colonIdx = rest.indexOf(':');
-    hostname = rest.slice(0, slashIdx >= 0 ? slashIdx : (colonIdx >= 0 ? colonIdx : undefined));
-  }
-  hostname = hostname.toLowerCase().trim();
-  return hostname === 'localhost' || hostname.startsWith('127.') || hostname === '::1';
 }
 
 /** 设备播放状态缓存（避免多调用方重复查询设备） */
@@ -77,11 +62,10 @@ export function registerPlaylistHandlers(
   router: Router,
   playlistManagerMap: PlaylistManagerMap,
   minaService: MinaService,
-  configManager: ConfigManager,
 ): void {
 
   // GET /playlists - 获取歌单列表
-  router.get('/playlists', async (req: HTTPRequest) => {
+  router.get('/playlists', async () => {
     try {
       const playlists = await songloft.playlists.list();
       return jsonResponse({ success: true, data: playlists });
@@ -91,7 +75,7 @@ export function registerPlaylistHandlers(
   });
 
   // GET /playlists/:id/songs - 获取歌单歌曲
-  router.get('/playlists/:id/songs', async (req: HTTPRequest, params: Record<string, string>) => {
+  router.get('/playlists/:id/songs', async (_req: HTTPRequest, params: Record<string, string>) => {
     try {
       const playlistId = Number(params.id);
       if (!playlistId || isNaN(playlistId)) {
@@ -119,10 +103,22 @@ export function registerPlaylistHandlers(
       if (!playlist_id) {
         return jsonResponse({ success: false, error: 'playlist_id is required' });
       }
+      const playlistId = Number(playlist_id);
+      if (!Number.isFinite(playlistId) || playlistId === 0) {
+        return jsonResponse({ success: false, error: 'invalid playlist_id' });
+      }
+      const startIndex = start_index === undefined || start_index === null ? 0 : Number(start_index);
+      if (!Number.isInteger(startIndex) || startIndex < 0) {
+        return jsonResponse({ success: false, error: 'start_index must be a non-negative integer' });
+      }
+      const modeValue = play_mode || 'order';
+      if (!isPlayMode(modeValue)) {
+        return jsonResponse({ success: false, error: 'invalid play_mode' });
+      }
 
       const manager = await playlistManagerMap.getOrCreate(account_id, device_id);
-      const mode: PlayMode = play_mode || 'order';
-      const ok = await manager.play(Number(playlist_id), start_index || 0, mode);
+      const mode: PlayMode = modeValue;
+      const ok = await manager.play(playlistId, startIndex, mode);
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to start playlist' });
       }
@@ -131,7 +127,7 @@ export function registerPlaylistHandlers(
         success: true,
         data: {
           message: 'playlist started',
-          playlist_id: Number(playlist_id),
+          playlist_id: playlistId,
           play_mode: mode,
           current_song: manager.getCurrentSong(),
         },
@@ -299,13 +295,16 @@ export function registerPlaylistHandlers(
       if (!play_mode) {
         return jsonResponse({ success: false, error: 'play_mode is required' });
       }
+      if (!isPlayMode(play_mode)) {
+        return jsonResponse({ success: false, error: 'invalid play_mode' });
+      }
 
       const manager = playlistManagerMap.get(account_id, device_id);
       if (!manager) {
         return jsonResponse({ success: false, error: 'no active playlist for this device' });
       }
 
-      await manager.setPlayMode(play_mode as PlayMode);
+      await manager.setPlayMode(play_mode);
       return jsonResponse({ success: true, data: { message: 'play mode set', play_mode } });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });

@@ -111,7 +111,7 @@ async function onInit(): Promise<void> {
     platformRegistry,
   );
 
-  const executor = new TaskExecutor(configManager, accountManager, minaService, playlistManagerMap, indexingManager, conversationMonitor);
+  const executor = new TaskExecutor(configManager, minaService, playlistManagerMap, indexingManager, conversationMonitor);
   scheduler = new Scheduler(configManager, executor);
 
   // 如果配置中没有语音口令配置，写入默认配置
@@ -124,10 +124,10 @@ async function onInit(): Promise<void> {
 
   // 注册所有路由
   const miotRouter = prefixRouter(router, '/api/miot');
-  registerAccountHandlers(miotRouter, accountManager, authService);
-  registerAuthHandlers(miotRouter, authService, accountManager);
+  registerAccountHandlers(miotRouter, accountManager);
+  registerAuthHandlers(miotRouter, authService);
   registerDeviceHandlers(miotRouter, minaService, accountManager, playlistManagerMap, conversationMonitor);
-  registerPlaylistHandlers(miotRouter, playlistManagerMap, minaService, configManager);
+  registerPlaylistHandlers(miotRouter, playlistManagerMap, minaService);
   registerConfigHandlers(miotRouter, configManager, conversationMonitor, scheduler, voiceEngine);
   registerConversationHandlers(miotRouter, conversationMonitor, configManager);
   registerScheduleHandlers(miotRouter, scheduler, configManager);
