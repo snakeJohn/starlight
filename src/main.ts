@@ -82,13 +82,13 @@ async function onInit(): Promise<void> {
 
   sourceManager = new SourceManager(new SourceStore());
   await sourceManager.init();
-  runtimeManager = new RuntimeManager(sourceManager);
+  runtimeManager = new RuntimeManager(sourceManager, { runtimeNamespace: 'playback' });
   downloadSourceManager = new SourceManager(new SourceStore({
     indexKey: 'starlight:music:download_sources',
     scriptPrefix: 'starlight:music:download_source_script:',
   }));
   await downloadSourceManager.init();
-  downloadRuntimeManager = new RuntimeManager(downloadSourceManager);
+  downloadRuntimeManager = new RuntimeManager(downloadSourceManager, { runtimeNamespace: 'download' });
   platformRegistry = new PlatformRegistry();
   bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService, playlistManagerMap);
   downloadService = new DownloadService(downloadRuntimeManager);

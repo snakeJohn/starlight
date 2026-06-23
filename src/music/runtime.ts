@@ -22,11 +22,17 @@ interface DispatchEnvelope {
   error?: unknown;
 }
 
+interface SourceRuntimeOptions {
+  runtimeNamespace?: string;
+}
+
 let nextDispatchId = 1;
 
-function envNameFor(sourceId: string): string {
-  const sanitized = sourceId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return `starlight_lx_${sanitized}_${stableShortHash(sourceId)}`;
+function envNameFor(sourceId: string, runtimeNamespace = ''): string {
+  const namespacedSourceId = runtimeNamespace ? `${runtimeNamespace}_${sourceId}` : sourceId;
+  const hashSource = runtimeNamespace ? `${runtimeNamespace}:${sourceId}` : sourceId;
+  const sanitized = namespacedSourceId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `starlight_lx_${sanitized}_${stableShortHash(hashSource)}`;
 }
 
 function stableShortHash(value: string): string {
@@ -101,8 +107,8 @@ export class SourceRuntime {
     private readonly config: SourceConfig,
   ) {}
 
-  static async create(sourceId: string, script: string): Promise<SourceRuntime> {
-    const envName = envNameFor(sourceId);
+  static async create(sourceId: string, script: string, options: SourceRuntimeOptions = {}): Promise<SourceRuntime> {
+    const envName = envNameFor(sourceId, options.runtimeNamespace);
 
     try {
       await songloft.jsenv.create(envName, LX_SHIM);

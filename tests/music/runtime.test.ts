@@ -805,6 +805,46 @@ describe('RuntimeManager', () => {
     expect(manager.count()).toBe(1);
   });
 
+  test('runtime namespaces keep playback and download managers from sharing the same jsenv', async () => {
+    const managerSource = fakeSourceManager(() => [sourceMeta('星海音乐源', true)], {
+      '星海音乐源': 'script',
+    });
+    const activeEnvs = new Set<string>();
+    const create = vi.fn(async (name: string) => {
+      activeEnvs.add(name);
+      return '';
+    });
+    const executeWait = vi.fn(async (name: string, code: string, _timeoutMs: number, waitEvents: string[]) => {
+      if (!activeEnvs.has(name)) {
+        throw new Error(`env jsplugin-starlight::${name} not found`);
+      }
+      if (waitEvents.includes('inited')) {
+        return result([initedEvent({ kw: {} })]);
+      }
+      return result([dispatchResultEvent(code, `https://cdn.invalid/${name}.mp3`)]);
+    });
+    const destroy = vi.fn(async (name: string) => {
+      activeEnvs.delete(name);
+    });
+    const jsenv = songloft.jsenv as unknown as TestJsenv;
+    jsenv.create = create;
+    jsenv.executeWait = executeWait;
+    jsenv.destroy = destroy;
+
+    const playbackManager = new RuntimeManager(managerSource, { runtimeNamespace: 'playback' });
+    const downloadManager = new RuntimeManager(managerSource, { runtimeNamespace: 'download' });
+    await playbackManager.loadEnabledSources();
+    await downloadManager.loadEnabledSources();
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[0][0]).not.toBe(create.mock.calls[1][0]);
+
+    await playbackManager.close();
+    await expect(downloadManager.getMusicUrl('kw', '320k', songInfo)).resolves.toMatch(
+      /^https:\/\/cdn\.invalid\/starlight_lx_download_/,
+    );
+  });
+
   test('getMusicUrl skips unsupported platforms and returns first matching URL', async () => {
     const managerSource = fakeSourceManager(
       () => [sourceMeta('kw-only', true), sourceMeta('kg-only', true)],

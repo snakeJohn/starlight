@@ -10,6 +10,7 @@ export interface MusicUrlResolutionAttempt {
 
 export interface RuntimeManagerOptions {
   musicUrlTimeoutMs?: number;
+  runtimeNamespace?: string;
 }
 
 export interface MusicUrlResolveOptions {
@@ -27,12 +28,14 @@ export class RuntimeManager {
   private lastMusicUrlAttempt: MusicUrlResolutionAttempt = { attemptedSources: 0, lastFailure: null };
   private readonly musicUrlTimeoutMs: number;
   private readonly runtimeSources = new WeakMap<SourceRuntime, MusicSourceMeta>();
+  private readonly runtimeNamespace: string;
 
   constructor(private readonly sourceManager: SourceManager, options: RuntimeManagerOptions = {}) {
     const timeout = Number(options.musicUrlTimeoutMs);
     this.musicUrlTimeoutMs = Number.isFinite(timeout) && timeout > 0
       ? timeout
       : DEFAULT_MUSIC_URL_TIMEOUT_MS;
+    this.runtimeNamespace = typeof options.runtimeNamespace === 'string' ? options.runtimeNamespace.trim() : '';
   }
 
   async loadEnabledSources(): Promise<void> {
@@ -55,7 +58,9 @@ export class RuntimeManager {
             continue;
           }
 
-          const runtime = await SourceRuntime.create(source.id, script);
+          const runtime = await SourceRuntime.create(source.id, script, {
+            runtimeNamespace: this.runtimeNamespace,
+          });
           this.runtimeSources.set(runtime, source);
           nextRuntimes.push(runtime);
         } catch (error) {
