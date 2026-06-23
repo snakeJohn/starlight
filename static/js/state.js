@@ -13,6 +13,7 @@ export const state = {
     accountId: '',
     deviceId: '',
     deviceName: '',
+    speakerPlayerState: 'idle',
     platform: 'kw',
     quality: '320k',
     searchQuery: null,

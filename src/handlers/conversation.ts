@@ -22,6 +22,7 @@ function parseBody(req: HTTPRequest): any {
 /**
  * 注册对话监听相关路由
  * GET    /conversation/messages  → 获取对话记录
+ * POST   /conversation/messages/clear → 清空插件缓存的对话记录
  * GET    /conversation/status    → 获取监听状态
  * POST   /conversation/webhooks  → 注册Webhook
  * GET    /conversation/webhooks  → 获取Webhook列表
@@ -42,6 +43,16 @@ export function registerConversationHandlers(
 
       const messages = conversationMonitor.getMessages(limit, sinceMs);
       return jsonResponse({ success: true, data: messages, count: messages.length });
+    } catch (e: any) {
+      return jsonResponse({ success: false, error: e.message || String(e) });
+    }
+  });
+
+  // POST /conversation/messages/clear - 清空插件内存缓存，不删除米家云端历史
+  router.post('/conversation/messages/clear', async () => {
+    try {
+      const cleared = conversationMonitor.clearMessages();
+      return jsonResponse({ success: true, data: { cleared } });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });
     }

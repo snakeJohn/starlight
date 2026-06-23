@@ -12,6 +12,7 @@ import type { LxSongInfo } from '../music/types';
 interface SearchBody {
   keyword?: unknown;
   source_id?: unknown;
+  quality?: unknown;
   page?: unknown;
   page_size?: unknown;
 }
@@ -143,6 +144,30 @@ function reloadRuntimesInBackground(runtimes: RuntimeManager): void {
   });
 }
 
+function applyRequestedQuality<T>(result: T, quality: string): T {
+  if (!quality || !result || typeof result !== 'object') {
+    return result;
+  }
+
+  const record = result as Record<string, unknown>;
+  const collections = [record.list, record.songs, Array.isArray(result) ? result : null];
+  for (const collection of collections) {
+    if (!Array.isArray(collection)) continue;
+    for (const item of collection) {
+      if (!item || typeof item !== 'object') continue;
+      const song = item as Record<string, unknown>;
+      const sourceData = song.source_data;
+      if (!sourceData || typeof sourceData !== 'object') continue;
+      song.source_data = {
+        ...(sourceData as Record<string, unknown>),
+        quality,
+      };
+    }
+  }
+
+  return result;
+}
+
 export function registerMusicHandlers(
   router: Router,
   sources: SourceManager,
@@ -189,7 +214,9 @@ export function registerMusicHandlers(
     handle(async () => {
       const body = parseJsonBody<SearchBody>(req);
       const provider = providerFor(platforms, body.source_id);
-      return provider.search(requireKeyword(body.keyword), page(body.page), pageSize(body.page_size));
+      const quality = stringField(body.quality);
+      const result = await provider.search(requireKeyword(body.keyword), page(body.page), pageSize(body.page_size));
+      return applyRequestedQuality(result, quality);
     }));
 
   router.post('/api/music/url', async (req) =>

@@ -18,6 +18,57 @@ import {
 import type { XiaomiTokenInfo, MinaDevice, AskMessage } from '../types';
 import type { DeviceInfoRaw, DeviceListResponse, UbusResponse, NlpResultData, NlpInfoData, NlpDetail, ConversationData } from './models';
 
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function firstText(...values: unknown[]): string {
+  for (const value of values) {
+    const direct = stringValue(value);
+    if (direct) return direct;
+
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      const nested = firstText(
+        record.text,
+        record.to_speak,
+        record.toSpeak,
+        record.displayText,
+        record.display_text,
+        record.answer,
+        record.content,
+      );
+      if (nested) return nested;
+    }
+  }
+
+  return '';
+}
+
+export function extractConversationAnswerText(record: unknown): string {
+  if (!record || typeof record !== 'object') return '';
+
+  const item = record as Record<string, unknown>;
+  const answers = Array.isArray(item.answers) ? item.answers : [];
+  for (const answer of answers) {
+    if (!answer || typeof answer !== 'object') continue;
+    const ans = answer as Record<string, unknown>;
+    const tts = ans.tts && typeof ans.tts === 'object' ? ans.tts as Record<string, unknown> : {};
+    const text = firstText(
+      tts.text,
+      ans.text,
+      ans.content,
+      ans.displayText,
+      ans.display_text,
+      ans.answer,
+      ans.value,
+    );
+    if (text) return text;
+  }
+
+  return firstText(item.answer, item.text, item.content, item.displayText, item.display_text);
+}
+
 /**
  * MinaHTTPClient - 小爱音箱 API 客户端
  * 提供设备控制、播放管理、对话记录获取等功能
@@ -511,9 +562,7 @@ export class MinaHTTPClient {
 
       // 转换为 AskMessage 格式（与 WASM 版一致）
       const messages = dataObj.records.map(record => {
-        // 从 answers 中找到 TTS 类型的回答，安全访问 tts.text
-        const ttsAnswer = (record.answers || []).find(a => a.type === 'TTS');
-        const answerText = ttsAnswer?.tts?.text || '';
+        const answerText = extractConversationAnswerText(record);
         return {
           timestamp_ms: record.time,
           response: {

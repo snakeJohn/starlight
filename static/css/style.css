@@ -857,6 +857,55 @@ textarea:focus {
     grid-template-columns: minmax(0, 1.28fr) minmax(240px, 0.72fr);
 }
 
+.speaker-side-stack,
+.speaker-player-panel {
+    min-width: 0;
+    display: grid;
+    gap: 14px;
+}
+
+.speaker-player-actions {
+    align-items: stretch;
+}
+
+.speaker-player-actions button {
+    flex: 1 1 76px;
+}
+
+.player-status-card {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+    border: 1px solid var(--surface-line);
+    border-radius: var(--radius);
+    padding: 9px 10px;
+    background: var(--surface-muted);
+}
+
+.player-status-card strong,
+.player-status-card span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.player-status-card span {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.songloft-library-sections {
+    display: grid;
+    gap: 12px;
+}
+
+.songloft-library-section {
+    min-width: 0;
+    border: 1px solid var(--surface-line);
+    border-radius: var(--radius);
+    padding: 10px;
+    background: var(--surface-muted);
+}
+
 .automation-layout {
     grid-template-columns: minmax(0, 1fr) minmax(220px, 0.34fr);
 }

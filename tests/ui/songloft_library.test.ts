@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 interface MusicModule {
   renderSongloftSongRow(song: Record<string, unknown>, index: number): string;
   playSongloftSongOnSpeaker(song: Record<string, unknown>): Promise<unknown>;
+  setSongloftLibraryPanelExpanded(kind: string, expanded: boolean): boolean;
 }
 
 interface StateModule {
@@ -85,5 +86,41 @@ describe('Songloft library UI', () => {
         song,
       }),
     }));
+  });
+
+  it('can expand and collapse Songloft library sections independently', async () => {
+    const panel = {
+      hidden: true,
+      setAttribute: vi.fn(),
+    };
+    const button = {
+      classList: { toggle: vi.fn() },
+      setAttribute: vi.fn(),
+    };
+    vi.stubGlobal('document', {
+      querySelector: vi.fn((selector: string) => {
+        if (selector === '[data-role="songloft-songs-panel"]') return panel;
+        if (selector === '[data-action="load-songloft-songs"]') return button;
+        return null;
+      }),
+      createElement: vi.fn(() => ({ className: '', textContent: '', remove: vi.fn() })),
+      body: { appendChild: vi.fn() },
+    });
+    vi.stubGlobal('window', {
+      setTimeout: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+    vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
+    const { music } = await loadModules();
+
+    expect(music.setSongloftLibraryPanelExpanded('songs', true)).toBe(true);
+    expect(panel.hidden).toBe(false);
+    expect(button.setAttribute).toHaveBeenCalledWith('aria-expanded', 'true');
+    expect(button.classList.toggle).toHaveBeenCalledWith('selected-action', true);
+
+    expect(music.setSongloftLibraryPanelExpanded('songs', false)).toBe(true);
+    expect(panel.hidden).toBe(true);
+    expect(button.setAttribute).toHaveBeenLastCalledWith('aria-expanded', 'false');
+    expect(button.classList.toggle).toHaveBeenLastCalledWith('selected-action', false);
   });
 });

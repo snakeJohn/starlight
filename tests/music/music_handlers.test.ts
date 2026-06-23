@@ -184,6 +184,19 @@ describe('registerMusicHandlers', () => {
     expect(parseResponseBody(missingKeyword).error.code).toBe('BAD_REQUEST');
   });
 
+  test('search applies the requested quality to returned song source data', async () => {
+    const { router } = createHarness();
+
+    const response = await router.handle(request('POST', '/api/music/search', {
+      keyword: 'hello',
+      source_id: 'kw',
+      quality: 'flac24bit',
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response).data.list[0].source_data.quality).toBe('flac24bit');
+  });
+
   test('search rejects invalid pagination values', async () => {
     const invalidBodies = [
       { keyword: 'hello', source_id: 'kw', page: 0 },

@@ -36,25 +36,29 @@ describe('static UI layout copy', () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
-  it('does not render visible speaker playback controls', () => {
+  it('renders speaker playback controls in the speaker page only', () => {
     const html = indexHtml();
     const speaker = speakerJs();
     const stylesheet = css();
 
-    expect(html).not.toContain('speaker-player-panel');
-    expect(html).not.toContain('data-role="speaker-player-device"');
-    expect(html).not.toContain('data-action="speaker-player-previous"');
-    expect(html).not.toContain('data-action="speaker-player-toggle"');
-    expect(html).not.toContain('data-action="speaker-player-stop"');
-    expect(html).not.toContain('data-action="speaker-player-next"');
-    expect(html).not.toContain('data-action="speaker-player-mode"');
-    expect(html).not.toContain('data-action="speaker-player-refresh"');
+    expect(html).toContain('speaker-player-panel');
+    expect(html).toContain('data-role="speaker-player-device"');
+    expect(html).toContain('data-action="speaker-player-previous"');
+    expect(html).toContain('data-action="speaker-player-toggle"');
+    expect(html).toContain('data-action="speaker-player-stop"');
+    expect(html).toContain('data-action="speaker-player-next"');
+    expect(html).toContain('data-action="speaker-player-mode"');
+    expect(html).toContain('data-action="speaker-player-refresh"');
     expect(html).not.toContain('>Prev</button>');
     expect(html).not.toContain('>Stop</button>');
     expect(html).not.toContain('>Next</button>');
-    expect(speaker).not.toContain('speaker-player');
-    expect(stylesheet).not.toContain('.speaker-player');
-    expect(stylesheet).not.toContain('.player-status-card');
+    expect(html).toContain('>上一首</button>');
+    expect(html).toContain('>暂停播放</button>');
+    expect(html).toContain('>停止</button>');
+    expect(html).toContain('>下一首</button>');
+    expect(speaker).toContain('speaker-player');
+    expect(stylesheet).toContain('.speaker-player');
+    expect(stylesheet).toContain('.player-status-card');
   });
 
   it('separates playlist import from custom playlist management and explains the target playlist', () => {
@@ -128,6 +132,12 @@ describe('static UI layout copy', () => {
     expect(html).toContain('批量推送音箱');
   });
 
+  it('passes the selected quality through search requests', () => {
+    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+
+    expect(music).toContain('quality: query.quality');
+  });
+
   it('defines scroll containers and mobile wrapping for long music lists', () => {
     const stylesheet = css();
 
@@ -174,7 +184,7 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('white-space: normal');
   });
 
-  it('keeps index controls in the speaker page without a playback control panel', () => {
+  it('keeps speaker playback and index controls in the speaker page only', () => {
     const html = indexHtml();
     const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
     const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
@@ -187,10 +197,12 @@ describe('static UI layout copy', () => {
     );
 
     expect(speakerHtml).not.toContain('<h2>音箱控制</h2>');
-    expect(speakerHtml).not.toContain('speaker-player');
+    expect(speakerHtml).toContain('speaker-player-panel');
+    expect(speakerHtml).toContain('<h2>音箱播放</h2>');
     expect(speakerHtml).toContain('<h2>索引</h2>');
     expect(speakerHtml).toContain('data-action="refresh-index"');
     expect(automationHtml).not.toContain('<h2>音箱控制</h2>');
+    expect(automationHtml).not.toContain('speaker-player');
     expect(automationHtml).not.toContain('<h2>索引</h2>');
   });
 
@@ -268,20 +280,19 @@ describe('static UI layout copy', () => {
 
   it('does not retain local player state fields', () => {
     expect(stateJs()).not.toContain('selectedSong');
-    expect(stateJs()).not.toContain('playbackState');
     expect(readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8')).not.toContain('playbackState');
   });
 
-  it('does not render visible buttons labelled as playback', () => {
+  it('does not render local playback buttons outside the speaker player', () => {
     const html = indexHtml();
-    const js = appJs();
+    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
     const staticButtonLabels = Array.from(html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g))
       .map((match) => match[1].replace(/<[^>]+>/g, '').trim())
       .filter(Boolean);
 
-    expect(staticButtonLabels.filter((label) => label.includes('播放'))).toEqual([]);
-    expect(js).not.toContain('暂停播放');
-    expect(js).not.toContain('继续播放');
+    expect(staticButtonLabels).toContain('暂停播放');
+    expect(staticButtonLabels).not.toContain('播放');
+    expect(music).not.toContain('>播放</button>');
   });
 
   it('mounts a 12 hour speaker voice record widget in the speaker page', () => {
@@ -294,6 +305,7 @@ describe('static UI layout copy', () => {
     expect(speakerHtml).toContain('data-role="voice-record-summary"');
     expect(speakerHtml).toContain('data-role="voice-record-list"');
     expect(speakerHtml).toContain('data-action="refresh-voice-records"');
+    expect(speakerHtml).toContain('data-action="clear-voice-records"');
     expect(speakerHtml).toContain('12 小时');
   });
 
@@ -304,6 +316,9 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-action="load-songloft-songs"');
     expect(html).toContain('data-action="load-songloft-local-songs"');
     expect(html).toContain('data-action="load-songloft-playlists"');
+    expect(html).toContain('data-role="songloft-songs-panel"');
+    expect(html).toContain('data-role="songloft-local-songs-panel"');
+    expect(html).toContain('data-role="songloft-playlists-panel"');
     expect(html).toContain('data-role="songloft-songs"');
     expect(html).toContain('data-role="songloft-local-songs"');
     expect(html).toContain('data-role="songloft-playlists"');

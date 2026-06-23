@@ -79,20 +79,22 @@
                             <button class="ghost-button" type="button" data-action="load-songloft-playlists">歌单</button>
                         </div>
                     </div>
-                    <div class="split-view">
-                        <section>
+                    <div class="songloft-library-sections">
+                        <section class="songloft-library-section" data-role="songloft-songs-panel" hidden>
                             <div class="section-bar compact-bar">
                                 <h2>歌曲库</h2>
                                 <span data-role="songloft-songs-total">0</span>
                             </div>
                             <div data-role="songloft-songs"></div>
+                        </section>
+                        <section class="songloft-library-section" data-role="songloft-local-songs-panel" hidden>
                             <div class="section-bar compact-bar">
                                 <h2>本地歌曲</h2>
                                 <span data-role="songloft-local-total">0</span>
                             </div>
                             <div data-role="songloft-local-songs"></div>
                         </section>
-                        <section>
+                        <section class="songloft-library-section" data-role="songloft-playlists-panel" hidden>
                             <div class="section-bar compact-bar">
                                 <h2>Songloft 歌单</h2>
                                 <span data-role="songloft-playlists-total">0</span>
@@ -158,33 +160,65 @@
                 </div>
 
                 <div class="two-column speaker-operations-layout">
-                    <section class="surface-section">
+                    <section class="surface-section speaker-player-panel">
                         <div class="section-bar">
-                            <h2>索引</h2>
-                            <span data-role="indexing-state">未加载</span>
+                            <h2>音箱播放</h2>
+                            <span data-role="speaker-player-state">未选择设备</span>
                         </div>
-                        <div class="metric-grid">
-                            <div><span>歌单</span><strong data-role="index-playlists">0</strong></div>
-                            <div><span>歌曲</span><strong data-role="index-songs">0</strong></div>
-                            <div><span>时间</span><strong data-role="index-updated">-</strong></div>
+                        <label>
+                            <span>控制设备</span>
+                            <select data-role="speaker-player-device" aria-label="音箱播放控制设备"></select>
+                        </label>
+                        <div class="player-status-card">
+                            <strong data-role="speaker-player-title">暂无播放信息</strong>
+                            <span data-role="speaker-player-meta">选择音箱后可管理当前播放。</span>
                         </div>
-                        <button class="primary-button" type="button" data-action="refresh-index">刷新索引</button>
-                    </section>
-                    <form class="surface-section settings-form" data-role="speaker-config-form" data-config-form>
-                        <div class="section-bar">
-                            <h2>音箱设置</h2>
-                            <button class="ghost-button" type="button" data-action="load-config">加载</button>
-                        </div>
-                        <div class="toggle-grid">
-                            <label class="toggle-line"><input name="conversation_monitor_enabled" type="checkbox"><span>对话监听</span></label>
-                            <label class="toggle-line"><input name="voice_command_enabled" type="checkbox" disabled><span>语音口令</span></label>
-                            <label class="toggle-line"><input name="force_mp3" type="checkbox"><span>强制 MP3</span></label>
+                        <div class="player-actions speaker-player-actions">
+                            <button class="icon-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">上一首</button>
+                            <button class="icon-button" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">暂停播放</button>
+                            <button class="icon-button" type="button" data-action="speaker-player-stop" title="停止" aria-label="停止">停止</button>
+                            <button class="icon-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">下一首</button>
                         </div>
                         <div class="inline-actions">
-                            <button class="primary-button" type="submit">保存设置</button>
-                            <span data-role="config-state">未加载</span>
+                            <select data-role="speaker-player-mode" aria-label="播放模式">
+                                <option value="order">顺序</option>
+                                <option value="loop">列表循环</option>
+                                <option value="random">随机</option>
+                                <option value="single">单曲循环</option>
+                            </select>
+                            <button class="ghost-button" type="button" data-action="speaker-player-mode">应用模式</button>
+                            <button class="ghost-button" type="button" data-action="speaker-player-refresh">刷新状态</button>
                         </div>
-                    </form>
+                    </section>
+                    <div class="speaker-side-stack">
+                        <section class="surface-section">
+                            <div class="section-bar">
+                                <h2>索引</h2>
+                                <span data-role="indexing-state">未加载</span>
+                            </div>
+                            <div class="metric-grid">
+                                <div><span>歌单</span><strong data-role="index-playlists">0</strong></div>
+                                <div><span>歌曲</span><strong data-role="index-songs">0</strong></div>
+                                <div><span>时间</span><strong data-role="index-updated">-</strong></div>
+                            </div>
+                            <button class="primary-button" type="button" data-action="refresh-index">刷新索引</button>
+                        </section>
+                        <form class="surface-section settings-form" data-role="speaker-config-form" data-config-form>
+                            <div class="section-bar">
+                                <h2>音箱设置</h2>
+                                <button class="ghost-button" type="button" data-action="load-config">加载</button>
+                            </div>
+                            <div class="toggle-grid">
+                                <label class="toggle-line"><input name="conversation_monitor_enabled" type="checkbox"><span>对话监听</span></label>
+                                <label class="toggle-line"><input name="voice_command_enabled" type="checkbox" disabled><span>语音口令</span></label>
+                                <label class="toggle-line"><input name="force_mp3" type="checkbox"><span>强制 MP3</span></label>
+                            </div>
+                            <div class="inline-actions">
+                                <button class="primary-button" type="submit">保存设置</button>
+                                <span data-role="config-state">未加载</span>
+                            </div>
+                        </form>
+                    </div>
                 </div>
                 <section class="surface-section voice-record-panel">
                     <div class="section-bar">
@@ -195,6 +229,7 @@
                         <div class="inline-actions">
                             <span data-role="voice-record-summary">未加载</span>
                             <button class="ghost-button" type="button" data-action="refresh-voice-records">刷新</button>
+                            <button class="ghost-button" type="button" data-action="clear-voice-records">清空</button>
                         </div>
                     </div>
                     <div class="voice-record-list" data-role="voice-record-list">

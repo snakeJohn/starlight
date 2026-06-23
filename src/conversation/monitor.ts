@@ -188,6 +188,13 @@ export class ConversationMonitor {
     return result;
   }
 
+  clearMessages(): number {
+    const count = this.messages.length;
+    this.messages = [];
+    songloft.log.info(`[ConversationMonitor] clearMessages cleared=${count}`);
+    return count;
+  }
+
   /**
    * 获取监听器状态（与 WASM 版一致）
    */

@@ -6,6 +6,7 @@ interface SpeakerControlsModule {
   renderAccountRow(account: Record<string, unknown>): string;
   selectAndPersistDevice(accountId: string, deviceId: string, name?: string): Promise<void>;
   renderVoiceRecordList(records: Array<Record<string, unknown>>, now?: number): string;
+  runPlayerAction(action: string): Promise<unknown>;
 }
 
 interface StateModule {
@@ -134,5 +135,58 @@ describe('speaker controls helpers', () => {
     expect(html.indexOf('客厅音箱')).toBeLessThan(html.indexOf('书房音箱'));
     expect(html).not.toContain('旧记录');
     expect(html).not.toContain('过期回答');
+  });
+
+  it('renders speaker answers from alternate conversation fields before fallback text', async () => {
+    installDom();
+    const { speaker } = await loadModules();
+    const now = new Date('2026-06-22T20:00:00+08:00').getTime();
+
+    const html = speaker.renderVoiceRecordList([
+      {
+        device_name: '客厅音箱',
+        message: {
+          timestamp_ms: now - 1000,
+          response: {
+            answer: [{
+              question: '今天几号',
+              text: '今天是六月二十二日',
+            }],
+          },
+        },
+      },
+      {
+        device_name: '卧室音箱',
+        message: {
+          timestamp_ms: now - 2000,
+          response: {
+            answer: [{
+              intention: { query: '播放稻香' },
+              content: { to_speak: '即将播放稻香' },
+            }],
+          },
+        },
+      },
+    ], now);
+
+    expect(html).toContain('今天是六月二十二日');
+    expect(html).toContain('即将播放稻香');
+    expect(html).not.toContain('音箱暂无文本回应');
+  });
+
+  it('sends speaker player commands through the MIoT playlist endpoints', async () => {
+    installDom();
+    const fetchMock = vi.fn(async () => okResponse({ message: 'playing next song' }) as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const { speaker, state } = await loadModules();
+    state.accountId = 'acc-1';
+    state.deviceId = 'speaker-1';
+
+    await speaker.runPlayerAction('speaker-player-next');
+
+    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/next', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ account_id: 'acc-1', device_id: 'speaker-1' }),
+    }));
   });
 });

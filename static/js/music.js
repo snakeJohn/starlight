@@ -40,6 +40,10 @@ const pageSizes = {
 let artworkFallbackInstalled = false;
 let downloadProgressTimer = null;
 
+function setControlDisabled(control, disabled) {
+    if (control) control.disabled = disabled;
+}
+
 export function musicPageSize(scope) {
     return pageSizes[scope] || 20;
 }
@@ -857,14 +861,14 @@ function bindCustomPlaylists() {
         const button = createForm.querySelector('button[type="submit"]');
         const body = Object.fromEntries(new FormData(createForm).entries());
         if (!body.name?.trim()) return;
-        button.disabled = true;
+        setControlDisabled(button, true);
         try {
             await createCustomPlaylist(body.name.trim());
             createForm.reset();
         } catch (error) {
             toast(error.message, 'error');
         } finally {
-            button.disabled = false;
+            setControlDisabled(button, false);
         }
     });
 
@@ -873,14 +877,14 @@ function bindCustomPlaylists() {
         const button = importForm.querySelector('button[type="submit"]');
         const body = Object.fromEntries(new FormData(importForm).entries());
         if (!body.id?.trim()) return;
-        button.disabled = true;
+        setControlDisabled(button, true);
         try {
             await importCustomPlaylistFromSource(body.source_id || state.platform, body.id.trim());
             importForm.reset();
         } catch (error) {
             toast(error.message, 'error');
         } finally {
-            button.disabled = false;
+            setControlDisabled(button, false);
         }
     });
 
@@ -1002,6 +1006,7 @@ async function loadSearchPage(page = 1) {
     const data = await api.post('/music/search', {
         keyword: query.keyword,
         source_id: query.platform,
+        quality: query.quality,
         page,
         page_size: pageSizes.search,
     });
@@ -1033,7 +1038,7 @@ function bindSearch() {
         const submit = form.querySelector('button[type="submit"]');
         const body = Object.fromEntries(new FormData(form).entries());
         if (!body.keyword?.trim()) return;
-        submit.disabled = true;
+        setControlDisabled(submit, true);
         try {
             setState({
                 searchQuery: {
@@ -1048,7 +1053,7 @@ function bindSearch() {
             clearPagination('search-pagination');
             toast(error.message, 'error');
         } finally {
-            submit.disabled = false;
+            setControlDisabled(submit, false);
         }
     });
 
@@ -1181,7 +1186,7 @@ function bindDownloads() {
         const body = Object.fromEntries(new FormData(form).entries());
         body.embed_metadata = Boolean(form.elements.embed_metadata?.checked);
         body.download_interval = Number(body.download_interval || 0);
-        button.disabled = true;
+        setControlDisabled(button, true);
         try {
             const settings = await api.post('/download/settings', body);
             setState({ downloadSettings: settings });
@@ -1190,7 +1195,7 @@ function bindDownloads() {
         } catch (error) {
             toast(error.message, 'error');
         } finally {
-            button.disabled = false;
+            setControlDisabled(button, false);
         }
     });
 
@@ -1215,6 +1220,49 @@ function bindDownloads() {
             button.disabled = false;
         }
     });
+}
+
+const songloftLibraryPanelMap = {
+    songs: {
+        panelRole: 'songloft-songs-panel',
+        action: 'load-songloft-songs',
+    },
+    local: {
+        panelRole: 'songloft-local-songs-panel',
+        action: 'load-songloft-local-songs',
+    },
+    playlists: {
+        panelRole: 'songloft-playlists-panel',
+        action: 'load-songloft-playlists',
+    },
+};
+
+export function setSongloftLibraryPanelExpanded(kind, expanded) {
+    const config = songloftLibraryPanelMap[kind];
+    if (!config) return false;
+
+    const panel = $(`[data-role="${config.panelRole}"]`);
+    if (!panel) return false;
+
+    panel.hidden = !expanded;
+    panel.setAttribute?.('aria-hidden', expanded ? 'false' : 'true');
+
+    const button = $(`[data-action="${config.action}"]`);
+    button?.setAttribute?.('aria-expanded', String(expanded));
+    button?.classList?.toggle?.('selected-action', expanded);
+    return true;
+}
+
+function isSongloftLibraryPanelExpanded(kind) {
+    const config = songloftLibraryPanelMap[kind];
+    const panel = config ? $(`[data-role="${config.panelRole}"]`) : null;
+    return Boolean(panel && !panel.hidden);
+}
+
+async function toggleSongloftLibraryPanel(kind, load) {
+    const nextExpanded = !isSongloftLibraryPanelExpanded(kind);
+    if (!setSongloftLibraryPanelExpanded(kind, nextExpanded)) return;
+    if (nextExpanded) await load();
 }
 
 async function loadSongloftSongs() {
@@ -1271,37 +1319,37 @@ async function loadSongloftPlaylistSongs(playlist, index) {
 function bindSongloftLibrary() {
     $('[data-action="load-songloft-songs"]')?.addEventListener('click', async event => {
         const button = event.currentTarget;
-        button.disabled = true;
+        setControlDisabled(button, true);
         try {
-            await loadSongloftSongs();
+            await toggleSongloftLibraryPanel('songs', loadSongloftSongs);
         } catch (error) {
             toast(error.message, 'error');
         } finally {
-            button.disabled = false;
+            setControlDisabled(button, false);
         }
     });
 
     $('[data-action="load-songloft-local-songs"]')?.addEventListener('click', async event => {
         const button = event.currentTarget;
-        button.disabled = true;
+        setControlDisabled(button, true);
         try {
-            await loadSongloftLocalSongs();
+            await toggleSongloftLibraryPanel('local', loadSongloftLocalSongs);
         } catch (error) {
             toast(error.message, 'error');
         } finally {
-            button.disabled = false;
+            setControlDisabled(button, false);
         }
     });
 
     $('[data-action="load-songloft-playlists"]')?.addEventListener('click', async event => {
         const button = event.currentTarget;
-        button.disabled = true;
+        setControlDisabled(button, true);
         try {
-            await loadSongloftPlaylists();
+            await toggleSongloftLibraryPanel('playlists', loadSongloftPlaylists);
         } catch (error) {
             toast(error.message, 'error');
         } finally {
-            button.disabled = false;
+            setControlDisabled(button, false);
         }
     });
 
