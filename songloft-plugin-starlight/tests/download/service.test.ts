@@ -3,6 +3,9 @@ import { DownloadService } from '../../src/download/service';
 import type { PlatformRegistry } from '../../src/music/platforms/registry';
 import type { MusicPlatformProvider } from '../../src/music/platforms/types';
 import type { RuntimeManager } from '../../src/music/runtime_manager';
+import { RuntimeManager as MusicRuntimeManager } from '../../src/music/runtime_manager';
+import type { SourceRuntime } from '../../src/music/runtime';
+import type { SourceManager } from '../../src/music/source_manager';
 import type { SearchResultSong } from '../../src/music/types';
 
 const song = {
@@ -85,6 +88,13 @@ function createPlatforms(providers: MusicPlatformProvider[]): PlatformRegistry {
     all: vi.fn(() => providers.map((provider) => ({ id: provider.id, name: provider.name }))),
     get: vi.fn((id: string) => providers.find((provider) => provider.id === id) ?? null),
   } as unknown as PlatformRegistry;
+}
+
+function emptySourceManager(): SourceManager {
+  return {
+    listSources: () => [],
+    getScript: vi.fn(async () => null),
+  } as unknown as SourceManager;
 }
 
 describe('DownloadService', () => {
@@ -183,6 +193,73 @@ describe('DownloadService', () => {
     expect(JSON.parse(payload[0].source_data)).toEqual({
       ...fallbackSong.source_data,
       starlight: { purpose: 'download' },
+    });
+  });
+
+  it('retries enabled download sources without using playback runtimes when one download source throws', async () => {
+    const downloadRuntimes = new MusicRuntimeManager(emptySourceManager());
+    const throwingDownloadSource = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => {
+        throw new Error('download resolver exploded');
+      }),
+      destroy: vi.fn(),
+    };
+    const workingDownloadSource = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => 'https://download.test/working.flac'),
+      destroy: vi.fn(),
+    };
+    (downloadRuntimes as unknown as { runtimes: SourceRuntime[] }).runtimes = [
+      throwingDownloadSource as unknown as SourceRuntime,
+      workingDownloadSource as unknown as SourceRuntime,
+    ];
+    const playbackRuntimes = {
+      getMusicUrl: vi.fn(async () => {
+        throw new Error('playback runtime should not be used');
+      }),
+    };
+    const fetchMock = installRemoteImport(1001);
+    const downloadMock = vi.fn(async () => ({ path: 'downloads/working.flac', status: 'ok' }));
+    const songsApi = songloft.songs as typeof songloft.songs & { download: typeof downloadMock };
+    songsApi.download = downloadMock;
+    const service = new DownloadService(downloadRuntimes, createPlatforms([]));
+
+    await expect(service.downloadSong(song)).resolves.toEqual({
+      song_id: 1001,
+      path: 'downloads/working.flac',
+      status: 'ok',
+    });
+
+    expect(throwingDownloadSource.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', song.source_data.songInfo);
+    expect(workingDownloadSource.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', song.source_data.songInfo);
+    expect(playbackRuntimes.getMusicUrl).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(downloadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports attempted download source count and the last source failure when no download source resolves', async () => {
+    const downloadRuntimes = new MusicRuntimeManager(emptySourceManager());
+    const throwingDownloadSource = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => {
+        throw new Error('first source failed');
+      }),
+      destroy: vi.fn(),
+    };
+    const emptyDownloadSource = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => null),
+      destroy: vi.fn(),
+    };
+    (downloadRuntimes as unknown as { runtimes: SourceRuntime[] }).runtimes = [
+      throwingDownloadSource as unknown as SourceRuntime,
+      emptyDownloadSource as unknown as SourceRuntime,
+    ];
+    const service = new DownloadService(downloadRuntimes, createPlatforms([]));
+
+    await expect(service.downloadSong(song)).rejects.toMatchObject({
+      message: expect.stringMatching(/已尝试 2 个下载源.*最后失败原因：first source failed/),
     });
   });
 

@@ -145,7 +145,17 @@ export class DownloadService {
       song.source_data.songInfo,
     );
     if (!url) {
-      throw new StarlightError('PLAY_URL_RESOLVE_FAILED', '下载音源无法解析歌曲地址', true);
+      const attempt = typeof this.runtimes.getLastMusicUrlAttempt === 'function'
+        ? this.runtimes.getLastMusicUrlAttempt()
+        : { attemptedSources: 0, lastFailure: null };
+      const reason = attempt.lastFailure ?? '未找到可用下载源';
+      const detail = attempt.attemptedSources > 0
+        ? `，已尝试 ${attempt.attemptedSources} 个下载源；最后失败原因：${reason}`
+        : '';
+      throw new StarlightError('PLAY_URL_RESOLVE_FAILED', `下载音源无法解析歌曲地址${detail}`, true, {
+        attempts: attempt.attemptedSources,
+        lastFailure: reason,
+      });
     }
 
     return url;
