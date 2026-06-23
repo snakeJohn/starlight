@@ -138,6 +138,28 @@ describe('static UI layout copy', () => {
     expect(music).toContain('quality: query.quality');
   });
 
+  it('adds highest-quality selectors to songlist and ranking pages', () => {
+    const html = indexHtml();
+    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
+    const rankingsStart = html.indexOf('<section class="tab-panel" id="tab-rankings">');
+    const sourcesStart = html.indexOf('<section class="tab-panel" id="tab-sources">');
+    const songlistsHtml = html.slice(songlistsStart, rankingsStart);
+    const rankingsHtml = html.slice(rankingsStart, sourcesStart);
+
+    expect(songlistsHtml).toContain('data-role="songlist-quality"');
+    expect(songlistsHtml).toContain('<option value="flac24bit" selected>flac24bit</option>');
+    expect(rankingsHtml).toContain('data-role="ranking-quality"');
+    expect(rankingsHtml).toContain('<option value="flac24bit" selected>flac24bit</option>');
+  });
+
+  it('passes songlist and ranking quality through detail requests', () => {
+    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+
+    expect(music).toContain('quality=${encodeURIComponent(context.quality)}');
+    expect(music).toContain('quality: body.quality || state.songlistQuality');
+    expect(music).toContain('const quality = $(\'[data-role="ranking-quality"]\')?.value || state.rankingQuality');
+  });
+
   it('defines scroll containers and mobile wrapping for long music lists', () => {
     const stylesheet = css();
 

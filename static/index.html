@@ -292,6 +292,15 @@
                             <span>平台</span>
                             <select name="source_id" data-role="songlist-platform"></select>
                         </label>
+                        <label>
+                            <span>音质</span>
+                            <select name="quality" data-role="songlist-quality">
+                                <option value="128k">128k</option>
+                                <option value="320k">320k</option>
+                                <option value="flac">flac</option>
+                                <option value="flac24bit" selected>flac24bit</option>
+                            </select>
+                        </label>
                         <label class="wide-field">
                             <span>关键词</span>
                             <input name="keyword" type="search" placeholder="歌单名" autocomplete="off">
@@ -333,6 +342,15 @@
                     <label>
                         <span>平台</span>
                         <select data-role="ranking-platform"></select>
+                    </label>
+                    <label>
+                        <span>音质</span>
+                        <select data-role="ranking-quality">
+                            <option value="128k">128k</option>
+                            <option value="320k">320k</option>
+                            <option value="flac">flac</option>
+                            <option value="flac24bit" selected>flac24bit</option>
+                        </select>
                     </label>
                     <button class="primary-button" type="button" data-action="load-rankings">加载榜单</button>
                 </div>

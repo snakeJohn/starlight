@@ -59,10 +59,10 @@ function createProvider(): MusicPlatformProvider {
     name: '酷我音乐',
     search: vi.fn(async () => ({ list: [song], total: 1 })),
     songListSearch: vi.fn(async () => ({ list: [{ id: 'pl1', name: 'Playlist', cover_url: '', play_count: 12, description: '' }], total: 1 })),
-    songListDetail: vi.fn(async () => ({ songs: [], total: 0, name: 'Playlist' })),
+    songListDetail: vi.fn(async () => ({ songs: [song], total: 1, name: 'Playlist' })),
     recommendedSongLists: vi.fn(async () => ({ list: [{ id: 'pl2', name: 'Recommended', cover_url: '', play_count: 34, description: '' }], total: 1 })),
     leaderboardBoards: vi.fn(async () => [{ id: 'kw__16', name: '热歌榜' }]),
-    leaderboardList: vi.fn(async () => ({ songs: [], total: 0, name: '热歌榜' })),
+    leaderboardList: vi.fn(async () => ({ songs: [song], total: 1, name: '热歌榜' })),
   };
 }
 
@@ -305,6 +305,24 @@ describe('registerMusicHandlers', () => {
 
     await router.handle(request('GET', '/api/music/leaderboard/list', undefined, 'source_id=kw&id=kw__16&page=6&page_size=10'));
     expect(provider.leaderboardList).toHaveBeenCalledWith('kw__16', 6, 10);
+  });
+
+  test('songlist detail applies the requested quality to returned song source data', async () => {
+    const { router } = createHarness();
+
+    const response = await router.handle(request('GET', '/api/music/songlist/detail', undefined, 'source_id=kw&id=pl1&quality=flac24bit'));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response).data.songs[0].source_data.quality).toBe('flac24bit');
+  });
+
+  test('leaderboard list applies the requested quality to returned song source data', async () => {
+    const { router } = createHarness();
+
+    const response = await router.handle(request('GET', '/api/music/leaderboard/list', undefined, 'source_id=kw&id=kw__16&quality=flac'));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response).data.songs[0].source_data.quality).toBe('flac');
   });
 
   test('query pagination routes reject invalid page size', async () => {

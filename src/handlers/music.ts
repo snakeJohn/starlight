@@ -262,10 +262,15 @@ export function registerMusicHandlers(
     }));
 
   router.get('/api/music/songlist/detail', async (req) =>
-    handle(() => {
+    handle(async () => {
       const params = query(req);
       const provider = providerFor(platforms, params.source_id);
-      return provider.songListDetail(requireId(params.id), page(params.page), pageSize(params.page_size));
+      const quality = stringField(params.quality);
+      const result = await provider.songListDetail(requireId(params.id), page(params.page), pageSize(params.page_size));
+      return applyRequestedQuality(
+        result,
+        quality,
+      );
     }));
 
   router.get('/api/music/leaderboard/boards', async (req) =>
@@ -276,10 +281,15 @@ export function registerMusicHandlers(
     }));
 
   router.get('/api/music/leaderboard/list', async (req) =>
-    handle(() => {
+    handle(async () => {
       const params = query(req);
       const provider = providerFor(platforms, params.source_id);
-      return provider.leaderboardList(requireId(params.id), page(params.page), pageSize(params.page_size));
+      const quality = stringField(params.quality);
+      const result = await provider.leaderboardList(requireId(params.id), page(params.page), pageSize(params.page_size));
+      return applyRequestedQuality(
+        result,
+        quality,
+      );
     }));
 
   router.post('/api/music/lyric', async () => handle(() => ({ lyric: '' })));

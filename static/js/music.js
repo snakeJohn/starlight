@@ -1512,7 +1512,8 @@ function renderSongLists(items) {
 
 async function loadSongListDetail(item) {
     const id = songListId(item);
-    const platform = $('[data-role="songlist-platform"]')?.value || state.platform;
+    const platform = state.songlistQuery?.platform || $('[data-role="songlist-platform"]')?.value || state.platform;
+    const quality = state.songlistQuery?.quality || $('[data-role="songlist-quality"]')?.value || state.songlistQuality;
     if (!id) {
         toast('歌单缺少 ID，无法解析', 'error');
         return;
@@ -1521,6 +1522,7 @@ async function loadSongListDetail(item) {
         songlistDetailContext: {
             id,
             platform,
+            quality,
             title: songListTitle(item),
         },
     });
@@ -1530,7 +1532,7 @@ async function loadSongListDetail(item) {
 async function loadSongListDetailPage(page = 1) {
     const context = state.songlistDetailContext;
     if (!context?.id) return;
-    const data = await api.get(`/music/songlist/detail?source_id=${encodeURIComponent(context.platform)}&id=${encodeURIComponent(context.id)}&page=${page}&page_size=${pageSizes.songlistDetail}`);
+    const data = await api.get(`/music/songlist/detail?source_id=${encodeURIComponent(context.platform)}&id=${encodeURIComponent(context.id)}&quality=${encodeURIComponent(context.quality)}&page=${page}&page_size=${pageSizes.songlistDetail}`);
     const songs = asArray(data);
     const total = resultCount(data);
     setState({ songlistSongs: songs, songlistDetailPage: page, songlistDetailTotal: total });
@@ -1548,11 +1550,11 @@ async function loadSongListsPage(page = 1) {
     if (!list || !query) return;
     list.innerHTML = '<div class="empty-state">正在加载...</div>';
     const data = query.mode === 'recommended'
-        ? await api.get(`/music/songlist/list?source_id=${encodeURIComponent(query.platform)}&page=${page}&page_size=${pageSizes.songlist}`)
-        : await api.post('/music/songlist/search', { keyword: query.keyword || '热门', source_id: query.platform, page, page_size: pageSizes.songlist });
+        ? await api.get(`/music/songlist/list?source_id=${encodeURIComponent(query.platform)}&quality=${encodeURIComponent(query.quality)}&page=${page}&page_size=${pageSizes.songlist}`)
+        : await api.post('/music/songlist/search', { keyword: query.keyword || '热门', source_id: query.platform, quality: query.quality, page, page_size: pageSizes.songlist });
     const items = asArray(data);
     const total = resultCount(data);
-    setState({ songlists: items, songlistPage: page, songlistTotal: total, platform: query.platform });
+    setState({ songlists: items, songlistPage: page, songlistTotal: total, platform: query.platform, songlistQuality: query.quality });
     $('[data-role="songlist-total"]').textContent = String(total);
     renderSongLists(items);
     renderPaginationInto('songlist-pagination', { scope: 'songlist', page, total, pageSize: pageSizes.songlist });
@@ -1569,6 +1571,7 @@ function bindSongLists() {
         const submitter = event.submitter;
         const body = Object.fromEntries(new FormData(form).entries());
         const platform = body.source_id || state.platform;
+        const quality = body.quality || state.songlistQuality;
         const mode = submitter?.value || 'search';
         const title = $('[data-role="songlist-title"]');
         try {
@@ -1576,8 +1579,10 @@ function bindSongLists() {
                 songlistQuery: {
                     mode,
                     platform,
+                    quality: body.quality || state.songlistQuality,
                     keyword: String(body.keyword || '热门'),
                 },
+                songlistQuality: quality,
                 songlistDetailContext: null,
                 songlistSongs: [],
             });
@@ -1668,7 +1673,7 @@ async function loadRankingPage(page = 1) {
     const songsNode = $('[data-role="ranking-songs"]');
     if (!context?.id || !songsNode) return;
     songsNode.innerHTML = '<div class="empty-state">正在加载歌曲...</div>';
-    const data = await api.get(`/music/leaderboard/list?source_id=${encodeURIComponent(context.platform)}&id=${encodeURIComponent(context.id)}&page=${page}&page_size=${pageSizes.ranking}`);
+    const data = await api.get(`/music/leaderboard/list?source_id=${encodeURIComponent(context.platform)}&id=${encodeURIComponent(context.id)}&quality=${encodeURIComponent(context.quality)}&page=${page}&page_size=${pageSizes.ranking}`);
     const songs = asArray(data);
     const total = resultCount(data);
     setState({ rankingSongs: songs, rankingPage: page, rankingTotal: total });
@@ -1686,11 +1691,12 @@ function bindRankings() {
 
     $('[data-action="load-rankings"]')?.addEventListener('click', async () => {
         const platform = $('[data-role="ranking-platform"]')?.value || state.platform;
+        const quality = $('[data-role="ranking-quality"]')?.value || state.rankingQuality;
         boardsNode.innerHTML = '<div class="empty-state">正在加载榜单...</div>';
         try {
             const data = await api.get(`/music/leaderboard/boards?source_id=${encodeURIComponent(platform)}`);
             const boards = asArray(data);
-            setState({ rankingBoards: boards, rankingContext: null, rankingSongs: [], platform });
+            setState({ rankingBoards: boards, rankingContext: null, rankingSongs: [], platform, rankingQuality: quality });
             boardsNode.innerHTML = boards.length
                 ? boards.map((board, index) => renderRankingBoard(board, index)).join('')
                 : '<div class="empty-state">暂无榜单。</div>';
@@ -1708,6 +1714,7 @@ function bindRankings() {
         const board = state.rankingBoards?.[Number(button.dataset.index)];
         const id = boardId(board);
         const platform = $('[data-role="ranking-platform"]')?.value || state.platform;
+        const quality = $('[data-role="ranking-quality"]')?.value || state.rankingQuality;
         if (!id) {
             toast('榜单缺少 ID，无法加载', 'error');
             return;
@@ -1717,8 +1724,10 @@ function bindRankings() {
                 rankingContext: {
                     id,
                     platform,
+                    quality,
                     title: boardTitle(board),
                 },
+                rankingQuality: quality,
             });
             await loadRankingPage(1);
         } catch (error) {
