@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
   "name": "Starlight 音乐助手",
-  "version": "2026.6.23-15.8",
+  "version": "2026.6.23-7.12",
   "description": "智能音箱控制与 LX Music 音源搜索、歌单、榜单、URL 播放桥接插件",
   "author": "Songloft Starlight",
   "homepage": "https://github.com/snakeJohn/starlight",
@@ -21,8 +21,8 @@
     "jsenv"
   ],
   "updateUrl": "https://raw.githubusercontent.com/snakeJohn/starlight/main/plugin.json",
-  "download_url": "https://github.com/snakeJohn/starlight/releases/download/V-2026.06.23.15.08/starlight-V-2026.06.23.15.08.zip",
+  "download_url": "https://github.com/snakeJohn/starlight/releases/download/V-2026.06.23.07.12/starlight-V-2026.06.23.07.12.zip",
   "entryHash": "64476e8be4f12d6456301dead9a38978e8e7d644d9ccf5fc15f290e5a208a008",
-  "zipHash": "4d06ffc21e466a13d179b0d9f84d5b9b92e362fc6a9066e43192129b9d9754a2",
-  "releaseVersion": "V-2026.06.23.15.08"
+  "zipHash": "01f1781c42e29292922dd57c421b7018fd1581f920dc7095e64b5dbaff41500e",
+  "releaseVersion": "V-2026.06.23.07.12"
 }
