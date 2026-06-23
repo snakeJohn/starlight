@@ -185,7 +185,7 @@ describe('custom playlist music UI helpers', () => {
 
   it('paginates imported playlist song details', async () => {
     const { renderCustomPlaylistDetail } = await loadMusicModule();
-    const songs = Array.from({ length: 55 }, (_, index) => ({
+    const songs = Array.from({ length: 45 }, (_, index) => ({
       title: `歌曲 ${index + 1}`,
       artist: '歌手',
       album: '',
@@ -199,11 +199,12 @@ describe('custom playlist music UI helpers', () => {
       songs,
     }, 2);
 
-    expect(html).toContain('歌曲 51');
-    expect(html).toContain('歌曲 55');
-    expect(html).not.toContain('歌曲 50');
+    expect(html).toContain('歌曲 21');
+    expect(html).toContain('歌曲 40');
+    expect(html).not.toContain('歌曲 20');
+    expect(html).not.toContain('歌曲 41');
     expect(html).toContain('data-pagination="custom-playlist-detail"');
-    expect(html).toContain('第 2 / 2 页');
+    expect(html).toContain('第 2 / 3 页');
   });
 
   it('posts imported playlist sync and playback actions', async () => {

@@ -2,10 +2,16 @@ import type { SourceManager } from './source_manager';
 import { SourceRuntime } from './runtime';
 import type { LxSongInfo, MusicPlatform, MusicQuality } from './types';
 
+export interface MusicUrlResolutionAttempt {
+  attemptedSources: number;
+  lastFailure: string | null;
+}
+
 export class RuntimeManager {
   private runtimes: SourceRuntime[] = [];
   private lifecycleQueue: Promise<void> = Promise.resolve();
   private lifecycleBusy = false;
+  private lastMusicUrlAttempt: MusicUrlResolutionAttempt = { attemptedSources: 0, lastFailure: null };
 
   constructor(private readonly sourceManager: SourceManager) {}
 
@@ -52,18 +58,33 @@ export class RuntimeManager {
       await this.lifecycleQueue;
     }
 
-    for (const runtime of this.runtimes) {
-      if (!runtime.supportsPlatform(platform)) {
-        continue;
-      }
+    let attemptedSources = 0;
+    let lastFailure: string | null = null;
 
-      const url = await runtime.getMusicUrl(platform, quality, songInfo);
-      if (url) {
-        return url;
+    for (const runtime of this.runtimes) {
+      try {
+        if (!runtime.supportsPlatform(platform)) {
+          continue;
+        }
+
+        attemptedSources += 1;
+        const url = await runtime.getMusicUrl(platform, quality, songInfo);
+        if (url) {
+          this.lastMusicUrlAttempt = { attemptedSources, lastFailure };
+          return url;
+        }
+      } catch (error) {
+        lastFailure = errorMessage(error);
+        songloft.log.warn(`Failed to resolve music URL from source runtime: ${lastFailure}`);
       }
     }
 
+    this.lastMusicUrlAttempt = { attemptedSources, lastFailure };
     return null;
+  }
+
+  getLastMusicUrlAttempt(): MusicUrlResolutionAttempt {
+    return { ...this.lastMusicUrlAttempt };
   }
 
   count(): number {
@@ -112,4 +133,8 @@ export class RuntimeManager {
 
     await Promise.all(destroys);
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

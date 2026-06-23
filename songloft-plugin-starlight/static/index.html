@@ -46,15 +46,66 @@
                 <div class="surface-section">
                     <div class="section-bar">
                         <h2>结果</h2>
-                        <span data-role="search-total">0</span>
+                        <div class="inline-actions">
+                            <span data-role="search-total">0</span>
+                            <button class="ghost-button" type="button" data-action="clear-search">清空</button>
+                        </div>
                     </div>
                     <div class="target-playlist-banner">
                         <span>加入歌单保存到</span>
                         <strong data-role="target-playlist-label">未选择歌单</strong>
                     </div>
+                    <div class="batch-actions" data-role="search-batch-actions">
+                        <button class="ghost-button" type="button" data-action="select-search-page">全选当前页</button>
+                        <button class="ghost-button" type="button" data-action="clear-search-selection">取消选择</button>
+                        <button class="ghost-button" type="button" data-action="import-selected-search">批量导入 Songloft 歌曲库</button>
+                        <button class="ghost-button" type="button" data-action="add-selected-search-to-playlist">批量加入目标歌单</button>
+                        <button class="ghost-button" type="button" data-action="download-selected-search">批量下载</button>
+                        <button class="ghost-button" type="button" data-action="speaker-selected-search">批量音箱播放</button>
+                    </div>
                     <div class="list-stack" data-role="search-results"></div>
                     <div data-role="search-pagination"></div>
                 </div>
+
+                <section class="surface-section songloft-library-panel">
+                    <div class="section-bar">
+                        <div>
+                            <h2>Songloft 曲库</h2>
+                            <span class="section-caption">读取 Songloft 歌曲库、歌单和本地歌曲，可直接推送到当前音箱。</span>
+                        </div>
+                        <div class="inline-actions">
+                            <button class="ghost-button" type="button" data-action="load-songloft-songs">歌曲库</button>
+                            <button class="ghost-button" type="button" data-action="load-songloft-local-songs">本地歌曲</button>
+                            <button class="ghost-button" type="button" data-action="load-songloft-playlists">歌单</button>
+                        </div>
+                    </div>
+                    <div class="split-view">
+                        <section>
+                            <div class="section-bar compact-bar">
+                                <h2>歌曲库</h2>
+                                <span data-role="songloft-songs-total">0</span>
+                            </div>
+                            <div data-role="songloft-songs"></div>
+                            <div class="section-bar compact-bar">
+                                <h2>本地歌曲</h2>
+                                <span data-role="songloft-local-total">0</span>
+                            </div>
+                            <div data-role="songloft-local-songs"></div>
+                        </section>
+                        <section>
+                            <div class="section-bar compact-bar">
+                                <h2>Songloft 歌单</h2>
+                                <span data-role="songloft-playlists-total">0</span>
+                            </div>
+                            <div data-role="songloft-playlists"></div>
+                            <div class="section-bar compact-bar">
+                                <h2 data-role="songloft-playlist-title">歌单歌曲</h2>
+                                <span data-role="songloft-playlist-songs-total">0</span>
+                            </div>
+                            <div data-role="songloft-playlist-songs"></div>
+                        </section>
+                    </div>
+                </section>
             </section>
 
             <section class="tab-panel" id="tab-speaker">

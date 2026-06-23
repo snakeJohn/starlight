@@ -22,6 +22,8 @@ const okResponse = (data: unknown) => ({
 function installToastDom() {
   const node = { className: '', textContent: '', remove: vi.fn() };
   const appendChild = vi.fn();
+  const setInterval = vi.fn(() => 1);
+  const clearInterval = vi.fn();
   vi.stubGlobal('document', {
     querySelector: vi.fn(() => null),
     createElement: vi.fn(() => node),
@@ -31,8 +33,10 @@ function installToastDom() {
   });
   vi.stubGlobal('window', {
     setTimeout: vi.fn(),
+    setInterval,
+    clearInterval,
   });
-  return { node, appendChild };
+  return { node, appendChild, setInterval, clearInterval };
 }
 
 function installNativePlayerDom() {
@@ -47,7 +51,17 @@ function installNativePlayerDom() {
   });
   vi.stubGlobal('window', {
     setTimeout: vi.fn(),
+    dispatchEvent: vi.fn(),
     parent: { postMessage },
+  });
+  vi.stubGlobal('CustomEvent', class {
+    type: string;
+    detail: unknown;
+
+    constructor(type: string, init?: { detail?: unknown }) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
   });
   return { postMessage };
 }
@@ -66,7 +80,7 @@ describe('songlist speaker actions', () => {
     vi.restoreAllMocks();
   });
 
-  it('imports all detail songs before playing the first song on the selected speaker', async () => {
+  it('plays all detail songs as a speaker queue after importing them', async () => {
     installToastDom();
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => okResponse({ ok: true }) as Response);
     vi.stubGlobal('fetch', fetchMock);
@@ -83,20 +97,21 @@ describe('songlist speaker actions', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('api/bridge/songs/import');
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ songs });
-    expect(fetchMock.mock.calls[1]?.[0]).toBe('api/bridge/play-url');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('api/bridge/play-songlist');
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
       account_id: 'miot-account',
       device_id: 'speaker-1',
-      song: songs[0],
+      songs,
     });
   });
 
-  it('requests native player playback after importing the song into Songloft', async () => {
+  it('queues plugin local playback after importing the song into Songloft', async () => {
     const { postMessage } = installNativePlayerDom();
     const nativeSong = { id: 99, type: 'remote', title: '晴天', artist: '周杰伦' };
     const fetchMock = vi.fn(async () => okResponse({ total: 1, songs: [nativeSong] }) as Response);
     vi.stubGlobal('fetch', fetchMock);
     const { music } = await loadModules();
+    const { state } = await import('../../static/js/state.js') as { state: { pluginPlayerQueue: unknown[]; pluginPlayerIndex: number; pluginPlayerState: string } };
     const song = { title: '晴天', artist: '周杰伦', source_data: { platform: 'kw', quality: '320k', songInfo: {} } };
 
     await music.previewSong(song);
@@ -110,10 +125,13 @@ describe('songlist speaker actions', () => {
       songs: [nativeSong],
       startIndex: 0,
     }, '*');
+    expect(state.pluginPlayerQueue).toEqual([nativeSong]);
+    expect(state.pluginPlayerIndex).toBe(0);
+    expect(state.pluginPlayerState).toBe('playing');
   });
 
   it('starts one-song downloads through the background download endpoint', async () => {
-    const { node } = installToastDom();
+    const { node, setInterval } = installToastDom();
     const fetchMock = vi.fn(async () => okResponse({ started: true, total: 1 }) as Response);
     vi.stubGlobal('fetch', fetchMock);
     const { music } = await loadModules();
@@ -125,6 +143,7 @@ describe('songlist speaker actions', () => {
       method: 'POST',
       body: JSON.stringify({ song }),
     }));
+    expect(setInterval).toHaveBeenCalled();
     expect(node.textContent).toBe('已开始下载 1 首歌曲，可在下载进度中查看');
   });
 

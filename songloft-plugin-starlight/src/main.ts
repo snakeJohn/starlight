@@ -37,6 +37,7 @@ import { registerBridgeHandlers } from './handlers/bridge';
 import { registerDownloadHandlers } from './handlers/download';
 import { registerCustomPlaylistHandlers } from './handlers/custom_playlists';
 import { registerHealthHandlers } from './handlers/health';
+import { registerSongloftLibraryHandlers } from './handlers/songloft_library';
 import { resolveHostBaseUrl } from './utils/http';
 
 const router = createRouter();
@@ -136,6 +137,7 @@ async function onInit(): Promise<void> {
   registerBridgeHandlers(router, bridgeService);
   registerDownloadHandlers(router, downloadSourceManager, downloadRuntimeManager, downloadService);
   registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);
+  registerSongloftLibraryHandlers(router, { playlistManagerMap });
   registerHealthHandlers(router, sourceManager, runtimeManager);
 
   runtimeManager.loadEnabledSources().catch(e => {

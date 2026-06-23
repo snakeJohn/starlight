@@ -125,31 +125,56 @@ export class BridgeService {
   }
 
   async playOnSpeaker(accountId: string, deviceId: string, song: SearchResultSong): Promise<{ url: string }> {
-    const url = await this.previewUrl(song);
+    const attemptedSources = new Set<string>();
+    const failures: string[] = [];
+    const directUrl = await this.tryPlaySearchSongOnSpeaker(accountId, deviceId, song, attemptedSources, failures);
+    if (directUrl) {
+      return { url: directUrl };
+    }
+
+    const fallbackUrl = await this.tryPlayResolvedCandidatesOnSpeaker(accountId, deviceId, song.title, song.artist, attemptedSources, failures);
+    if (!fallbackUrl) {
+      throw playbackFallbackError(attemptedSources.size, failures);
+    }
+
+    return { url: fallbackUrl };
+  }
+
+  async playSonglistOnSpeaker(accountId: string, deviceId: string, songs: SearchResultSong[]): Promise<{ urls: string[] }> {
+    if (songs.length === 0) {
+      throw new StarlightError('BAD_REQUEST', 'songs must not be empty');
+    }
+
+    const playerSongs: PlayerSong[] = [];
+    const urls: string[] = [];
+    for (const song of songs) {
+      const url = await this.previewUrl(song);
+      playerSongs.push(toPlayerSong(song, url));
+      urls.push(url);
+    }
+
     const played = this.playlistManagerMap
-      ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone([toPlayerSong(song, url)], 0, 'single')
-      : await this.minaService.playURL(accountId, deviceId, url);
+      ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone(playerSongs, 0, 'order')
+      : await this.minaService.playURL(accountId, deviceId, urls[0]);
     if (!played) {
       throw new StarlightError('DEVICE_OFFLINE', '音箱播放 URL 失败', true);
     }
 
-    return { url };
+    return { urls };
   }
 
   async playResolvedOnSpeaker(accountId: string, deviceId: string, title: string, artist = ''): Promise<{ url: string }> {
-    const song = await this.resolvePlayableSong(title, artist);
-    if (!song) {
+    const attemptedSources = new Set<string>();
+    const failures: string[] = [];
+    const url = await this.tryPlayResolvedCandidatesOnSpeaker(accountId, deviceId, title, artist, attemptedSources, failures);
+    if (!url) {
+      if (attemptedSources.size > 0 || failures.length > 0) {
+        throw playbackFallbackError(attemptedSources.size, failures);
+      }
       throw new StarlightError('PLAY_URL_RESOLVE_FAILED', `未找到可用音源：${title}${artist ? ` - ${artist}` : ''}`, true);
     }
 
-    const played = this.playlistManagerMap
-      ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone([song], 0, 'single')
-      : await this.minaService.playURL(accountId, deviceId, song.url);
-    if (!played) {
-      throw new StarlightError('DEVICE_OFFLINE', '音箱播放 URL 失败', true);
-    }
-
-    return { url: song.url };
+    return { url };
   }
 
   async resolveSearchSong(title: string, artist = ''): Promise<SearchResultSong | null> {
@@ -184,12 +209,70 @@ export class BridgeService {
   }
 
   private async findPlayableSearchSong(title: string, artist: string): Promise<{ song: SearchResultSong; url: string } | null> {
+    for await (const resolved of this.iterPlayableSearchCandidates(title, artist)) {
+      return resolved;
+    }
+
+    return null;
+  }
+
+  private async tryPlayResolvedCandidatesOnSpeaker(
+    accountId: string,
+    deviceId: string,
+    title: string,
+    artist: string,
+    attemptedSources: Set<string>,
+    failures: string[],
+  ): Promise<string | null> {
+    for await (const resolved of this.iterPlayableSearchCandidates(title, artist, attemptedSources, failures)) {
+      const url = await this.tryPlaySearchSongOnSpeaker(accountId, deviceId, resolved.song, attemptedSources, failures, resolved.url);
+      if (url) {
+        return url;
+      }
+    }
+
+    return null;
+  }
+
+  private async tryPlaySearchSongOnSpeaker(
+    accountId: string,
+    deviceId: string,
+    song: SearchResultSong,
+    attemptedSources: Set<string>,
+    failures: string[],
+    resolvedUrl?: string,
+  ): Promise<string | null> {
+    attemptedSources.add(song.source_data.platform);
+    try {
+      const url = resolvedUrl ?? await this.previewUrl(song);
+      const played = this.playlistManagerMap
+        ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone([toPlayerSong(song, url)], 0, 'single')
+        : await this.minaService.playURL(accountId, deviceId, url);
+      if (!played) {
+        failures.push('音箱播放 URL 失败');
+        return null;
+      }
+
+      return url;
+    } catch (error) {
+      failures.push(sanitizeProviderError(error));
+      return null;
+    }
+  }
+
+  private async *iterPlayableSearchCandidates(
+    title: string,
+    artist: string,
+    attemptedSources?: Set<string>,
+    failures?: string[],
+  ): AsyncGenerator<{ song: SearchResultSong; url: string }, void, void> {
     const keyword = [title, artist].map((item) => item.trim()).filter(Boolean).join(' ');
     if (!keyword) {
-      return null;
+      return;
     }
 
     for (const platform of this.platforms.all()) {
+      attemptedSources?.add(platform.id);
       const provider = this.platforms.get(platform.id);
       if (!provider) {
         continue;
@@ -205,17 +288,17 @@ export class BridgeService {
         for (const candidate of candidates) {
           try {
             const url = await this.previewUrl(candidate.song);
-            return { song: candidate.song, url };
+            yield { song: candidate.song, url };
           } catch (error) {
+            failures?.push(sanitizeProviderError(error));
             songloft.log.warn(`[BridgeService] Resolved search hit is not playable on ${platform.id}: ${sanitizeProviderError(error)}`);
           }
         }
       } catch (error) {
+        failures?.push(sanitizeProviderError(error));
         songloft.log.warn(`[BridgeService] Resolve search provider ${platform.id} failed: ${sanitizeProviderError(error)}`);
       }
     }
-
-    return null;
   }
 }
 
@@ -247,6 +330,13 @@ function sanitizeProviderError(error: unknown): string {
     .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
     .replace(/token[=:]\s*\S+/gi, 'token=[redacted]')
     .slice(0, 500);
+}
+
+function playbackFallbackError(attemptedCount: number, failures: string[]): StarlightError {
+  const lastFailure = failures.length > 0 ? failures[failures.length - 1] : '未找到可用音源';
+  const message = `播放失败，已尝试 ${attemptedCount} 个播放音源；最后失败原因：${lastFailure}`;
+  const code = lastFailure.includes('音箱播放') ? 'DEVICE_OFFLINE' : 'PLAY_URL_RESOLVE_FAILED';
+  return new StarlightError(code, message, true, { attempts: attemptedCount, lastFailure });
 }
 
 function normalizeSongText(value: string): string {

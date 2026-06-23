@@ -1,5 +1,6 @@
 import { initAutomationUI } from './automation.js';
 import { initMusicUI } from './music.js';
+import { bindPluginPlayerControls, renderPluginPlayer } from './plugin_player.js';
 import { initSpeakerUI } from './speaker.js';
 import { $, tabs, escapeHtml, setState, state } from './state.js';
 
@@ -79,6 +80,7 @@ function renderStatus() {
             <span class="status-chip"><strong>音源</strong>${sourceTotal} / ${sourceEnabled} 启用</span>
         </div>
         <div class="status-side">
+            ${renderPluginPlayer()}
             <div class="global-player" data-role="global-player">
                 <span class="global-player-info">
                     <strong>${escapeHtml(playerTitle)}</strong>
@@ -104,6 +106,7 @@ async function boot() {
     renderNavigation();
     renderActiveTab(state.activeTab);
     bindNavigation();
+    bindPluginPlayerControls();
     bindStateRenderers();
     renderStatus();
 

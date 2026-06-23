@@ -828,6 +828,31 @@ describe('RuntimeManager', () => {
     expect(dispatchCalls[0][0]).toMatch(/^starlight_lx_kg-only(?:_[a-z0-9]+)?$/);
   });
 
+  test('getMusicUrl continues to later enabled sources when one source throws', async () => {
+    const manager = new RuntimeManager(fakeSourceManager(() => [], {}));
+    const throwingRuntime = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => {
+        throw new Error('resolver exploded');
+      }),
+      destroy: vi.fn(),
+    };
+    const workingRuntime = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => 'https://cdn.invalid/working.mp3'),
+      destroy: vi.fn(),
+    };
+    (manager as unknown as { runtimes: SourceRuntime[] }).runtimes = [
+      throwingRuntime as unknown as SourceRuntime,
+      workingRuntime as unknown as SourceRuntime,
+    ];
+
+    await expect(manager.getMusicUrl('kw', '320k', songInfo)).resolves.toBe('https://cdn.invalid/working.mp3');
+
+    expect(throwingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', songInfo);
+    expect(workingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', songInfo);
+  });
+
   test('getMusicUrl returns null when no runtime matches the platform', async () => {
     const managerSource = fakeSourceManager(
       () => [sourceMeta('kw-only', true), sourceMeta('tx-only', true)],

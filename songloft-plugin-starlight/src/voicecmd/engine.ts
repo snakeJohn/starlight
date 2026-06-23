@@ -13,9 +13,11 @@ import { URLBuilder } from '../player/url_builder';
 import { AIAnalyzer } from './ai_analyzer';
 import { OnlineSearcher } from './online_searcher';
 import { updateDeviceStatusCache } from '../handlers/playlist';
+import { syntheticPlaylistId } from '../custom_playlists/synthetic';
 import type { ConversationMessage, VoiceCommand, PlayMode, AIAnalysisResult } from '../types';
 import type { BridgeService } from '../bridge/service';
 import type { CustomPlaylistService } from '../custom_playlists/service';
+import type { CustomPlaylist } from '../custom_playlists/types';
 import type { PlatformRegistry } from '../music/platforms/registry';
 import type { MusicPlatform, SearchResultSong } from '../music/types';
 
@@ -27,6 +29,17 @@ interface MatchResult {
   keyword: string;
   argument: string;
 }
+
+type VoiceCustomPlaylistService = Pick<CustomPlaylistService, 'create' | 'addSong' | 'list'>;
+
+interface MatchedPlaylist {
+  id: number;
+  name: string;
+}
+
+type SongloftRecord = Record<string, unknown>;
+
+const LIST_KEYS = ['list', 'items', 'songs', 'playlists'] as const;
 
 /** 口令类型优先级（数字越小优先级越高） */
 const COMMAND_PRIORITY: Record<string, number> = {
@@ -72,6 +85,157 @@ function standaloneSongToPlayerSong(song: { id: number; url: string; title: stri
   };
 }
 
+function normalizeMatchText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function matchScore(query: string, candidate: string): number {
+  const q = normalizeMatchText(query);
+  const c = normalizeMatchText(candidate);
+  if (!q || !c) return 0;
+  if (q === c) return 100;
+  if (c.includes(q)) return 60;
+  if (q.includes(c)) return 50;
+  return 0;
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function extractList(value: unknown): SongloftRecord[] {
+  if (Array.isArray(value)) {
+    return value.filter(isRecord);
+  }
+
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  for (const key of LIST_KEYS) {
+    const list = value[key];
+    if (Array.isArray(list)) {
+      return list.filter(isRecord);
+    }
+  }
+
+  return [];
+}
+
+function isRecord(value: unknown): value is SongloftRecord {
+  return Boolean(value && typeof value === 'object');
+}
+
+function isTruthyLocalMarker(value: unknown): boolean {
+  if (value === true || value === 1) {
+    return true;
+  }
+
+  if (typeof value === 'string') {
+    const marker = value.trim().toLowerCase();
+    return marker === 'true' || marker === '1' || marker === 'yes' || marker === 'local';
+  }
+
+  return false;
+}
+
+function isSongloftLocalSong(song: SongloftRecord): boolean {
+  if (isTruthyLocalMarker(song.local)) {
+    return true;
+  }
+
+  const type = readString(song.type).toLowerCase().replace(/[\s_-]+/g, '');
+  return type === 'local' || type === 'localsong' || type === '本地';
+}
+
+function getPlaylistName(playlist: SongloftRecord): string {
+  return readString(playlist.name) || readString(playlist.title);
+}
+
+function getSongTitle(song: SongloftRecord): string {
+  return readString(song.title) || readString(song.name) || readString(song.song_name);
+}
+
+function getSongArtist(song: SongloftRecord): string {
+  const artist = readString(song.artist) || readString(song.singer) || readString(song.author);
+  if (artist) {
+    return artist;
+  }
+
+  const artists = song.artists;
+  if (Array.isArray(artists)) {
+    return artists
+      .map(item => isRecord(item) ? readString(item.name) : readString(item))
+      .filter(Boolean)
+      .join(' / ');
+  }
+
+  return '';
+}
+
+function scoreSongloftSong(query: string, song: SongloftRecord): number {
+  const title = getSongTitle(song);
+  const artist = getSongArtist(song);
+  return Math.max(
+    matchScore(query, title),
+    matchScore(query, artist),
+    matchScore(query, [title, artist].filter(Boolean).join(' ')),
+  );
+}
+
+function findBestPlaylistMatch(query: string, playlists: SongloftRecord[]): MatchedPlaylist | null {
+  const scored = playlists
+    .map((playlist, index) => ({
+      playlist,
+      index,
+      score: matchScore(query, getPlaylistName(playlist)),
+    }))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const best = scored[0];
+  if (!best) {
+    return null;
+  }
+
+  const id = readNumber(best.playlist.id);
+  if (id === null) {
+    return null;
+  }
+
+  return {
+    id,
+    name: getPlaylistName(best.playlist),
+  };
+}
+
+function findBestSongloftSongMatch(query: string, songs: SongloftRecord[]): SongloftRecord | null {
+  const scored = songs
+    .map((song, index) => ({
+      song,
+      index,
+      score: scoreSongloftSong(query, song),
+      isLocal: isSongloftLocalSong(song),
+    }))
+    .filter(item => item.score > 0)
+    .sort((a, b) => Number(b.isLocal) - Number(a.isLocal) || b.score - a.score || a.index - b.index);
+
+  return scored[0]?.song ?? null;
+}
+
 // ===== 默认口令配置 =====
 
 /**
@@ -111,7 +275,7 @@ export class VoiceEngine {
   private indexingManager: IndexingManager;
   private aiAnalyzer: AIAnalyzer;
   private onlineSearcher: OnlineSearcher;
-  private customPlaylistService?: Pick<CustomPlaylistService, 'create' | 'addSong'>;
+  private customPlaylistService?: VoiceCustomPlaylistService;
   private platforms?: PlatformRegistry;
   private enabled: boolean = false;
   private resumeTimer: any = null;
@@ -125,7 +289,7 @@ export class VoiceEngine {
     indexingManager: IndexingManager,
     aiAnalyzer?: AIAnalyzer,
     bridgeService?: BridgeService,
-    customPlaylistService?: Pick<CustomPlaylistService, 'create' | 'addSong'>,
+    customPlaylistService?: VoiceCustomPlaylistService,
     platforms?: PlatformRegistry,
   ) {
     this.configManager = configManager;
@@ -533,6 +697,151 @@ export class VoiceEngine {
     return null;
   }
 
+  private async findCustomPlaylistByName(name: string): Promise<MatchedPlaylist | null> {
+    if (!name || !this.customPlaylistService || typeof this.customPlaylistService.list !== 'function') {
+      return null;
+    }
+
+    let playlists: CustomPlaylist[] = [];
+    try {
+      playlists = await this.customPlaylistService.list();
+    } catch (error) {
+      songloft.log.warn(`[VoiceEngine] Custom playlist lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+
+    const scored = playlists
+      .map((playlist, index) => ({
+        playlist,
+        index,
+        score: matchScore(name, playlist.name),
+      }))
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+
+    const best = scored[0];
+    if (!best) {
+      return null;
+    }
+
+    const nativeId = readNumber(best.playlist.native_playlist_id);
+    return {
+      id: nativeId ?? syntheticPlaylistId(best.index),
+      name: best.playlist.name,
+    };
+  }
+
+  private async findSongloftPlaylistByName(name: string): Promise<MatchedPlaylist | null> {
+    if (!name) {
+      return null;
+    }
+
+    try {
+      const playlists = extractList(await songloft.playlists.list());
+      return findBestPlaylistMatch(name, playlists);
+    } catch (error) {
+      songloft.log.warn(`[VoiceEngine] Songloft playlist lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  private async loadSongloftPlaylistSongs(playlistId: number): Promise<PlayerSong[]> {
+    try {
+      const rawSongs = extractList(await songloft.playlists.getSongs(playlistId, { limit: 100000 }));
+      return await this.songloftRecordsToPlayerSongs(rawSongs);
+    } catch (error) {
+      songloft.log.warn(`[VoiceEngine] Songloft playlist songs lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
+  private async findSongloftLibrarySong(songName: string): Promise<PlayerSong | null> {
+    if (!songName) {
+      return null;
+    }
+
+    try {
+      const songs = extractList(await songloft.songs.list({ limit: 10000 }));
+      const matched = findBestSongloftSongMatch(songName, songs);
+      if (!matched) {
+        return null;
+      }
+      return await this.songloftRecordToPlayerSong(matched);
+    } catch (error) {
+      songloft.log.warn(`[VoiceEngine] Songloft song lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  private async songloftRecordsToPlayerSongs(records: SongloftRecord[]): Promise<PlayerSong[]> {
+    const songs: PlayerSong[] = [];
+    for (const record of records) {
+      const song = await this.songloftRecordToPlayerSong(record);
+      if (song) {
+        songs.push(song);
+      }
+    }
+    return songs;
+  }
+
+  private async songloftRecordToPlayerSong(record: SongloftRecord): Promise<PlayerSong | null> {
+    const id = readNumber(record.id);
+    const title = getSongTitle(record);
+    if (id === null || !title) {
+      return null;
+    }
+
+    const rawUrl = readString(record.url)
+      || readString(record.play_url)
+      || readString(record.playUrl)
+      || `/api/v1/songs/${id}/play`;
+    const url = await URLBuilder.buildSongURL({ id, url: rawUrl });
+    if (!url) {
+      return null;
+    }
+
+    const explicitType = readString(record.type);
+    const type = isSongloftLocalSong(record) ? 'local' : (explicitType || 'remote');
+
+    return {
+      id,
+      type,
+      title,
+      artist: getSongArtist(record),
+      album: readString(record.album),
+      duration: readNumber(record.duration) ?? 0,
+      file_path: readString(record.file_path),
+      url,
+      cover_path: readString(record.cover_path),
+      cover_url: readString(record.cover_url),
+      lyric_url: readString(record.lyric_url),
+      file_size: readNumber(record.file_size) ?? 0,
+      format: readString(record.format),
+      bit_rate: readNumber(record.bit_rate) ?? 0,
+      sample_rate: readNumber(record.sample_rate) ?? 0,
+      is_live: record.is_live === true,
+      cache_hash: readString(record.cache_hash),
+    };
+  }
+
+  private async getPlaybackConfig(accountId: string, deviceId: string, playlistId?: number): Promise<{ startIndex: number; playMode: PlayMode }> {
+    let startIndex = 0;
+    let playMode: PlayMode = 'order';
+
+    const devices = await this.configManager.getDevices(accountId);
+    const devCfg = devices.find(d => d.device_id === deviceId);
+    if (devCfg) {
+      if (playlistId !== undefined && devCfg.playlist_id === playlistId) {
+        startIndex = devCfg.current_song_index || 0;
+      }
+      if (devCfg.play_mode) {
+        playMode = devCfg.play_mode as PlayMode;
+      }
+    }
+
+    return { startIndex, playMode };
+  }
+
   /**
    * 执行播放歌单
    * 通过 IndexingManager 模糊匹配歌单名，然后调用 PlaylistManager 播放
@@ -577,6 +886,37 @@ export class VoiceEngine {
       songloft.log.info(`[VoiceEngine] No name specified, using default playlist: ${playlistName}`);
     }
 
+    const customPlaylist = await this.findCustomPlaylistByName(playlistName);
+    if (customPlaylist) {
+      const { startIndex, playMode } = await this.getPlaybackConfig(accountId, deviceId, customPlaylist.id);
+      const ok = await pm.play(customPlaylist.id, startIndex, playMode);
+      if (ok) {
+        songloft.log.info(`[VoiceEngine] Play custom playlist success: ${customPlaylist.name} index=${startIndex} mode=${playMode}`);
+      } else {
+        songloft.log.error(`[VoiceEngine] Play custom playlist failed: ${customPlaylist.name}`);
+      }
+      return;
+    }
+
+    const songloftPlaylist = await this.findSongloftPlaylistByName(playlistName);
+    if (songloftPlaylist) {
+      const songs = await this.loadSongloftPlaylistSongs(songloftPlaylist.id);
+      if (songs.length === 0) {
+        songloft.log.warn(`[VoiceEngine] Songloft playlist is empty or unplayable: ${songloftPlaylist.name}`);
+        await this.minaService.textToSpeech(accountId, deviceId, `歌单为空：${songloftPlaylist.name}`);
+        return;
+      }
+
+      const { playMode } = await this.getPlaybackConfig(accountId, deviceId);
+      const ok = await pm.playStandalone(songs, 0, playMode);
+      if (ok) {
+        songloft.log.info(`[VoiceEngine] Play Songloft playlist success: ${songloftPlaylist.name} mode=${playMode}`);
+      } else {
+        songloft.log.error(`[VoiceEngine] Play Songloft playlist failed: ${songloftPlaylist.name}`);
+      }
+      return;
+    }
+
     // 模糊匹配歌单
     const matchedPlaylist = this.indexingManager.findPlaylistByName(playlistName);
     if (!matchedPlaylist) {
@@ -588,20 +928,7 @@ export class VoiceEngine {
     songloft.log.info(`[VoiceEngine] Matched playlist: ${matchedPlaylist.name} (id=${matchedPlaylist.id})`);
 
     // 获取设备配置中的播放模式和起始位置
-    let startIndex = 0;
-    let playMode: PlayMode = 'order';
-
-    const devices = await this.configManager.getDevices(accountId);
-    const devCfg = devices.find(d => d.device_id === deviceId);
-    if (devCfg) {
-      if (devCfg.playlist_id === matchedPlaylist.id) {
-        // 同一个歌单，从上次位置继续
-        startIndex = devCfg.current_song_index || 0;
-      }
-      if (devCfg.play_mode) {
-        playMode = devCfg.play_mode as PlayMode;
-      }
-    }
+    const { startIndex, playMode } = await this.getPlaybackConfig(accountId, deviceId, matchedPlaylist.id);
 
     // 播放歌单
     const ok = await pm.play(matchedPlaylist.id, startIndex, playMode);
@@ -661,6 +988,17 @@ export class VoiceEngine {
           songloft.log.info('[VoiceEngine] Played standalone remote song through PlaylistManager: ' + standalone.title + ' - ' + standalone.artist);
           return;
         }
+      }
+
+      const songloftSong = await this.findSongloftLibrarySong(songName);
+      if (songloftSong) {
+        const ok = await pm.playStandalone([songloftSong], 0, 'single');
+        if (!ok) {
+          songloft.log.error('[VoiceEngine] Failed to play Songloft library song: ' + songloftSong.title + ' - ' + songloftSong.artist);
+          return;
+        }
+        songloft.log.info('[VoiceEngine] Played Songloft library song through PlaylistManager: ' + songloftSong.title + ' - ' + songloftSong.artist);
+        return;
       }
 
       songloft.log.warn(`[VoiceEngine] Song not found locally: ${songName}, trying online search`);
