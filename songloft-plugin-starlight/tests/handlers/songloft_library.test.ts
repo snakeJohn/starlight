@@ -30,13 +30,22 @@ function createHarness(options: Parameters<typeof registerSongloftLibraryHandler
   return { router };
 }
 
+type SongloftSongsStub = {
+  list: () => Promise<unknown>;
+};
+
+type SongloftPlaylistsStub = {
+  list: () => Promise<unknown>;
+  getSongs: (playlistId: string) => Promise<unknown>;
+};
+
 describe('registerSongloftLibraryHandlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('returns Songloft songs from songloft.songs.list and normalizes items/count responses', async () => {
-    songloft.songs.list = vi.fn(async () => ({
+    (songloft.songs as unknown as SongloftSongsStub).list = vi.fn(async () => ({
       items: [{ id: 'song-1', title: 'Song A' }],
       count: 8,
     }));
@@ -57,7 +66,7 @@ describe('registerSongloftLibraryHandlers', () => {
   });
 
   it('returns Songloft playlists from songloft.playlists.list and normalizes playlists/total responses', async () => {
-    songloft.playlists.list = vi.fn(async () => ({
+    (songloft.playlists as unknown as SongloftPlaylistsStub).list = vi.fn(async () => ({
       playlists: [{ id: 'playlist-1', name: 'Daily Mix' }],
       total: 3,
     }));
@@ -74,7 +83,7 @@ describe('registerSongloftLibraryHandlers', () => {
   });
 
   it('returns playlist songs from songloft.playlists.getSongs and normalizes songs/count responses', async () => {
-    songloft.playlists.getSongs = vi.fn(async () => ({
+    (songloft.playlists as unknown as SongloftPlaylistsStub).getSongs = vi.fn(async () => ({
       songs: [{ id: 'song-2', title: 'Playlist Song' }],
       count: 11,
     }));
@@ -91,7 +100,7 @@ describe('registerSongloftLibraryHandlers', () => {
   });
 
   it('returns only local songs using common type and local markers', async () => {
-    songloft.songs.list = vi.fn(async () => [
+    (songloft.songs as unknown as SongloftSongsStub).list = vi.fn(async () => [
       { id: 'local-1', title: 'Local A', type: 'local' },
       { id: 'local-2', title: 'Local B', type: 'LOCAL' },
       { id: 'local-3', title: 'Local C', local: true },
@@ -137,7 +146,7 @@ describe('registerSongloftLibraryHandlers', () => {
     const response = await router.handle({
       ...request('POST', '/api/songloft/player/song'),
       body,
-    } as HTTPRequest);
+    } as unknown as HTTPRequest);
 
     expect(response.statusCode).toBe(200);
     expect(getOrCreate).toHaveBeenCalledWith('acc-1', 'dev-1');
@@ -161,7 +170,7 @@ describe('registerSongloftLibraryHandlers', () => {
 
   it('registers Songloft library routes during plugin init', async () => {
     vi.resetModules();
-    songloft.songs.list = vi.fn(async () => [{ id: 'song-main', title: 'From Main' }]);
+    (songloft.songs as unknown as SongloftSongsStub).list = vi.fn(async () => [{ id: 'song-main', title: 'From Main' }]);
     songloft.playlists.list = vi.fn(async () => []);
     songloft.playlists.getSongs = vi.fn(async () => []);
 

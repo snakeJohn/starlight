@@ -188,7 +188,7 @@ export function registerSongloftLibraryHandlers(router: Router, options: Songlof
     handle(async () => normalizeList(await songloft.playlists.list())));
 
   router.get('/api/songloft/playlists/:id/songs', async (_req, params) =>
-    handle(async () => normalizeList(await songloft.playlists.getSongs(requireId(params.id)))));
+    handle(async () => normalizeList(await songloft.playlists.getSongs(requireId(params.id) as unknown as number))));
 
   router.get('/api/songloft/local-songs', async () =>
     handle(async () => {

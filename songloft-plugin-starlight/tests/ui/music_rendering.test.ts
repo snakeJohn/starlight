@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest';
 interface MusicRenderingModule {
   cleanDisplayText(value: unknown): string;
   mediaCoverUrl(item: Record<string, unknown>): string;
-  renderSongRow(song: Record<string, unknown>, index: number, extraActions?: string): string;
+  renderSongRow(
+    song: Record<string, unknown>,
+    index: number,
+    extraActions?: string,
+    options?: { selectable?: boolean; checkboxRole?: string },
+  ): string;
   renderListScroller(innerHtml: string, extraClass?: string): string;
   renderSongListItem(item: Record<string, unknown>, index: number): string;
   renderRankingBoard(board: Record<string, unknown>, index: number): string;
