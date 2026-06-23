@@ -4,7 +4,6 @@ export const tabs = [
     { id: 'songlists', label: '歌单', icon: 'L' },
     { id: 'rankings', label: '排行', icon: '#' },
     { id: 'sources', label: '音源', icon: '+' },
-    { id: 'download', label: '下载', icon: 'D' },
     { id: 'logs', label: '日志', icon: '!' },
     { id: 'automation', label: '自动化', icon: 'A' },
 ];

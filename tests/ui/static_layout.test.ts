@@ -182,26 +182,32 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('@media (max-width: 760px)');
   });
 
-  it('keeps download settings and progress separate from merged source management', () => {
+  it('keeps download settings and progress at the bottom of merged source management', () => {
     const html = indexHtml();
-    const downloadStart = html.indexOf('<section class="tab-panel" id="tab-download">');
+    const sourcesStart = html.indexOf('<section class="tab-panel" id="tab-sources">');
     const logsStart = html.indexOf('<section class="tab-panel" id="tab-logs">');
-    const downloadHtml = html.slice(downloadStart, logsStart);
+    const sourcesHtml = html.slice(sourcesStart, logsStart);
+    const sourcePagination = sourcesHtml.indexOf('data-role="source-pagination"');
+    const downloadSettings = sourcesHtml.indexOf('data-role="download-settings-form"');
+    const downloadProgress = sourcesHtml.indexOf('data-role="download-progress"');
 
     expect(html).not.toContain('id="miniPlayer"');
-    expect(downloadHtml).toContain('data-role="download-settings-form"');
-    expect(downloadHtml).toContain('data-role="download-progress"');
-    expect(downloadHtml).not.toContain('data-role="download-source-file"');
-    expect(downloadHtml).not.toContain('data-role="download-source-list"');
-    expect(downloadHtml).not.toContain('<h2>下载音源</h2>');
+    expect(html).not.toContain('id="tab-download"');
+    expect(sourcesHtml).toContain('data-role="download-settings-form"');
+    expect(sourcesHtml).toContain('data-role="download-progress"');
+    expect(downloadSettings).toBeGreaterThan(sourcePagination);
+    expect(downloadProgress).toBeGreaterThan(downloadSettings);
+    expect(sourcesHtml).not.toContain('data-role="download-source-file"');
+    expect(sourcesHtml).not.toContain('data-role="download-source-list"');
+    expect(sourcesHtml).not.toContain('<h2>下载音源</h2>');
   });
 
   it('merges playback and download source management into one paged selectable control', () => {
     const html = indexHtml();
     const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
     const sourcesStart = html.indexOf('<section class="tab-panel" id="tab-sources">');
-    const downloadStart = html.indexOf('<section class="tab-panel" id="tab-download">');
-    const sourcesHtml = html.slice(sourcesStart, downloadStart);
+    const logsStart = html.indexOf('<section class="tab-panel" id="tab-logs">');
+    const sourcesHtml = html.slice(sourcesStart, logsStart);
 
     expect(sourcesHtml).toContain('data-action="enable-selected-playback-sources"');
     expect(sourcesHtml).toContain('data-action="disable-selected-playback-sources"');
