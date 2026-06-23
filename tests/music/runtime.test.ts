@@ -1,9 +1,10 @@
-import { describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { LX_SHIM } from '../../src/music/lx_shim';
 import { RuntimeManager } from '../../src/music/runtime_manager';
 import { SourceRuntime } from '../../src/music/runtime';
 import type { SourceManager } from '../../src/music/source_manager';
 import type { LxSongInfo, MusicSourceMeta } from '../../src/music/types';
+import { sourceDiagnostics } from '../../src/diagnostics/source_logs';
 
 interface JsenvEvent {
   name: string;
@@ -66,6 +67,10 @@ const songInfo: LxSongInfo = {
   duration: 180,
   musicId: 'synthetic-id',
 };
+
+beforeEach(() => {
+  sourceDiagnostics.clear();
+});
 
 function installJsenvMock(handler: ExecuteWaitHandler) {
   const create = vi.fn(async (_name: string, _initCode?: string) => '');
@@ -848,8 +853,14 @@ describe('RuntimeManager', () => {
 
     await expect(manager.getMusicUrl('kw', '320k', songInfo)).resolves.toBe('https://cdn.invalid/working.mp3');
 
-    expect(throwingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', songInfo);
-    expect(workingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', songInfo);
+    expect(throwingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', expect.objectContaining({
+      musicId: 'synthetic-id',
+      songmid: 'synthetic-id',
+    }));
+    expect(workingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', expect.objectContaining({
+      musicId: 'synthetic-id',
+      songmid: 'synthetic-id',
+    }));
   });
 
   test('getMusicUrl continues to later enabled sources when one source times out', async () => {
@@ -871,12 +882,115 @@ describe('RuntimeManager', () => {
 
     await expect(manager.getMusicUrl('kw', '320k', songInfo)).resolves.toBe('https://cdn.invalid/working-after-timeout.mp3');
 
-    expect(slowRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', songInfo);
-    expect(workingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', songInfo);
+    expect(slowRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', expect.objectContaining({
+      musicId: 'synthetic-id',
+      songmid: 'synthetic-id',
+    }));
+    expect(workingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', expect.objectContaining({
+      musicId: 'synthetic-id',
+      songmid: 'synthetic-id',
+    }));
     expect(manager.getLastMusicUrlAttempt()).toEqual({
       attemptedSources: 2,
       lastFailure: 'music URL source timed out after 5ms',
     });
+  });
+
+  test('getMusicUrl copies musicId into songmid before invoking source runtimes', async () => {
+    const manager = new RuntimeManager(fakeSourceManager(() => [], {}));
+    const runtime = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => 'https://cdn.invalid/song.mp3'),
+      destroy: vi.fn(),
+    };
+    (manager as unknown as { runtimes: SourceRuntime[] }).runtimes = [runtime as unknown as SourceRuntime];
+
+    await expect(manager.getMusicUrl('kw', '320k', songInfo)).resolves.toBe('https://cdn.invalid/song.mp3');
+
+    expect(runtime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', expect.objectContaining({
+      musicId: 'synthetic-id',
+      songmid: 'synthetic-id',
+    }));
+  });
+
+  test('getMusicUrl fails before dispatch when the song has no resolvable id', async () => {
+    const manager = new RuntimeManager(fakeSourceManager(() => [], {}));
+    const runtime = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => 'https://cdn.invalid/should-not-dispatch.mp3'),
+      destroy: vi.fn(),
+    };
+    (manager as unknown as { runtimes: SourceRuntime[] }).runtimes = [runtime as unknown as SourceRuntime];
+
+    await expect(manager.getMusicUrl('kw', '320k', {
+      source: 'kw',
+      name: 'No Id Song',
+      singer: 'Singer',
+      album: '',
+      duration: 180,
+    }, { operation: 'playback', title: 'No Id Song', artist: 'Singer' })).resolves.toBeNull();
+
+    expect(runtime.getMusicUrl).not.toHaveBeenCalled();
+    expect(manager.getLastMusicUrlAttempt()).toEqual({
+      attemptedSources: 0,
+      lastFailure: '歌曲缺少可解析 ID',
+    });
+    expect(sourceDiagnostics.list()).toEqual([
+      expect.objectContaining({
+        operation: 'playback',
+        status: 'failed',
+        title: 'No Id Song',
+        artist: 'Singer',
+        platform: 'kw',
+        quality: '320k',
+        message: '歌曲缺少可解析 ID',
+      }),
+    ]);
+  });
+
+  test('getMusicUrl records failed and successful source diagnostics with source names', async () => {
+    const managerSource = fakeSourceManager(() => [sourceMeta('broken-source', true), sourceMeta('working-source', true)], {
+      'broken-source': 'broken-script',
+      'working-source': 'working-script',
+    });
+    installJsenvMock((name, code, _timeoutMs, waitEvents) => {
+      if (waitEvents.includes('inited')) {
+        return result([initedEvent({ kw: {} })]);
+      }
+      if (name.includes('broken-source')) {
+        return result([dispatchErrorEvent(code, 'resolver failed')]);
+      }
+      return result([dispatchResultEvent(code, 'https://cdn.invalid/working.mp3')]);
+    });
+    const manager = new RuntimeManager(managerSource);
+    await manager.loadEnabledSources();
+
+    await expect(manager.getMusicUrl('kw', '320k', songInfo, {
+      operation: 'download',
+      title: 'Synthetic Song',
+      artist: 'Synthetic Artist',
+    })).resolves.toBe('https://cdn.invalid/working.mp3');
+
+    expect(sourceDiagnostics.list()).toEqual([
+      expect.objectContaining({
+        operation: 'download',
+        status: 'failed',
+        sourceId: 'broken-source',
+        sourceName: 'broken-source',
+        platform: 'kw',
+        message: 'resolver failed',
+      }),
+      expect.objectContaining({
+        operation: 'download',
+        status: 'success',
+        sourceId: 'working-source',
+        sourceName: 'working-source',
+        platform: 'kw',
+        quality: '320k',
+        title: 'Synthetic Song',
+        artist: 'Synthetic Artist',
+      }),
+    ]);
   });
 
   test('getMusicUrl returns null when no runtime matches the platform', async () => {

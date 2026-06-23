@@ -22,9 +22,21 @@ export class BridgeService {
       song.source_data.platform,
       song.source_data.quality,
       song.source_data.songInfo,
+      { operation: 'playback', title: song.title, artist: song.artist },
     );
     if (!url) {
-      throw new StarlightError('PLAY_URL_RESOLVE_FAILED', '无法解析播放 URL', true);
+      const attempt = typeof this.runtimes.getLastMusicUrlAttempt === 'function'
+        ? this.runtimes.getLastMusicUrlAttempt()
+        : { attemptedSources: 0, lastFailure: null };
+      throw new StarlightError(
+        'PLAY_URL_RESOLVE_FAILED',
+        playUrlResolveFailureMessage(attempt.attemptedSources, attempt.lastFailure),
+        true,
+        {
+          attempts: attempt.attemptedSources,
+          lastFailure: attempt.lastFailure || '未找到可用播放音源',
+        },
+      );
     }
 
     return url;
@@ -338,6 +350,13 @@ function playbackFallbackError(attemptedCount: number, failures: string[]): Star
   const message = `播放失败，已尝试 ${attemptedCount} 个播放音源；最后失败原因：${lastFailure}`;
   const code = lastFailure.includes('音箱播放') ? 'DEVICE_OFFLINE' : 'PLAY_URL_RESOLVE_FAILED';
   return new StarlightError(code, message, true, { attempts: attemptedCount, lastFailure });
+}
+
+function playUrlResolveFailureMessage(attemptedCount: number, lastFailure: string | null): string {
+  if (attemptedCount > 0 || lastFailure) {
+    return `无法解析播放 URL，已尝试 ${attemptedCount} 个播放音源；最后失败原因：${lastFailure || '未找到可用播放音源'}`;
+  }
+  return '无法解析播放 URL';
 }
 
 function normalizeSongText(value: string): string {

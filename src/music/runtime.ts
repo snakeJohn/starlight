@@ -19,6 +19,7 @@ interface RuntimeResult {
 interface DispatchEnvelope {
   id?: unknown;
   result?: unknown;
+  error?: unknown;
 }
 
 let nextDispatchId = 1;
@@ -93,6 +94,7 @@ export class SourceRuntime {
   private destroyed = false;
   private dispatchQueue: Promise<void> = Promise.resolve();
   private destroyPromise: Promise<void> | null = null;
+  private lastMusicUrlFailure: string | null = null;
 
   private constructor(
     private readonly envName: string,
@@ -148,6 +150,10 @@ export class SourceRuntime {
     return this.enqueueDispatch(() => this.dispatchMusicUrl(platform, quality, songInfo), null);
   }
 
+  getLastMusicUrlFailure(): string | null {
+    return this.lastMusicUrlFailure;
+  }
+
   async destroy(): Promise<void> {
     if (this.destroyPromise) {
       return this.destroyPromise;
@@ -191,6 +197,7 @@ export class SourceRuntime {
     quality: MusicQuality | string,
     songInfo: LxSongInfo,
   ): Promise<string | null> {
+    this.lastMusicUrlFailure = null;
     const dispatchId = `musicUrl_${nextDispatchId++}`;
     const payload = {
       source: platform,
@@ -210,17 +217,31 @@ export class SourceRuntime {
         ['dispatchResult', 'dispatchError'],
       ) as RuntimeResult;
       if (dispatchResult.error) {
+        this.lastMusicUrlFailure = sanitizeError(dispatchResult.error);
+        return null;
+      }
+
+      const errorEvent = this.findDispatchEvent(dispatchResult.events, 'dispatchError', dispatchId);
+      if (errorEvent) {
+        const data = parseEventData(errorEvent.data) as DispatchEnvelope;
+        this.lastMusicUrlFailure = sanitizeError(typeof data.error === 'string' ? data.error : '音源返回错误');
         return null;
       }
 
       const resultEvent = this.findDispatchEvent(dispatchResult.events, 'dispatchResult', dispatchId);
       if (!resultEvent) {
+        this.lastMusicUrlFailure = '音源未返回 URL';
         return null;
       }
 
       const data = parseEventData(resultEvent.data) as DispatchEnvelope;
-      return stringUrl(data.result);
-    } catch {
+      const url = stringUrl(data.result);
+      if (!url) {
+        this.lastMusicUrlFailure = '音源未返回 URL';
+      }
+      return url;
+    } catch (error) {
+      this.lastMusicUrlFailure = sanitizeError(error);
       return null;
     }
   }
@@ -248,6 +269,14 @@ export class SourceRuntime {
 
     return null;
   }
+}
+
+function sanitizeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/token[=:]\s*\S+/gi, 'token=[redacted]')
+    .slice(0, 500);
 }
 
 function parseSourceConfig(data: unknown): SourceConfig | null {

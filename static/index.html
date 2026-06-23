@@ -447,6 +447,49 @@
                 </section>
             </section>
 
+            <section class="tab-panel" id="tab-logs">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Diagnostics</p>
+                        <h1>日志</h1>
+                    </div>
+                    <div class="inline-actions">
+                        <span class="status-pill" data-role="source-log-total">0 条</span>
+                        <button class="ghost-button" type="button" data-action="refresh-source-logs">刷新</button>
+                        <button class="ghost-button" type="button" data-action="clear-source-logs">清空</button>
+                    </div>
+                </div>
+                <section class="surface-section">
+                    <div class="section-bar">
+                        <div>
+                            <h2>音源诊断</h2>
+                            <span class="section-caption">记录播放和下载时每个音源的解析结果，方便判断失效音源。</span>
+                        </div>
+                    </div>
+                    <div class="control-grid compact">
+                        <label>
+                            <span>类型</span>
+                            <select data-role="diagnostics-operation-filter">
+                                <option value="all">全部</option>
+                                <option value="playback">播放</option>
+                                <option value="download">下载</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>状态</span>
+                            <select data-role="diagnostics-status-filter">
+                                <option value="all">全部</option>
+                                <option value="failed">失败</option>
+                                <option value="success">成功</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="source-log-list" data-role="source-log-list">
+                        <div class="empty-state">暂无播放或下载音源日志。</div>
+                    </div>
+                </section>
+            </section>
+
             <section class="tab-panel" id="tab-automation">
                 <div class="panel-heading">
                     <div>

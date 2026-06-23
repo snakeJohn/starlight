@@ -766,6 +766,76 @@ textarea:focus {
     overflow-wrap: anywhere;
 }
 
+.source-log-list {
+    display: grid;
+    gap: 10px;
+    max-height: 62vh;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+}
+
+.source-log-row {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
+    gap: 12px;
+    align-items: start;
+    border: 1px solid var(--surface-line);
+    border-radius: var(--radius);
+    padding: 10px;
+    background: color-mix(in srgb, var(--surface-solid) 90%, transparent);
+}
+
+.source-log-row[data-status="failed"] {
+    border-color: color-mix(in srgb, #d43f3a 38%, var(--surface-line));
+}
+
+.source-log-row[data-status="success"] {
+    border-color: color-mix(in srgb, #1d9a61 34%, var(--surface-line));
+}
+
+.source-log-main,
+.source-log-title,
+.source-log-meta {
+    min-width: 0;
+}
+
+.source-log-main {
+    display: grid;
+    gap: 8px;
+}
+
+.source-log-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.source-log-title strong,
+.source-log-main p,
+.source-log-meta span {
+    overflow-wrap: anywhere;
+}
+
+.source-log-title span,
+.source-log-main p,
+.source-log-meta {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.source-log-main p {
+    margin: 0;
+}
+
+.source-log-meta {
+    display: grid;
+    gap: 5px;
+    justify-items: end;
+    text-align: right;
+}
+
 .voice-record-panel {
     min-width: 0;
 }
@@ -1204,7 +1274,7 @@ legend {
         bottom: 0;
         z-index: 40;
         display: grid;
-        grid-template-columns: repeat(7, 1fr);
+        grid-template-columns: repeat(8, minmax(0, 1fr));
         min-height: var(--bottom-tabs-height);
         padding: 6px max(6px, env(safe-area-inset-left)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-right));
         border-top: 1px solid var(--surface-line);
@@ -1247,6 +1317,15 @@ legend {
     .song-row,
     .source-row {
         grid-template-columns: minmax(0, 1fr);
+    }
+
+    .source-log-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .source-log-meta {
+        justify-items: start;
+        text-align: left;
     }
 
     .media-row {

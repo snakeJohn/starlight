@@ -119,7 +119,11 @@ describe('BridgeService', () => {
 
     await expect(service.previewUrl(song)).resolves.toBe('https://audio.test/song.mp3');
 
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo);
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo, {
+      operation: 'playback',
+      title: 'Song',
+      artist: 'Singer',
+    });
   });
 
   it('throws PLAY_URL_RESOLVE_FAILED when the runtime cannot resolve a URL', async () => {
@@ -127,6 +131,30 @@ describe('BridgeService', () => {
 
     await expect(service.previewUrl(song)).rejects.toMatchObject({
       code: 'PLAY_URL_RESOLVE_FAILED',
+    });
+  });
+
+  it('includes the last runtime failure when preview URL resolution fails', async () => {
+    const runtimes = {
+      getMusicUrl: vi.fn(async () => null),
+      getLastMusicUrlAttempt: vi.fn(() => ({
+        attemptedSources: 2,
+        lastFailure: '音乐下载器 v6 请求了空歌曲 ID',
+      })),
+    } as unknown as RuntimeManager;
+    const platforms = {
+      all: vi.fn(() => []),
+      get: vi.fn(() => null),
+    } as unknown as PlatformRegistry;
+    const service = new BridgeService(platforms, runtimes, {} as MinaService);
+
+    await expect(service.previewUrl(song)).rejects.toMatchObject({
+      code: 'PLAY_URL_RESOLVE_FAILED',
+      message: expect.stringContaining('已尝试 2 个播放音源'),
+      details: {
+        attempts: 2,
+        lastFailure: '音乐下载器 v6 请求了空歌曲 ID',
+      },
     });
   });
 
@@ -314,8 +342,16 @@ describe('BridgeService', () => {
       urls: ['https://audio.test/song.mp3', 'https://audio.test/song.mp3'],
     });
 
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo);
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', secondSong.source_data.songInfo);
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo, {
+      operation: 'playback',
+      title: 'Song',
+      artist: 'Singer',
+    });
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', secondSong.source_data.songInfo, {
+      operation: 'playback',
+      title: 'Second Song',
+      artist: 'Singer',
+    });
     expect(playlistManagerMap.getOrCreate).toHaveBeenCalledWith('acc-1', 'dev-1');
     expect(playlistManager.playStandalone).toHaveBeenCalledWith([
       expect.objectContaining({ title: 'Song', url: 'https://audio.test/song.mp3' }),
@@ -360,8 +396,16 @@ describe('BridgeService', () => {
     });
 
     expect(provider.search).toHaveBeenCalledWith('Song Singer', 1, 5);
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo);
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kg', '320k', fallbackSong.source_data.songInfo);
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo, {
+      operation: 'playback',
+      title: 'Song',
+      artist: 'Singer',
+    });
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kg', '320k', fallbackSong.source_data.songInfo, {
+      operation: 'playback',
+      title: 'Song',
+      artist: 'Singer',
+    });
     expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/fallback.mp3');
   });
 
@@ -426,7 +470,11 @@ describe('BridgeService', () => {
 
     expect(emptyProvider.search).toHaveBeenCalledWith('Second Song Singer', 1, 5);
     expect(hitProvider.search).toHaveBeenCalledWith('Second Song Singer', 1, 5);
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', secondSong.source_data.songInfo);
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', secondSong.source_data.songInfo, {
+      operation: 'playback',
+      title: 'Second Song',
+      artist: 'Singer',
+    });
   });
 
   it('skips provider search hits whose playback URL cannot be resolved', async () => {

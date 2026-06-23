@@ -22,6 +22,10 @@ function speakerJs(): string {
   return readFileSync(resolve(process.cwd(), 'static/js/speaker.js'), 'utf8');
 }
 
+function diagnosticsJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/diagnostics.js'), 'utf8');
+}
+
 function css(): string {
   return readFileSync(resolve(process.cwd(), 'static/css/style.css'), 'utf8');
 }
@@ -374,5 +378,24 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('padding-bottom: var(--bottom-tabs-height)');
     expect(stylesheet).toContain('minmax(min(100%, 280px), 1fr)');
     expect(stylesheet).not.toContain('grid-template-columns: repeat(auto-fit, minmax(280px, 1fr))');
+  });
+
+  it('adds a source diagnostics log menu with filtering and clearing controls', () => {
+    const html = indexHtml();
+    const state = stateJs();
+    const app = appJs();
+    const diagnostics = diagnosticsJs();
+    const stylesheet = css();
+
+    expect(state).toContain("{ id: 'logs', label: '日志'");
+    expect(app).toContain('initDiagnosticsUI');
+    expect(html).toContain('<section class="tab-panel" id="tab-logs">');
+    expect(html).toContain('data-role="diagnostics-operation-filter"');
+    expect(html).toContain('data-action="refresh-source-logs"');
+    expect(html).toContain('data-action="clear-source-logs"');
+    expect(html).toContain('data-role="source-log-list"');
+    expect(diagnostics).toContain('/diagnostics/source-logs');
+    expect(diagnostics).toContain('renderSourceLogs');
+    expect(stylesheet).toContain('.source-log-row');
   });
 });

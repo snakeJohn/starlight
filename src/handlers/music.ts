@@ -239,9 +239,26 @@ export function registerMusicHandlers(
       const resolver = isDownloadMusicUrlSource(sourceData) && options.downloadRuntimes
         ? options.downloadRuntimes
         : runtimes;
-      const url = await resolver.getMusicUrl(platform, quality, sourceData.songInfo as LxSongInfo);
+      const operation = resolver === options.downloadRuntimes ? 'download' : 'playback';
+      const songInfo = sourceData.songInfo as LxSongInfo;
+      const url = await resolver.getMusicUrl(platform, quality, songInfo, {
+        operation,
+        title: songInfo.name,
+        artist: songInfo.singer,
+      });
       if (!url) {
-        throw new StarlightError('PLAY_URL_RESOLVE_FAILED', '播放地址解析失败');
+        const attempt = typeof resolver.getLastMusicUrlAttempt === 'function'
+          ? resolver.getLastMusicUrlAttempt()
+          : { attemptedSources: 0, lastFailure: null };
+        throw new StarlightError(
+          'PLAY_URL_RESOLVE_FAILED',
+          musicUrlResolveFailureMessage(operation, attempt.attemptedSources, attempt.lastFailure),
+          true,
+          {
+            attempts: attempt.attemptedSources,
+            lastFailure: attempt.lastFailure || '未找到可用音源',
+          },
+        );
       }
 
       return { url };
@@ -293,6 +310,14 @@ export function registerMusicHandlers(
     }));
 
   router.post('/api/music/lyric', async () => handle(() => ({ lyric: '' })));
+}
+
+function musicUrlResolveFailureMessage(operation: 'playback' | 'download', attemptedCount: number, lastFailure: string | null): string {
+  const label = operation === 'download' ? '下载' : '播放';
+  if (attemptedCount > 0 || lastFailure) {
+    return `${label}地址解析失败，已尝试 ${attemptedCount} 个${label}音源；最后失败原因：${lastFailure || '未找到可用音源'}`;
+  }
+  return `${label}地址解析失败`;
 }
 
 function isDownloadMusicUrlSource(sourceData: { starlight?: unknown }): boolean {

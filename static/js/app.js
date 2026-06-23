@@ -1,4 +1,5 @@
 import { initAutomationUI } from './automation.js';
+import { initDiagnosticsUI } from './diagnostics.js';
 import { initMusicUI } from './music.js';
 import { initSpeakerUI } from './speaker.js';
 import { $, tabs, escapeHtml, setState, state } from './state.js';
@@ -99,6 +100,7 @@ async function boot() {
         initMusicUI(),
         initSpeakerUI(),
         initAutomationUI(),
+        initDiagnosticsUI(),
     ]);
     const failed = results.find(result => result.status === 'rejected');
     if (failed) {

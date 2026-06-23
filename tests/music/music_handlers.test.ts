@@ -248,7 +248,11 @@ describe('registerMusicHandlers', () => {
     const response = await router.handle(request('POST', '/api/music/url', { source_data: sourceData }));
 
     expect(response.statusCode).toBe(200);
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', sourceData.songInfo);
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', sourceData.songInfo, {
+      operation: 'playback',
+      title: 'Song',
+      artist: 'Artist',
+    });
     expect(parseResponseBody(response)).toEqual({ url: 'https://cdn.example/song.mp3' });
 
     const invalid = await router.handle(request('POST', '/api/music/url', {}));
@@ -268,7 +272,11 @@ describe('registerMusicHandlers', () => {
     const response = await router.handle(request('POST', '/api/music/url', { source_data: sourceData }));
 
     expect(response.statusCode).toBe(200);
-    expect(downloadRuntimes.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', sourceData.songInfo);
+    expect(downloadRuntimes.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', sourceData.songInfo, {
+      operation: 'download',
+      title: 'Song',
+      artist: 'Artist',
+    });
     expect(runtimes.getMusicUrl).not.toHaveBeenCalled();
     expect(parseResponseBody(response)).toEqual({ url: 'https://download.example/song.flac' });
   });

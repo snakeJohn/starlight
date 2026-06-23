@@ -7,6 +7,7 @@ import { RuntimeManager as MusicRuntimeManager } from '../../src/music/runtime_m
 import type { SourceRuntime } from '../../src/music/runtime';
 import type { SourceManager } from '../../src/music/source_manager';
 import type { SearchResultSong } from '../../src/music/types';
+import { sourceDiagnostics } from '../../src/diagnostics/source_logs';
 
 const song = {
   title: 'Song',
@@ -100,6 +101,7 @@ function emptySourceManager(): SourceManager {
 describe('DownloadService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sourceDiagnostics.clear();
   });
 
   it('loads and saves download settings with downloader defaults', async () => {
@@ -135,7 +137,11 @@ describe('DownloadService', () => {
       status: 'ok',
     });
 
-    expect(runtime.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', song.source_data.songInfo);
+    expect(runtime.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', song.source_data.songInfo, {
+      operation: 'download',
+      title: 'Song',
+      artist: 'Singer',
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const fetchCalls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
     const payload = JSON.parse(String(fetchCalls[0][1].body));
@@ -187,8 +193,16 @@ describe('DownloadService', () => {
     });
 
     expect(provider.search).toHaveBeenCalledWith('Song Singer', 1, 5);
-    expect(runtime.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', song.source_data.songInfo);
-    expect(runtime.getMusicUrl).toHaveBeenCalledWith('kg', 'flac', fallbackSong.source_data.songInfo);
+    expect(runtime.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', song.source_data.songInfo, {
+      operation: 'download',
+      title: 'Song',
+      artist: 'Singer',
+    });
+    expect(runtime.getMusicUrl).toHaveBeenCalledWith('kg', 'flac', fallbackSong.source_data.songInfo, {
+      operation: 'download',
+      title: 'Song',
+      artist: 'Singer',
+    });
     const fetchCalls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
     const payload = JSON.parse(String(fetchCalls[0][1].body));
     expect(JSON.parse(payload[0].source_data)).toEqual({
@@ -232,8 +246,14 @@ describe('DownloadService', () => {
       status: 'ok',
     });
 
-    expect(throwingDownloadSource.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', song.source_data.songInfo);
-    expect(workingDownloadSource.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', song.source_data.songInfo);
+    expect(throwingDownloadSource.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', expect.objectContaining({
+      ...song.source_data.songInfo,
+      songmid: '123',
+    }));
+    expect(workingDownloadSource.getMusicUrl).toHaveBeenCalledWith('kw', 'flac', expect.objectContaining({
+      ...song.source_data.songInfo,
+      songmid: '123',
+    }));
     expect(playbackRuntimes.getMusicUrl).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(downloadMock).toHaveBeenCalledTimes(1);
@@ -260,7 +280,11 @@ describe('DownloadService', () => {
     const service = new DownloadService(downloadRuntimes, createPlatforms([]));
 
     await expect(service.downloadSong(song)).rejects.toMatchObject({
-      message: expect.stringMatching(/已尝试 2 个下载源.*最后失败原因：first source failed/),
+      message: expect.stringMatching(/已尝试 2 个下载音源.*最后失败原因：音源未返回 URL/),
+      details: {
+        attempts: 2,
+        lastFailure: '音源未返回 URL',
+      },
     });
   });
 
@@ -285,6 +309,32 @@ describe('DownloadService', () => {
 
     expect(provider.search).toHaveBeenCalledWith('Song Singer', 1, 5);
     expect(downloadMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('records Songloft native download failures separately from URL source failures', async () => {
+    const runtime = createRuntime('https://download.test/song.flac');
+    installRemoteImport(811);
+    const downloadMock = vi.fn(async () => {
+      throw new Error('handleSongs: download: acquire audio: http status 410');
+    });
+    const songsApi = songloft.songs as typeof songloft.songs & { download: typeof downloadMock };
+    songsApi.download = downloadMock;
+    const service = new DownloadService(runtime, createPlatforms([]));
+
+    await expect(service.downloadSong(song)).rejects.toMatchObject({
+      message: expect.stringContaining('http status 410'),
+    });
+
+    expect(sourceDiagnostics.list()).toContainEqual(expect.objectContaining({
+      operation: 'download',
+      stage: 'native-download',
+      status: 'failed',
+      platform: 'kw',
+      quality: 'flac',
+      title: 'Song',
+      artist: 'Singer',
+      message: 'handleSongs: download: acquire audio: http status 410',
+    }));
   });
 
   it('tracks batch progress and keeps processing after item failures', async () => {
@@ -345,7 +395,7 @@ describe('DownloadService', () => {
       status: 'failed',
       error: expect.stringContaining('最后失败原因'),
     });
-    expect(progress.results[0].error).toContain('下载音源无法解析歌曲地址');
+    expect(progress.results[0].error).toContain('未找到可用下载源');
     expect(progress.results[1]).toMatchObject({
       song_id: 901,
       status: 'ok',

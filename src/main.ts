@@ -38,6 +38,7 @@ import { registerDownloadHandlers } from './handlers/download';
 import { registerCustomPlaylistHandlers } from './handlers/custom_playlists';
 import { registerHealthHandlers } from './handlers/health';
 import { registerSongloftLibraryHandlers } from './handlers/songloft_library';
+import { registerDiagnosticsHandlers } from './handlers/diagnostics';
 import { resolveHostBaseUrl } from './utils/http';
 
 const router = createRouter();
@@ -139,6 +140,7 @@ async function onInit(): Promise<void> {
   registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);
   registerSongloftLibraryHandlers(router, { playlistManagerMap });
   registerHealthHandlers(router, sourceManager, runtimeManager);
+  registerDiagnosticsHandlers(router);
 
   runtimeManager.loadEnabledSources().catch(e => {
     songloft.log.warn('Failed to load enabled music sources: ' + String(e));

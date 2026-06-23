@@ -1,6 +1,7 @@
 import type { SourceManager } from './source_manager';
 import { SourceRuntime } from './runtime';
-import type { LxSongInfo, MusicPlatform, MusicQuality } from './types';
+import type { LxSongInfo, MusicPlatform, MusicQuality, MusicSourceMeta } from './types';
+import { sourceDiagnostics, type SourceDiagnosticOperation } from '../diagnostics/source_logs';
 
 export interface MusicUrlResolutionAttempt {
   attemptedSources: number;
@@ -11,6 +12,12 @@ export interface RuntimeManagerOptions {
   musicUrlTimeoutMs?: number;
 }
 
+export interface MusicUrlResolveOptions {
+  operation?: SourceDiagnosticOperation;
+  title?: string;
+  artist?: string;
+}
+
 const DEFAULT_MUSIC_URL_TIMEOUT_MS = 8000;
 
 export class RuntimeManager {
@@ -19,6 +26,7 @@ export class RuntimeManager {
   private lifecycleBusy = false;
   private lastMusicUrlAttempt: MusicUrlResolutionAttempt = { attemptedSources: 0, lastFailure: null };
   private readonly musicUrlTimeoutMs: number;
+  private readonly runtimeSources = new WeakMap<SourceRuntime, MusicSourceMeta>();
 
   constructor(private readonly sourceManager: SourceManager, options: RuntimeManagerOptions = {}) {
     const timeout = Number(options.musicUrlTimeoutMs);
@@ -48,6 +56,7 @@ export class RuntimeManager {
           }
 
           const runtime = await SourceRuntime.create(source.id, script);
+          this.runtimeSources.set(runtime, source);
           nextRuntimes.push(runtime);
         } catch (error) {
           songloft.log.warn(`Failed to load music source ${source.id}: ${String(error)}`);
@@ -65,32 +74,93 @@ export class RuntimeManager {
     platform: MusicPlatform | string,
     quality: MusicQuality | string,
     songInfo: LxSongInfo,
+    options: MusicUrlResolveOptions = {},
   ): Promise<string | null> {
     if (this.lifecycleBusy) {
       await this.lifecycleQueue;
+    }
+
+    const normalizedSongInfo = normalizeRuntimeSongInfo(platform, songInfo);
+    if (!hasResolvableSongId(normalizedSongInfo)) {
+      const lastFailure = '歌曲缺少可解析 ID';
+      this.lastMusicUrlAttempt = { attemptedSources: 0, lastFailure };
+      sourceDiagnostics.record({
+        operation: options.operation || 'playback',
+        stage: 'resolve',
+        status: 'failed',
+        sourceId: '',
+        sourceName: 'Starlight',
+        platform: String(platform),
+        quality: String(quality),
+        title: options.title || normalizedSongInfo.name,
+        artist: options.artist || normalizedSongInfo.singer,
+        message: lastFailure,
+      });
+      return null;
     }
 
     let attemptedSources = 0;
     let lastFailure: string | null = null;
 
     for (const runtime of this.runtimes) {
+      const source = this.runtimeSources.get(runtime);
       try {
         if (!runtime.supportsPlatform(platform)) {
           continue;
         }
 
         attemptedSources += 1;
+        const startedAt = Date.now();
         const url = await withTimeout(
-          runtime.getMusicUrl(platform, quality, songInfo),
+          runtime.getMusicUrl(platform, quality, normalizedSongInfo),
           this.musicUrlTimeoutMs,
           `music URL source timed out after ${this.musicUrlTimeoutMs}ms`,
         );
         if (url) {
+          sourceDiagnostics.record({
+            operation: options.operation || 'playback',
+            stage: 'resolve',
+            status: 'success',
+            sourceId: source?.id || '',
+            sourceName: source?.name || source?.id || '',
+            platform: String(platform),
+            quality: String(quality),
+            title: options.title || normalizedSongInfo.name,
+            artist: options.artist || normalizedSongInfo.singer,
+            durationMs: Date.now() - startedAt,
+            message: '解析成功',
+          });
           this.lastMusicUrlAttempt = { attemptedSources, lastFailure };
           return url;
         }
+        lastFailure = runtime.getLastMusicUrlFailure?.() || '音源未返回 URL';
+        sourceDiagnostics.record({
+          operation: options.operation || 'playback',
+          stage: 'resolve',
+          status: 'failed',
+          sourceId: source?.id || '',
+          sourceName: source?.name || source?.id || '',
+          platform: String(platform),
+          quality: String(quality),
+          title: options.title || normalizedSongInfo.name,
+          artist: options.artist || normalizedSongInfo.singer,
+          durationMs: Date.now() - startedAt,
+          message: lastFailure,
+        });
       } catch (error) {
         lastFailure = errorMessage(error);
+        sourceDiagnostics.record({
+          operation: options.operation || 'playback',
+          stage: 'resolve',
+          status: 'failed',
+          sourceId: source?.id || '',
+          sourceName: source?.name || source?.id || '',
+          platform: String(platform),
+          quality: String(quality),
+          title: options.title || normalizedSongInfo.name,
+          artist: options.artist || normalizedSongInfo.singer,
+          message: lastFailure,
+        });
         songloft.log.warn(`Failed to resolve music URL from source runtime: ${lastFailure}`);
       }
     }
@@ -153,6 +223,29 @@ export class RuntimeManager {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeRuntimeSongInfo(platform: MusicPlatform | string, songInfo: LxSongInfo): LxSongInfo {
+  const songmid = stringValue(songInfo.songmid || songInfo.musicId || songInfo.copyrightId || songInfo.strMediaMid);
+  return {
+    ...songInfo,
+    source: songInfo.source || String(platform),
+    songmid,
+  };
+}
+
+function hasResolvableSongId(songInfo: LxSongInfo): boolean {
+  return Boolean(
+    stringValue(songInfo.hash)
+    || stringValue(songInfo.songmid)
+    || stringValue(songInfo.musicId)
+    || stringValue(songInfo.copyrightId)
+    || stringValue(songInfo.strMediaMid),
+  );
+}
+
+function stringValue(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value).trim();
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
