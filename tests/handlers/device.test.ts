@@ -84,4 +84,34 @@ describe('registerDeviceHandlers', () => {
     expect(minaService.updateManagedStatus).toHaveBeenCalledWith('acc-1', 'dev-1', true);
     expect(monitor.refresh).toHaveBeenCalledTimes(1);
   });
+
+  it('includes the last selected device when listing devices for one account', async () => {
+    const router = createRouter();
+    const minaService = {
+      getDevices: vi.fn(async () => [{ device_id: 'dev-1', name: '客厅音箱' }]),
+    } as unknown as MinaService;
+    const accountManager = {
+      getLastSelectedDevice: vi.fn(async () => 'dev-1'),
+    } as unknown as AccountManager;
+
+    (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+      router,
+      minaService,
+      accountManager,
+    );
+
+    const response = await router.handle({
+      ...request('GET', '/mina/devices'),
+      query: 'account_id=acc-1',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response)).toMatchObject({
+      success: true,
+      data: [{
+        account_id: 'acc-1',
+        last_selected_device_id: 'dev-1',
+      }],
+    });
+  });
 });

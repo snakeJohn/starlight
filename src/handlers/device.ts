@@ -49,7 +49,14 @@ export function registerDeviceHandlers(
 
       if (accountId) {
         const devices = await minaService.getDevices(accountId);
-        return jsonResponse({ success: true, data: [{ account_id: accountId, devices }] });
+        return jsonResponse({
+          success: true,
+          data: [{
+            account_id: accountId,
+            devices,
+            last_selected_device_id: (await accountManager.getLastSelectedDevice(accountId)) || '',
+          }],
+        });
       }
 
       // 所有账号的设备
