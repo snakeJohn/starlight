@@ -154,7 +154,7 @@ export class BridgeService {
     }
 
     const played = this.playlistManagerMap
-      ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone(playerSongs, 0, 'songlist')
+      ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone(playerSongs, 0, 'order')
       : await this.minaService.playURL(accountId, deviceId, urls[0]);
     if (!played) {
       throw new StarlightError('DEVICE_OFFLINE', '音箱播放 URL 失败', true);

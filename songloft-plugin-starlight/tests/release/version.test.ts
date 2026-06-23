@@ -7,10 +7,12 @@ import { describe, expect, it } from 'vitest';
 type ReleaseJson = {
   scripts?: Record<string, string>;
   version?: string;
+  releaseVersion?: string;
   packages?: Record<string, { version?: string }>;
 };
 
 const versionPattern = /^V-\d{4}\.(0[1-9]|1[0-2])\.(0[1-9]|[12]\d|3[01])\.([01]\d|2[0-3])\.[0-5]\d$/;
+const semverPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 function readJson(path: string): ReleaseJson {
   return JSON.parse(readFileSync(resolve(process.cwd(), path), 'utf8')) as ReleaseJson;
@@ -28,12 +30,13 @@ function formatVersion(date: Date): string {
 }
 
 describe('release version', () => {
-  it('uses V-yyyy.mm.dd.hh.mm consistently across release metadata', () => {
+  it('uses V-yyyy.mm.dd.hh.mm for release metadata and semver for Songloft manifest validation', () => {
     const packageJson = readJson('package.json');
     const packageLock = readJson('package-lock.json');
     const pluginJson = readJson('plugin.json');
 
-    expect(pluginJson.version).toBe(packageJson.version);
+    expect(pluginJson.releaseVersion).toBe(packageJson.version);
+    expect(pluginJson.version).toMatch(semverPattern);
     expect(packageLock.version).toBe(packageJson.version);
     expect(packageLock.packages?.['']?.version).toBe(packageJson.version);
     expect(packageJson.version).toMatch(versionPattern);
@@ -68,7 +71,8 @@ describe('release version', () => {
     };
     const pluginJson = {
       name: 'Starlight Plugin',
-      version: 'V-2000.01.01.00.00',
+      version: '2000.1.1-0.0',
+      releaseVersion: 'V-2000.01.01.00.00',
       download_url: 'https://github.com/snakeJohn/starlight/releases/download/V-2000.01.01.00.00/starlight-V-2000.01.01.00.00.zip',
     };
 
@@ -82,14 +86,15 @@ describe('release version', () => {
 
     const stampedPackage = JSON.parse(readFileSync(resolve(fixtureDir, 'package.json'), 'utf8')) as ReleaseJson;
     const stampedLock = JSON.parse(readFileSync(resolve(fixtureDir, 'package-lock.json'), 'utf8')) as ReleaseJson;
-    const stampedPlugin = JSON.parse(readFileSync(resolve(fixtureDir, 'plugin.json'), 'utf8')) as { version?: string; download_url?: string };
+    const stampedPlugin = JSON.parse(readFileSync(resolve(fixtureDir, 'plugin.json'), 'utf8')) as { version?: string; releaseVersion?: string; download_url?: string };
     const allowedVersions = new Set([formatVersion(before), formatVersion(after)]);
 
     expect(stampedPackage.version).toMatch(versionPattern);
     expect(allowedVersions.has(stampedPackage.version ?? '')).toBe(true);
     expect(stampedLock.version).toBe(stampedPackage.version);
     expect(stampedLock.packages?.['']?.version).toBe(stampedPackage.version);
-    expect(stampedPlugin.version).toBe(stampedPackage.version);
+    expect(stampedPlugin.releaseVersion).toBe(stampedPackage.version);
+    expect(stampedPlugin.version).toMatch(semverPattern);
     expect(stampedPlugin.download_url).toBe(
       `https://github.com/snakeJohn/starlight/releases/download/${stampedPackage.version}/starlight-${stampedPackage.version}.zip`,
     );

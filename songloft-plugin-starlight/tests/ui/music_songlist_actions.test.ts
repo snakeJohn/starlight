@@ -22,6 +22,8 @@ const okResponse = (data: unknown) => ({
 function installToastDom() {
   const node = { className: '', textContent: '', remove: vi.fn() };
   const appendChild = vi.fn();
+  const setInterval = vi.fn(() => 1);
+  const clearInterval = vi.fn();
   vi.stubGlobal('document', {
     querySelector: vi.fn(() => null),
     createElement: vi.fn(() => node),
@@ -31,8 +33,10 @@ function installToastDom() {
   });
   vi.stubGlobal('window', {
     setTimeout: vi.fn(),
+    setInterval,
+    clearInterval,
   });
-  return { node, appendChild };
+  return { node, appendChild, setInterval, clearInterval };
 }
 
 function installNativePlayerDom() {
@@ -127,7 +131,7 @@ describe('songlist speaker actions', () => {
   });
 
   it('starts one-song downloads through the background download endpoint', async () => {
-    const { node } = installToastDom();
+    const { node, setInterval } = installToastDom();
     const fetchMock = vi.fn(async () => okResponse({ started: true, total: 1 }) as Response);
     vi.stubGlobal('fetch', fetchMock);
     const { music } = await loadModules();
@@ -139,6 +143,7 @@ describe('songlist speaker actions', () => {
       method: 'POST',
       body: JSON.stringify({ song }),
     }));
+    expect(setInterval).toHaveBeenCalled();
     expect(node.textContent).toBe('已开始下载 1 首歌曲，可在下载进度中查看');
   });
 

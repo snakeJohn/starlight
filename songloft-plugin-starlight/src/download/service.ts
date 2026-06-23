@@ -238,7 +238,7 @@ export class DownloadService {
   private async importDownloadRemoteSong(song: SearchResultSong): Promise<SongloftRemoteSong> {
     const token = await songloft.plugin.getToken();
     const host = await songloft.plugin.getHostUrl();
-    const payload = toRemoteSong(song, '', {
+    const payload = toRemoteSong({ ...song, duration: 0 }, '', {
       pluginEntryPath: STARLIGHT_PLUGIN_ENTRY_PATH,
       sourceData: downloadSourceData(song),
       dedupKey: '',

@@ -39,6 +39,7 @@ const pageSizes = {
 };
 
 let artworkFallbackInstalled = false;
+let downloadProgressTimer = null;
 
 export function musicPageSize(scope) {
     return pageSizes[scope] || 20;
@@ -415,23 +416,29 @@ async function loadDownloadSettings() {
     return settings;
 }
 
-function renderDownloadProgress(progress) {
-    const node = $('[data-role="download-progress"]');
-    if (!node) return;
+export function renderDownloadProgressMarkup(progress) {
     if (!progress?.active) {
-        node.innerHTML = '<div class="empty-state">暂无下载任务。</div>';
-        return;
+        return '<div class="empty-state">暂无下载任务。</div>';
     }
 
+    const current = Number(progress.current) || 0;
+    const total = Number(progress.total) || 0;
+    const percent = total > 0 ? Math.min(100, Math.max(0, Math.round((current / total) * 100))) : 0;
     const rows = asArray(progress.results).slice(-8).map(result => `
         <div class="download-progress-row">
             <span>${escapeHtml(result.status === 'failed' ? '失败' : '完成')}</span>
             <strong>${escapeHtml(result.path || result.error || `Song #${result.song_id || '-'}`)}</strong>
         </div>
     `).join('');
-    node.innerHTML = `
+    return `
+        <div class="download-progress-bar" aria-label="下载进度 ${percent}%">
+            <div class="download-progress-track">
+                <span class="download-progress-fill" style="width: ${percent}%"></span>
+            </div>
+            <strong>${percent}%</strong>
+        </div>
         <div class="metric-grid">
-            <div><span>进度</span><strong>${Number(progress.current) || 0}/${Number(progress.total) || 0}</strong></div>
+            <div><span>进度</span><strong>${current}/${total}</strong></div>
             <div><span>成功</span><strong>${Number(progress.success) || 0}</strong></div>
             <div><span>失败</span><strong>${Number(progress.failed) || 0}</strong></div>
         </div>
@@ -439,10 +446,37 @@ function renderDownloadProgress(progress) {
     `;
 }
 
+function renderDownloadProgress(progress) {
+    const node = $('[data-role="download-progress"]');
+    if (!node) return;
+    node.innerHTML = renderDownloadProgressMarkup(progress);
+}
+
+function stopDownloadProgressPolling() {
+    if (!downloadProgressTimer) return;
+    window?.clearInterval?.(downloadProgressTimer);
+    downloadProgressTimer = null;
+}
+
+function startDownloadProgressPolling() {
+    if (downloadProgressTimer || typeof window?.setInterval !== 'function') return;
+    downloadProgressTimer = window.setInterval(() => {
+        loadDownloadProgress().catch(error => {
+            stopDownloadProgressPolling();
+            toast(error.message, 'error');
+        });
+    }, 2000);
+}
+
 async function loadDownloadProgress() {
     const progress = await api.get('/download/batch/progress');
     setState({ downloadProgress: progress });
     renderDownloadProgress(progress);
+    if (progress?.active && !progress.done) {
+        startDownloadProgressPolling();
+    } else if (progress?.done) {
+        stopDownloadProgressPolling();
+    }
     return progress;
 }
 
@@ -457,6 +491,7 @@ async function downloadSongs(songs) {
     if (selectedSongs.length > 1) {
         toast(`已开始下载 ${selectedSongs.length} 首歌曲`);
         await loadDownloadProgress().catch(() => {});
+        startDownloadProgressPolling();
     }
     return result;
 }
@@ -487,6 +522,7 @@ export async function downloadSong(song) {
     const result = await api.post('/download/song', { song });
     toast(result?.started ? '已开始下载 1 首歌曲，可在下载进度中查看' : (result?.path ? `下载完成：${result.path}` : '下载任务已完成'));
     await loadDownloadProgress().catch(() => {});
+    if (result?.started) startDownloadProgressPolling();
     return result;
 }
 

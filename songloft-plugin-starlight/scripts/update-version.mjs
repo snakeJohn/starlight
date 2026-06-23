@@ -18,6 +18,15 @@ function currentVersion(date = new Date()) {
   ].join('.');
 }
 
+function manifestSemver(releaseVersion) {
+  const match = /^V-(\d{4})\.(\d{2})\.(\d{2})\.(\d{2})\.(\d{2})$/.exec(releaseVersion);
+  if (!match) {
+    throw new Error(`Invalid release version: ${releaseVersion}`);
+  }
+  const [, year, month, day, hour, minute] = match;
+  return `${Number(year)}.${Number(month)}.${Number(day)}-${Number(hour)}.${Number(minute)}`;
+}
+
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
 }
@@ -28,6 +37,7 @@ function writeJson(path, value) {
 
 const root = process.cwd();
 const version = currentVersion();
+const semver = manifestSemver(version);
 const downloadUrl = `${repoUrl}/releases/download/${version}/starlight-${version}.zip`;
 
 const packagePath = join(root, 'package.json');
@@ -43,7 +53,8 @@ packageLock.version = version;
 packageLock.packages ??= {};
 packageLock.packages[''] ??= {};
 packageLock.packages[''].version = version;
-pluginJson.version = version;
+pluginJson.version = semver;
+pluginJson.releaseVersion = version;
 pluginJson.homepage = repoUrl;
 pluginJson.updateUrl = rawPluginUrl;
 pluginJson.download_url = downloadUrl;

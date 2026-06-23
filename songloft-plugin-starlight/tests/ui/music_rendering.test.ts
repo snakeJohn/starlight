@@ -12,6 +12,7 @@ interface MusicRenderingModule {
   renderListScroller(innerHtml: string, extraClass?: string): string;
   renderSongListItem(item: Record<string, unknown>, index: number): string;
   renderRankingBoard(board: Record<string, unknown>, index: number): string;
+  renderDownloadProgressMarkup(progress: Record<string, unknown> | null): string;
 }
 
 async function loadMusicModule(): Promise<MusicRenderingModule> {
@@ -158,5 +159,27 @@ describe('music media rendering', () => {
     expect(html).toContain('media-artwork-placeholder');
     expect(html).not.toContain('src="1"');
     expect(html).not.toContain('src="2"');
+  });
+
+  it('renders download progress as a percentage bar with recent failure details', async () => {
+    const { renderDownloadProgressMarkup } = await loadMusicModule();
+
+    const html = renderDownloadProgressMarkup({
+      active: true,
+      current: 1,
+      total: 4,
+      success: 0,
+      failed: 1,
+      results: [{
+        status: 'failed',
+        error: 'audio invalid: reason=duration_mismatch_high expected=28.0s actual=252.0s',
+      }],
+    });
+
+    expect(html).toContain('download-progress-track');
+    expect(html).toContain('download-progress-fill');
+    expect(html).toContain('style="width: 25%"');
+    expect(html).toContain('25%');
+    expect(html).toContain('duration_mismatch_high');
   });
 });

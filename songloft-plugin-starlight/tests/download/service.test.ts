@@ -143,6 +143,7 @@ describe('DownloadService', () => {
     expect(payload).toEqual([
       expect.objectContaining({
         title: 'Song',
+        duration: 0,
         url: '',
         plugin_entry_path: 'starlight',
         dedup_key: '',

@@ -25,12 +25,13 @@ describe('release registry', () => {
       updateUrl?: string;
       download_url?: string;
       version?: string;
+      releaseVersion?: string;
     }>('plugin.json');
 
     expect(pluginJson.homepage).toBe(githubRepoUrl);
     expect(pluginJson.updateUrl).toBe(rawPluginUrl);
     expect(pluginJson.download_url).toBe(
-      `${githubRepoUrl}/releases/download/${pluginJson.version}/starlight-${pluginJson.version}.zip`,
+      `${githubRepoUrl}/releases/download/${pluginJson.releaseVersion}/starlight-${pluginJson.releaseVersion}.zip`,
     );
   });
 });

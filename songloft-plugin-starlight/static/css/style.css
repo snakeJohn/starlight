@@ -843,6 +843,31 @@ textarea:focus {
     gap: 10px;
 }
 
+.download-progress-bar {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.download-progress-track {
+    min-width: 0;
+    height: 10px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--surface-muted);
+    border: 1px solid var(--surface-line);
+}
+
+.download-progress-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 180ms ease;
+}
+
 .download-progress-row {
     min-width: 0;
     display: grid;

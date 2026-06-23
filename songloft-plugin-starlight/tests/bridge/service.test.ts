@@ -301,7 +301,7 @@ describe('BridgeService', () => {
     expect(playlistManager.playStandalone).toHaveBeenCalledWith([
       expect.objectContaining({ title: 'Song', url: 'https://audio.test/song.mp3' }),
       expect.objectContaining({ title: 'Second Song', url: 'https://audio.test/song.mp3' }),
-    ], 0, 'songlist');
+    ], 0, 'order');
     expect(minaService.playURL).not.toHaveBeenCalled();
   });
 
