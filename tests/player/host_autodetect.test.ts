@@ -86,4 +86,47 @@ describe('playlist host auto-detection', () => {
     expect(manager.play).not.toHaveBeenCalled();
     expect(manager.setPlayMode).not.toHaveBeenCalled();
   });
+
+  it('replays the current standalone queue song when paused URL playback cannot resume natively', async () => {
+    const router = createRouter();
+    const currentSong = { title: '单曲', artist: '歌手' };
+    const manager = {
+      isPlaying: vi.fn(() => false),
+      hasPlaylist: vi.fn(() => true),
+      getStatus: vi.fn(() => ({
+        state: 'paused',
+        playlist_id: 0,
+        current_index: 0,
+        play_mode: 'single',
+        position: 12,
+        duration: 180,
+      })),
+      resumePlayback: vi.fn(async () => false),
+      replayCurrent: vi.fn(async () => true),
+      play: vi.fn(async () => true),
+      getCurrentSong: vi.fn(() => currentSong),
+    };
+    const managerMap = {
+      getOrCreate: vi.fn(async () => manager),
+    } as unknown as PlaylistManagerMap;
+    registerPlaylistHandlers(router, managerMap, {} as MinaService);
+
+    const response = await router.handle(request('POST', '/player/toggle', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response)).toMatchObject({
+      success: true,
+      data: {
+        message: 'playlist resumed',
+        state: 'playing',
+        current_song: currentSong,
+      },
+    });
+    expect(manager.resumePlayback).toHaveBeenCalledTimes(1);
+    expect(manager.replayCurrent).toHaveBeenCalledTimes(1);
+    expect(manager.play).not.toHaveBeenCalled();
+  });
 });

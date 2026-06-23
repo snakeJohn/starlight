@@ -7,13 +7,25 @@ export interface MusicUrlResolutionAttempt {
   lastFailure: string | null;
 }
 
+export interface RuntimeManagerOptions {
+  musicUrlTimeoutMs?: number;
+}
+
+const DEFAULT_MUSIC_URL_TIMEOUT_MS = 8000;
+
 export class RuntimeManager {
   private runtimes: SourceRuntime[] = [];
   private lifecycleQueue: Promise<void> = Promise.resolve();
   private lifecycleBusy = false;
   private lastMusicUrlAttempt: MusicUrlResolutionAttempt = { attemptedSources: 0, lastFailure: null };
+  private readonly musicUrlTimeoutMs: number;
 
-  constructor(private readonly sourceManager: SourceManager) {}
+  constructor(private readonly sourceManager: SourceManager, options: RuntimeManagerOptions = {}) {
+    const timeout = Number(options.musicUrlTimeoutMs);
+    this.musicUrlTimeoutMs = Number.isFinite(timeout) && timeout > 0
+      ? timeout
+      : DEFAULT_MUSIC_URL_TIMEOUT_MS;
+  }
 
   async loadEnabledSources(): Promise<void> {
     return this.enqueueLifecycle(() => this.reloadEnabledSources());
@@ -68,7 +80,11 @@ export class RuntimeManager {
         }
 
         attemptedSources += 1;
-        const url = await runtime.getMusicUrl(platform, quality, songInfo);
+        const url = await withTimeout(
+          runtime.getMusicUrl(platform, quality, songInfo),
+          this.musicUrlTimeoutMs,
+          `music URL source timed out after ${this.musicUrlTimeoutMs}ms`,
+        );
         if (url) {
           this.lastMusicUrlAttempt = { attemptedSources, lastFailure };
           return url;
@@ -137,4 +153,17 @@ export class RuntimeManager {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  });
 }

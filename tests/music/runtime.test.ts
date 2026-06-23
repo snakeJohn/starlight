@@ -852,6 +852,33 @@ describe('RuntimeManager', () => {
     expect(workingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', songInfo);
   });
 
+  test('getMusicUrl continues to later enabled sources when one source times out', async () => {
+    const manager = new RuntimeManager(fakeSourceManager(() => [], {}), { musicUrlTimeoutMs: 5 });
+    const slowRuntime = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => new Promise<string>(() => {})),
+      destroy: vi.fn(),
+    };
+    const workingRuntime = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => 'https://cdn.invalid/working-after-timeout.mp3'),
+      destroy: vi.fn(),
+    };
+    (manager as unknown as { runtimes: SourceRuntime[] }).runtimes = [
+      slowRuntime as unknown as SourceRuntime,
+      workingRuntime as unknown as SourceRuntime,
+    ];
+
+    await expect(manager.getMusicUrl('kw', '320k', songInfo)).resolves.toBe('https://cdn.invalid/working-after-timeout.mp3');
+
+    expect(slowRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', songInfo);
+    expect(workingRuntime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', songInfo);
+    expect(manager.getLastMusicUrlAttempt()).toEqual({
+      attemptedSources: 2,
+      lastFailure: 'music URL source timed out after 5ms',
+    });
+  });
+
   test('getMusicUrl returns null when no runtime matches the platform', async () => {
     const managerSource = fakeSourceManager(
       () => [sourceMeta('kw-only', true), sourceMeta('tx-only', true)],

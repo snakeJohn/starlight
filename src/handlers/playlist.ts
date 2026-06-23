@@ -203,7 +203,22 @@ export function registerPlaylistHandlers(
             },
           });
         }
-        // 如果 resumePlayback 失败，回退到重新播放
+        if (status.playlist_id === 0) {
+          const replayed = await manager.replayCurrent();
+          if (!replayed) {
+            return jsonResponse({ success: false, error: 'failed to resume playback' });
+          }
+          updateDeviceStatusCache(account_id, device_id, { state: 'playing', position: manager.getStatus().position });
+          return jsonResponse({
+            success: true,
+            data: {
+              message: 'playlist resumed',
+              state: 'playing',
+              current_song: manager.getCurrentSong(),
+            },
+          });
+        }
+        // 如果 resumePlayback 失败，普通歌单回退到重新播放
       }
 
       // 处于 stopped 状态或 resumePlayback 失败，重新播放
