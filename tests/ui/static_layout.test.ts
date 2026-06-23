@@ -206,6 +206,16 @@ describe('static UI layout copy', () => {
     expect(automationHtml).not.toContain('<h2>索引</h2>');
   });
 
+  it('provides a visible action to clear the current speaker device selection', () => {
+    const html = indexHtml();
+    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
+    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
+    const speakerHtml = html.slice(speakerStart, songlistsStart);
+
+    expect(speakerHtml).toContain('data-action="clear-device-selection"');
+    expect(speakerHtml).toContain('取消选择</button>');
+  });
+
   it('moves visible settings into speaker and automation pages and removes the settings tab', () => {
     const html = indexHtml();
     const stateJs = readFileSync(resolve(process.cwd(), 'static/js/state.js'), 'utf8');

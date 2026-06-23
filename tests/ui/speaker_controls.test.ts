@@ -4,7 +4,9 @@ interface SpeakerControlsModule {
   normalizeDeviceId(device: Record<string, unknown>): string;
   normalizeDeviceName(device: Record<string, unknown>): string;
   renderAccountRow(account: Record<string, unknown>): string;
+  renderDeviceRow(row: Record<string, unknown>): string;
   selectAndPersistDevice(accountId: string, deviceId: string, name?: string): Promise<void>;
+  clearSelectedDevice(): void;
   renderVoiceRecordList(records: Array<Record<string, unknown>>, now?: number): string;
   runPlayerAction(action: string): Promise<unknown>;
 }
@@ -77,6 +79,36 @@ describe('speaker controls helpers', () => {
     expect(html).toContain('data-action="delete-account"');
     expect(html).toContain('selected-action');
     expect(html).toContain('>已选</button>');
+  });
+
+  it('renders the selected speaker with a cancel selection action', async () => {
+    installDom();
+    const { speaker, state } = await loadModules();
+    state.accountId = 'acc-1';
+    state.deviceId = 'speaker-1';
+
+    const html = speaker.renderDeviceRow({
+      account_id: 'acc-1',
+      account_name: '小米账号',
+      device: { device_id: 'speaker-1', name: '客厅音箱', model: 'xiaomi' },
+    });
+
+    expect(html).toContain('data-action="clear-device-selection"');
+    expect(html).toContain('>取消选择</button>');
+    expect(html).toContain('selected-action');
+    expect(html).not.toContain('>已选</button>');
+  });
+
+  it('clears the current selected speaker without changing the selected account', async () => {
+    installDom();
+    const { speaker, state } = await loadModules();
+    state.accountId = 'acc-1';
+    state.deviceId = 'speaker-1';
+
+    speaker.clearSelectedDevice();
+
+    expect(state.accountId).toBe('acc-1');
+    expect(state.deviceId).toBe('');
   });
 
   it('persists selected speaker as managed and last selected for conversation monitoring', async () => {

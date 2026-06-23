@@ -213,6 +213,15 @@ function selectDevice(accountId, deviceIdValue, name = '') {
     });
 }
 
+export function clearSelectedDevice() {
+    setState({ deviceId: '', deviceName: '', speakerPlayerState: 'idle' });
+    const deviceSelect = $('[data-role="device-select"]');
+    const playerSelect = $('[data-role="speaker-player-device"]');
+    if (deviceSelect) deviceSelect.value = '';
+    if (playerSelect) playerSelect.value = '';
+    renderPlayerStatus({ state: 'idle' });
+}
+
 export async function selectAndPersistDevice(accountId, deviceIdValue, name = '') {
     selectDevice(accountId, deviceIdValue, name);
     await api.post('/miot/mina/device/managed', {
@@ -271,6 +280,31 @@ function renderAccounts(accounts) {
     if (authSummary) authSummary.textContent = accounts.length ? `${accounts.length} 个账号` : '未登录';
 }
 
+export function renderDeviceRow(row) {
+    const id = deviceId(row.device);
+    const selected = state.accountId === row.account_id && state.deviceId === id;
+    const action = selected ? 'clear-device-selection' : 'select-device';
+    const label = selected ? '取消选择' : '选择';
+    return `
+        <article class="device-row">
+            <span class="row-main">
+                <strong>${escapeHtml(deviceName(row.device))}</strong>
+                <span>${escapeHtml(row.account_name)} · ${escapeHtml(id)} · ${escapeHtml(row.device.model || row.device.hardware || '')}</span>
+            </span>
+            <span class="row-actions">
+                <button
+                    type="button"
+                    class="${selected ? 'selected-action' : ''}"
+                    data-action="${action}"
+                    data-account-id="${escapeHtml(row.account_id)}"
+                    data-device-id="${escapeHtml(id)}"
+                    data-device-name="${escapeHtml(deviceName(row.device))}"
+                >${label}</button>
+            </span>
+        </article>
+    `;
+}
+
 function renderDevices(groups) {
     const rows = flattenDevices(groups);
     const select = $('[data-role="device-select"]');
@@ -280,12 +314,12 @@ function renderDevices(groups) {
     if (select) {
         const filtered = rows.filter(row => !state.accountId || row.account_id === state.accountId);
         select.innerHTML = filtered.length
-            ? filtered.map(row => `<option value="${escapeHtml(deviceId(row.device))}">${escapeHtml(deviceName(row.device))}</option>`).join('')
+            ? '<option value="">请选择设备</option>' + filtered.map(row => `<option value="${escapeHtml(deviceId(row.device))}">${escapeHtml(deviceName(row.device))}</option>`).join('')
             : '<option value="">暂无设备</option>';
         if (state.deviceId) select.value = state.deviceId;
-        if (!state.deviceId && filtered[0]) {
-            setState({ deviceId: deviceId(filtered[0].device), deviceName: deviceName(filtered[0].device) });
-        } else if (state.deviceId) {
+        if (!state.deviceId) {
+            select.value = '';
+        } else {
             const selected = filtered.find(row => deviceId(row.device) === state.deviceId);
             if (selected && state.deviceName !== deviceName(selected.device)) {
                 setState({ deviceName: deviceName(selected.device) });
@@ -295,7 +329,7 @@ function renderDevices(groups) {
 
     if (playerSelect) {
         playerSelect.innerHTML = rows.length
-            ? rows.map(row => {
+            ? '<option value="">请选择设备</option>' + rows.map(row => {
                 const id = deviceId(row.device);
                 const value = `${row.account_id}|${id}`;
                 return `<option value="${escapeHtml(value)}">${escapeHtml(deviceName(row.device))} · ${escapeHtml(row.account_name)}</option>`;
@@ -303,31 +337,14 @@ function renderDevices(groups) {
             : '<option value="">暂无设备</option>';
         if (state.accountId && state.deviceId) {
             playerSelect.value = `${state.accountId}|${state.deviceId}`;
-        } else if (rows[0]) {
-            playerSelect.value = `${rows[0].account_id}|${deviceId(rows[0].device)}`;
+        } else {
+            playerSelect.value = '';
         }
     }
 
     if (list) {
         list.innerHTML = rows.length
-            ? rows.map(row => `
-                <article class="device-row">
-                    <span class="row-main">
-                        <strong>${escapeHtml(deviceName(row.device))}</strong>
-                        <span>${escapeHtml(row.account_name)} · ${escapeHtml(deviceId(row.device))} · ${escapeHtml(row.device.model || row.device.hardware || '')}</span>
-                    </span>
-                    <span class="row-actions">
-                        <button
-                            type="button"
-                            class="${state.accountId === row.account_id && state.deviceId === deviceId(row.device) ? 'selected-action' : ''}"
-                            data-action="select-device"
-                            data-account-id="${escapeHtml(row.account_id)}"
-                            data-device-id="${escapeHtml(deviceId(row.device))}"
-                            data-device-name="${escapeHtml(deviceName(row.device))}"
-                        >${state.accountId === row.account_id && state.deviceId === deviceId(row.device) ? '已选' : '选择'}</button>
-                    </span>
-                </article>
-            `).join('')
+            ? rows.map(row => renderDeviceRow(row)).join('')
             : '<div class="empty-state">暂无设备。登录米家账号后刷新设备列表。</div>';
     }
 }
@@ -490,6 +507,22 @@ function setQrStatus(message) {
     if (status) status.textContent = message;
 }
 
+function hideQRCodeAfterLogin() {
+    const box = $('[data-role="qr-box"]');
+    const img = $('[data-role="qr-image"]');
+    const link = $('[data-role="qr-link"]');
+    if (box) {
+        box.hidden = true;
+        box.classList.toggle('has-qr', false);
+    }
+    if (img) img.src = '';
+    if (link) {
+        link.href = '#';
+        link.textContent = '';
+    }
+    setQrStatus('登录成功，账号已保存');
+}
+
 function stopQrPolling() {
     if (qrPollTimer) {
         clearTimeout(qrPollTimer);
@@ -511,13 +544,19 @@ async function pollQRCodeStatus(accountId) {
             setQrStatus(result.message || result.state || '等待扫码');
 
             if (result.account_id) {
-                setState({ accountId: result.account_id });
+                setState({
+                    accountId: result.account_id,
+                    deviceId: '',
+                    deviceName: '',
+                    speakerPlayerState: 'idle',
+                });
                 qrAccountId = result.account_id;
             }
 
             if (result.state === 'success') {
                 qrLoginDone = true;
                 stopQrPolling();
+                hideQRCodeAfterLogin();
                 toast('扫码登录成功');
                 await refreshSpeaker();
                 return;
@@ -561,6 +600,7 @@ function bindLogin() {
             const img = $('[data-role="qr-image"]');
             const link = $('[data-role="qr-link"]');
             const status = $('[data-role="qr-status"]');
+            if (box) box.hidden = false;
             if (img && result.qrcode_url) img.src = result.qrcode_url;
             if (link) {
                 link.href = result.login_url || result.qrcode_url || '#';
@@ -606,6 +646,12 @@ function bindDeviceSelection() {
 
     $('[data-role="device-select"]')?.addEventListener('change', async event => {
         try {
+            if (!event.target.value) {
+                clearSelectedDevice();
+                renderDevices(state.deviceGroups);
+                toast('已取消设备选择');
+                return;
+            }
             await selectAndPersistDevice(state.accountId, event.target.value);
             renderDevices(state.deviceGroups);
             refreshPlayerStatus().catch(() => null);
@@ -617,7 +663,12 @@ function bindDeviceSelection() {
 
     $('[data-role="speaker-player-device"]')?.addEventListener('change', async event => {
         const [accountIdValue, deviceIdValue] = String(event.target.value || '').split('|');
-        if (!accountIdValue || !deviceIdValue) return;
+        if (!accountIdValue || !deviceIdValue) {
+            clearSelectedDevice();
+            renderDevices(state.deviceGroups);
+            toast('已取消播放设备选择');
+            return;
+        }
         const row = findDeviceRow(accountIdValue, deviceIdValue);
         try {
             await selectAndPersistDevice(accountIdValue, deviceIdValue, row ? deviceName(row.device) : '');
@@ -631,6 +682,13 @@ function bindDeviceSelection() {
         } catch (error) {
             toast(error.message, 'error');
         }
+    });
+
+    $('[data-action="clear-device-selection"]')?.addEventListener('click', () => {
+        clearSelectedDevice();
+        renderDevices(state.deviceGroups);
+        refreshPlayerStatus().catch(() => null);
+        toast('已取消设备选择');
     });
 
     $('[data-role="account-list"]')?.addEventListener('click', async event => {
@@ -662,10 +720,17 @@ function bindDeviceSelection() {
     });
 
     $('[data-role="device-list"]')?.addEventListener('click', async event => {
-        const button = event.target.closest('[data-action="select-device"]');
+        const button = event.target.closest('[data-action="select-device"], [data-action="clear-device-selection"]');
         if (!button) return;
         button.disabled = true;
         try {
+            if (button.dataset.action === 'clear-device-selection') {
+                clearSelectedDevice();
+                renderDevices(state.deviceGroups);
+                refreshPlayerStatus().catch(() => null);
+                toast('已取消设备选择');
+                return;
+            }
             await selectAndPersistDevice(button.dataset.accountId, button.dataset.deviceId, button.dataset.deviceName);
             const accountSelect = $('[data-role="account-select"]');
             const deviceSelect = $('[data-role="device-select"]');

@@ -6,6 +6,14 @@ interface SpeakerModule {
   initSpeakerUI(): Promise<void>;
 }
 
+interface StateModule {
+  state: {
+    accountId: string;
+    deviceId: string;
+    deviceName: string;
+  };
+}
+
 class FakeClassList {
   toggled: Array<[string, boolean | undefined]> = [];
 
@@ -19,6 +27,7 @@ class FakeElement {
   classList = new FakeClassList();
   dataset: Record<string, string> = {};
   disabled = false;
+  hidden = false;
   href = '';
   src = '';
   textContent = '';
@@ -63,13 +72,26 @@ function jsonResponse(payload: unknown): Response {
 function installSpeakerDom() {
   const qrStart = new FakeElement();
   const qrPoll = new FakeElement();
+  const qrBox = new FakeElement();
+  const qrImage = new FakeElement();
+  const qrLink = new FakeElement();
+  const qrStatus = new FakeElement();
   const elements = new Map<string, FakeElement>([
     ['[data-action="qr-start"]', qrStart],
     ['[data-action="qr-poll"]', qrPoll],
-    ['[data-role="qr-box"]', new FakeElement()],
-    ['[data-role="qr-image"]', new FakeElement()],
-    ['[data-role="qr-link"]', new FakeElement()],
-    ['[data-role="qr-status"]', new FakeElement()],
+    ['[data-role="qr-box"]', qrBox],
+    ['[data-role="qr-image"]', qrImage],
+    ['[data-role="qr-link"]', qrLink],
+    ['[data-role="qr-status"]', qrStatus],
+    ['[data-role="account-list"]', new FakeElement()],
+    ['[data-role="account-select"]', new FakeElement()],
+    ['[data-role="auth-summary"]', new FakeElement()],
+    ['[data-role="device-list"]', new FakeElement()],
+    ['[data-role="device-select"]', new FakeElement()],
+    ['[data-role="speaker-player-device"]', new FakeElement()],
+    ['[data-role="speaker-player-state"]', new FakeElement()],
+    ['[data-role="speaker-player-title"]', new FakeElement()],
+    ['[data-role="speaker-player-meta"]', new FakeElement()],
   ]);
 
   vi.stubGlobal('document', {
@@ -95,7 +117,7 @@ function installSpeakerDom() {
     setTimeout: vi.fn(),
   });
 
-  return { qrStart, elements };
+  return { qrStart, elements, qrBox, qrImage, qrLink, qrStatus };
 }
 
 describe('speaker QR login UI', () => {
@@ -137,5 +159,69 @@ describe('speaker QR login UI', () => {
       'api/miot/auth/qrcode/poll',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('hides the QR code and keeps the speaker device unselected after QR login succeeds', async () => {
+    const { qrStart, qrBox, qrImage, qrLink, qrStatus } = installSpeakerDom();
+    let loginComplete = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/miot/accounts')) {
+        return jsonResponse({
+          success: true,
+          data: loginComplete ? [{ id: '12345', account: '小米账号' }] : [],
+        });
+      }
+      if (url.endsWith('/miot/auth/status')) {
+        return jsonResponse({ success: true, data: [] });
+      }
+      if (url.endsWith('/miot/mina/devices?account_id=12345')) {
+        return jsonResponse({
+          success: true,
+          data: [{
+            account_id: '12345',
+            account_name: '小米账号',
+            devices: [{ device_id: 'speaker-1', name: '客厅音箱' }],
+          }],
+        });
+      }
+      if (url.endsWith('/miot/mina/devices')) {
+        return jsonResponse({ success: true, data: [] });
+      }
+      if (url.endsWith('/miot/auth/qrcode')) {
+        return jsonResponse({
+          success: true,
+          account_id: 'qr_1',
+          qrcode_url: 'https://qr.test/image.png',
+          login_url: 'https://qr.test/login',
+        });
+      }
+      if (url.endsWith('/miot/auth/qrcode/poll')) {
+        loginComplete = true;
+        return jsonResponse({ success: true, state: 'success', message: 'ok', account_id: '12345' });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const modulePath = '../../static/js/speaker.js';
+    const stateModulePath = '../../static/js/state.js';
+    const { initSpeakerUI } = await import(modulePath) as SpeakerModule;
+    const { state } = await import(stateModulePath) as StateModule;
+    await initSpeakerUI();
+
+    await qrStart.dispatch('click');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(state.accountId).toBe('12345');
+    expect(state.deviceId).toBe('');
+    expect(state.deviceName).toBe('');
+    expect(qrBox.hidden).toBe(true);
+    expect(qrBox.classList.toggled).toContainEqual(['has-qr', false]);
+    expect(qrImage.src).toBe('');
+    expect(qrLink.href).toBe('#');
+    expect(qrLink.textContent).toBe('');
+    expect(qrStatus.textContent).toBe('登录成功，账号已保存');
   });
 });
