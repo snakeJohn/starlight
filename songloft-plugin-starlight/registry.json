@@ -1,0 +1,6 @@
+{
+  "name": "Starlight Plugin Registry",
+  "plugins": [
+    "https://raw.githubusercontent.com/snakeJohn/starlight/main/plugin.json"
+  ]
+}
