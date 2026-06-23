@@ -46,11 +46,22 @@
                 <div class="surface-section">
                     <div class="section-bar">
                         <h2>结果</h2>
-                        <span data-role="search-total">0</span>
+                        <div class="inline-actions">
+                            <span data-role="search-total">0</span>
+                            <button class="ghost-button" type="button" data-action="clear-search">清空</button>
+                        </div>
                     </div>
                     <div class="target-playlist-banner">
                         <span>加入歌单保存到</span>
                         <strong data-role="target-playlist-label">未选择歌单</strong>
+                    </div>
+                    <div class="batch-actions" data-role="search-batch-actions">
+                        <button class="ghost-button" type="button" data-action="select-search-page">全选当前页</button>
+                        <button class="ghost-button" type="button" data-action="clear-search-selection">取消选择</button>
+                        <button class="ghost-button" type="button" data-action="import-selected-search">批量导入 Songloft 歌曲库</button>
+                        <button class="ghost-button" type="button" data-action="add-selected-search-to-playlist">批量加入目标歌单</button>
+                        <button class="ghost-button" type="button" data-action="download-selected-search">批量下载</button>
+                        <button class="ghost-button" type="button" data-action="speaker-selected-search">批量音箱播放</button>
                     </div>
                     <div class="list-stack" data-role="search-results"></div>
                     <div data-role="search-pagination"></div>

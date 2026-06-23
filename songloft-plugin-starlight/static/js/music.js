@@ -30,14 +30,18 @@ const builtinPlatformNames = {
 };
 
 const pageSizes = {
-    search: 30,
-    songlist: 30,
-    songlistDetail: 50,
-    ranking: 50,
-    customPlaylistDetail: 50,
+    search: 20,
+    songlist: 20,
+    songlistDetail: 20,
+    ranking: 20,
+    customPlaylistDetail: 20,
 };
 
 let artworkFallbackInstalled = false;
+
+export function musicPageSize(scope) {
+    return pageSizes[scope] || 20;
+}
 
 export function sourceDisplayName(id) {
     return state.platforms.find(item => item.id === id)?.name || builtinPlatformNames[id] || id || '未知';
@@ -265,9 +269,26 @@ function customPlaylistAction(index) {
     return actionButton('add-to-playlist', index, '加入歌单');
 }
 
-export function renderSongRow(song, index, extraActions = '') {
+function renderSongCheckbox(index, options = {}) {
+    if (!options.selectable) return '';
+    const role = options.checkboxRole || 'song-check';
+    const label = options.checkboxLabel || '选择歌曲';
     return `
-        <article class="song-row media-row">
+            <label class="song-check" title="${escapeHtml(label)}">
+                <input type="checkbox" data-role="${escapeHtml(role)}" data-index="${index}">
+            </label>`;
+}
+
+export function renderListScroller(innerHtml, extraClass = '', stackClass = 'list-stack') {
+    const className = ['list-scroll', extraClass].filter(Boolean).join(' ');
+    return `<div class="${escapeHtml(className)}"><div class="${escapeHtml(stackClass)}">${innerHtml}</div></div>`;
+}
+
+export function renderSongRow(song, index, extraActions = '', options = {}) {
+    const selectable = Boolean(options.selectable);
+    return `
+        <article class="song-row media-row${selectable ? ' selectable-song-row' : ''}">
+            ${renderSongCheckbox(index, options)}
             ${renderArtwork(song, songTitle(song))}
             <div class="row-main">
                 <strong>${escapeHtml(songTitle(song))}</strong>
@@ -623,6 +644,12 @@ function bindSongActions(root, getSong) {
     });
 }
 
+function selectedSongsFromChecks(root, role, songs) {
+    return $$(`[data-role="${role}"]:checked`, root)
+        .map(input => songs?.[Number(input.dataset.index)])
+        .filter(Boolean);
+}
+
 function selectedCustomPlaylistId() {
     const select = $('[data-role="custom-playlist-select"]');
     return select?.value || state.customPlaylistId || '';
@@ -729,7 +756,7 @@ export function renderCustomPlaylistDetail(playlist, page = state.customPlaylist
                 ${songs.length ? `<button class="primary-button" type="button" data-action="add-selected-custom-playlist-songs">加入选中歌曲</button><button class="ghost-button" type="button" data-action="download-selected-custom-playlist-songs">下载选中歌曲</button>` : ''}
             </div>
             ${songs.length
-                ? `<div class="list-stack tight">${pageSongs.map((song, index) => renderCustomPlaylistSongRow(song, start + index)).join('')}</div>
+                ? `${renderListScroller(pageSongs.map((song, index) => renderCustomPlaylistSongRow(song, start + index)).join(''), 'custom-playlist-detail-scroll', 'list-stack tight')}
                     ${renderPagination({ scope: 'custom-playlist-detail', page: currentPage, total: songs.length, pageSize: pageSizes.customPlaylistDetail })}`
                 : '<div class="empty-state">这个歌单还没有歌曲。</div>'}
         </section>
@@ -948,7 +975,10 @@ async function loadSearchPage(page = 1) {
     setState({ searchResults: songs, searchPage: page, searchTotal: total, platform: query.platform, quality: query.quality });
     $('[data-role="search-total"]').textContent = String(total);
     list.innerHTML = songs.length
-        ? songs.map((song, index) => renderSongRow(song, index)).join('')
+        ? renderListScroller(songs.map((song, index) => renderSongRow(song, index, '', {
+            selectable: true,
+            checkboxRole: 'search-song-check',
+        })).join(''), 'search-results-scroll')
         : '<div class="empty-state">没有找到匹配歌曲。</div>';
     renderPaginationInto('search-pagination', { scope: 'search', page, total, pageSize: pageSizes.search });
 }
@@ -984,6 +1014,46 @@ function bindSearch() {
             toast(error.message, 'error');
         } finally {
             submit.disabled = false;
+        }
+    });
+
+    $('[data-action="clear-search"]')?.addEventListener('click', () => {
+        const keyword = form.elements.keyword;
+        if (keyword) keyword.value = '';
+        setState({ searchQuery: null, searchResults: [], searchPage: 1, searchTotal: 0 });
+        $('[data-role="search-total"]').textContent = '0';
+        list.innerHTML = '';
+        clearPagination('search-pagination');
+    });
+
+    $('[data-role="search-batch-actions"]')?.addEventListener('click', async event => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const action = button.dataset.action;
+        const checks = $$('[data-role="search-song-check"]', list);
+        if (action === 'select-search-page') {
+            checks.forEach(input => { input.checked = true; });
+            return;
+        }
+        if (action === 'clear-search-selection') {
+            checks.forEach(input => { input.checked = false; });
+            return;
+        }
+        if (!['import-selected-search', 'add-selected-search-to-playlist', 'download-selected-search', 'speaker-selected-search'].includes(action)) {
+            return;
+        }
+        const selectedSongs = selectedSongsFromChecks(list, 'search-song-check', state.searchResults);
+        button.disabled = true;
+        try {
+            if (!selectedSongs.length) throw new Error('请先选择歌曲');
+            if (action === 'import-selected-search') await importSongs(selectedSongs);
+            if (action === 'add-selected-search-to-playlist') await addSelectedSongsToCustomPlaylist(selectedCustomPlaylistId(), selectedSongs);
+            if (action === 'download-selected-search') await downloadSongs(selectedSongs);
+            if (action === 'speaker-selected-search') await playSonglistOnSpeaker(selectedSongs);
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            button.disabled = false;
         }
     });
 
@@ -1152,7 +1222,7 @@ function renderSongLists(items) {
     const list = $('[data-role="songlist-list"]');
     if (!list) return;
     list.innerHTML = items.length
-        ? items.map((item, index) => renderSongListItem(item, index)).join('')
+        ? renderListScroller(items.map((item, index) => renderSongListItem(item, index)).join(''), 'songlist-results-scroll')
         : '<div class="empty-state">暂无歌单。</div>';
 }
 
@@ -1183,7 +1253,7 @@ async function loadSongListDetailPage(page = 1) {
     $('[data-role="songlist-title"]').textContent = context.title;
     const detail = $('[data-role="songlist-detail"]');
     detail.innerHTML = songs.length
-        ? `${songs.map((song, index) => renderSongRow(song, index)).join('')}<div class="inline-actions"><button class="primary-button" type="button" data-action="play-songlist">播放整个歌单</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button><button class="ghost-button" type="button" data-action="download-songlist">下载当前歌单</button></div>`
+        ? `${renderListScroller(songs.map((song, index) => renderSongRow(song, index)).join(''), 'songlist-detail-scroll')}<div class="inline-actions"><button class="primary-button" type="button" data-action="play-songlist">播放整个歌单</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button><button class="ghost-button" type="button" data-action="download-songlist">下载当前歌单</button></div>`
         : '<div class="empty-state">歌单没有可显示歌曲。</div>';
     renderPaginationInto('songlist-detail-pagination', { scope: 'songlist-detail', page, total, pageSize: pageSizes.songlistDetail });
 }
@@ -1320,7 +1390,7 @@ async function loadRankingPage(page = 1) {
     setState({ rankingSongs: songs, rankingPage: page, rankingTotal: total });
     $('[data-role="ranking-title"]').textContent = context.title;
     songsNode.innerHTML = songs.length
-        ? songs.map((song, index) => renderSongRow(song, index)).join('')
+        ? renderListScroller(songs.map((song, index) => renderSongRow(song, index)).join(''), 'ranking-songs-scroll')
         : '<div class="empty-state">榜单没有可显示歌曲。</div>';
     renderPaginationInto('ranking-pagination', { scope: 'ranking', page, total, pageSize: pageSizes.ranking });
 }

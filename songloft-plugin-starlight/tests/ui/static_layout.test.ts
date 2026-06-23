@@ -94,6 +94,29 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-role="ranking-pagination"');
   });
 
+  it('adds search result clearing, selection, and batch controls', () => {
+    const html = indexHtml();
+
+    expect(html).toContain('data-action="clear-search"');
+    expect(html).toContain('data-role="search-batch-actions"');
+    expect(html).toContain('data-action="select-search-page"');
+    expect(html).toContain('data-action="clear-search-selection"');
+    expect(html).toContain('data-action="import-selected-search"');
+    expect(html).toContain('data-action="add-selected-search-to-playlist"');
+    expect(html).toContain('data-action="download-selected-search"');
+    expect(html).toContain('data-action="speaker-selected-search"');
+  });
+
+  it('defines scroll containers and mobile wrapping for long music lists', () => {
+    const stylesheet = css();
+
+    expect(stylesheet).toContain('.list-scroll');
+    expect(stylesheet).toContain('max-height');
+    expect(stylesheet).toContain('overflow-y: auto');
+    expect(stylesheet).toContain('.batch-actions');
+    expect(stylesheet).toContain('@media (max-width: 760px)');
+  });
+
   it('replaces the plugin mini player with download source management UI', () => {
     const html = indexHtml();
 

@@ -452,6 +452,22 @@ textarea:focus {
     margin-top: 12px;
 }
 
+.list-scroll {
+    max-height: min(62vh, 680px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 4px;
+    scrollbar-gutter: stable;
+}
+
+.search-results-scroll,
+.songlist-results-scroll,
+.songlist-detail-scroll,
+.ranking-songs-scroll,
+.custom-playlist-detail-scroll {
+    margin-top: 8px;
+}
+
 .song-row,
 .source-row {
     min-height: 56px;
@@ -551,6 +567,10 @@ textarea:focus {
     grid-template-columns: 28px 48px minmax(0, 1fr) auto;
 }
 
+.song-row.selectable-song-row {
+    grid-template-columns: 28px 48px minmax(0, 1fr) auto;
+}
+
 .song-check {
     display: inline-grid;
     place-items: center;
@@ -644,6 +664,18 @@ textarea:focus {
     min-width: 0;
     color: var(--text);
     overflow-wrap: anywhere;
+}
+
+.batch-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.batch-actions button {
+    min-height: 32px;
 }
 
 .pagination-bar {
@@ -1230,6 +1262,10 @@ legend {
         grid-template-columns: 28px 48px minmax(0, 1fr);
     }
 
+    .song-row.selectable-song-row {
+        grid-template-columns: 28px 48px minmax(0, 1fr);
+    }
+
     .data-row,
     .device-row,
     .account-row,
@@ -1242,6 +1278,16 @@ legend {
 
     .row-actions {
         justify-content: flex-start;
+    }
+
+    .batch-actions {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        padding-bottom: 4px;
+    }
+
+    .batch-actions button {
+        flex: 0 0 auto;
     }
 
     .metric-grid {

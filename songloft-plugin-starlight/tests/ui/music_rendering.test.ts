@@ -4,6 +4,7 @@ interface MusicRenderingModule {
   cleanDisplayText(value: unknown): string;
   mediaCoverUrl(item: Record<string, unknown>): string;
   renderSongRow(song: Record<string, unknown>, index: number, extraActions?: string): string;
+  renderListScroller(innerHtml: string, extraClass?: string): string;
   renderSongListItem(item: Record<string, unknown>, index: number): string;
   renderRankingBoard(board: Record<string, unknown>, index: number): string;
 }
@@ -40,6 +41,34 @@ describe('music media rendering', () => {
     expect(html).not.toContain('>试听<');
     expect(html).not.toContain('>导入<');
     expect(html).not.toContain('228908');
+  });
+
+  it('can render selectable song rows while preserving the play button', async () => {
+    const { renderSongRow } = await loadMusicModule();
+
+    const html = renderSongRow({
+      title: '稻香',
+      artist: '周杰伦',
+      source_data: {
+        platform: 'kw',
+        quality: '320k',
+      },
+    }, 3, '', { selectable: true, checkboxRole: 'search-song-check' });
+
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('data-role="search-song-check"');
+    expect(html).toContain('data-index="3"');
+    expect(html).toContain('data-action="preview"');
+    expect(html).toContain('>播放</button>');
+  });
+
+  it('wraps long list content in a stable scroll container', async () => {
+    const { renderListScroller } = await loadMusicModule();
+
+    const html = renderListScroller('<article>歌曲</article>', 'search-results-scroll');
+
+    expect(html).toContain('class="list-scroll search-results-scroll"');
+    expect(html).toContain('<article>歌曲</article>');
   });
 
   it('renders discovered songlists with cover artwork while hiding raw ids', async () => {
