@@ -47,7 +47,17 @@ function installNativePlayerDom() {
   });
   vi.stubGlobal('window', {
     setTimeout: vi.fn(),
+    dispatchEvent: vi.fn(),
     parent: { postMessage },
+  });
+  vi.stubGlobal('CustomEvent', class {
+    type: string;
+    detail: unknown;
+
+    constructor(type: string, init?: { detail?: unknown }) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
   });
   return { postMessage };
 }
@@ -91,12 +101,13 @@ describe('songlist speaker actions', () => {
     });
   });
 
-  it('requests native player playback after importing the song into Songloft', async () => {
+  it('queues plugin local playback after importing the song into Songloft', async () => {
     const { postMessage } = installNativePlayerDom();
     const nativeSong = { id: 99, type: 'remote', title: '晴天', artist: '周杰伦' };
     const fetchMock = vi.fn(async () => okResponse({ total: 1, songs: [nativeSong] }) as Response);
     vi.stubGlobal('fetch', fetchMock);
     const { music } = await loadModules();
+    const { state } = await import('../../static/js/state.js') as { state: { pluginPlayerQueue: unknown[]; pluginPlayerIndex: number; pluginPlayerState: string } };
     const song = { title: '晴天', artist: '周杰伦', source_data: { platform: 'kw', quality: '320k', songInfo: {} } };
 
     await music.previewSong(song);
@@ -105,11 +116,10 @@ describe('songlist speaker actions', () => {
       method: 'POST',
       body: JSON.stringify({ songs: [song] }),
     }));
-    expect(postMessage).toHaveBeenCalledWith({
-      type: 'songloft:native-player:play',
-      songs: [nativeSong],
-      startIndex: 0,
-    }, '*');
+    expect(postMessage).not.toHaveBeenCalled();
+    expect(state.pluginPlayerQueue).toEqual([nativeSong]);
+    expect(state.pluginPlayerIndex).toBe(0);
+    expect(state.pluginPlayerState).toBe('playing');
   });
 
   it('starts one-song downloads through the background download endpoint', async () => {

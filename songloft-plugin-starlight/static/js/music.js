@@ -1,5 +1,5 @@
 import { api } from './api.js';
-import { requestNativePlayback } from './native_player.js';
+import { playPluginQueue } from './plugin_player.js';
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from './state.js';
 
 const platformSelectRoles = [
@@ -468,13 +468,9 @@ export async function previewSong(song) {
         return result;
     }
 
-    const nativeResult = requestNativePlayback(importedSongs, 0);
-    if (nativeResult.direct) {
-        toast('已发送到 Songloft 播放器');
-    } else {
-        toast('已导入 Songloft 歌曲库；当前 Songloft 未开放插件直控播放器入口，请在原生播放器中播放。');
-    }
-    return { ...result, native_player: nativeResult };
+    playPluginQueue(importedSongs, 0);
+    toast('已加入本插件播放队列');
+    return { ...result, plugin_player: { queued: importedSongs.length, startIndex: 0 } };
 }
 
 async function importSongs(songs, options = {}) {

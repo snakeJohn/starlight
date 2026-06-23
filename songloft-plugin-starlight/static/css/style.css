@@ -247,6 +247,98 @@ textarea:disabled {
     font-size: 12px;
 }
 
+.plugin-player {
+    min-width: 0;
+    max-width: min(680px, 56vw);
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) auto;
+    gap: 6px 8px;
+    align-items: center;
+    border: 1px solid var(--surface-line);
+    border-radius: var(--radius);
+    padding: 4px;
+    background: color-mix(in srgb, var(--surface-solid) 78%, transparent);
+}
+
+.plugin-player-now,
+.plugin-player-queue-item {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.plugin-player-cover {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    object-fit: cover;
+    border: 1px solid var(--surface-line);
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface-solid));
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.plugin-player-info,
+.plugin-player-queue-item span {
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+}
+
+.plugin-player-info strong,
+.plugin-player-info span,
+.plugin-player-queue-item strong,
+.plugin-player-queue-item small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plugin-player-info span,
+.plugin-player-queue-item small,
+.plugin-player-empty {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.plugin-player-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: flex-end;
+}
+
+.plugin-player-queue {
+    grid-column: 1 / -1;
+    max-height: 104px;
+    display: grid;
+    gap: 4px;
+    overflow-y: auto;
+}
+
+.plugin-player-queue-item {
+    width: 100%;
+    min-height: 36px;
+    justify-content: flex-start;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 3px;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+}
+
+.plugin-player-queue-item.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .compact-icon-button {
     min-height: 30px;
     padding: 0 8px;
@@ -1174,10 +1266,19 @@ legend {
     }
 
     .status-side,
+    .plugin-player,
     .global-player {
         width: 100%;
         max-width: none;
         justify-content: stretch;
+    }
+
+    .plugin-player {
+        grid-template-columns: 1fr;
+    }
+
+    .plugin-player-actions {
+        justify-content: flex-start;
     }
 
     .global-player-info {
