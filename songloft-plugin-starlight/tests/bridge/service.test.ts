@@ -514,6 +514,29 @@ describe('registerBridgeHandlers', () => {
     expect(parseResponseBody(response).error.code).toBe('DEVICE_OFFLINE');
   });
 
+  it('routes speaker songlist playback to the queue service', async () => {
+    const bridge = {
+      previewUrl: vi.fn(),
+      importSongs: vi.fn(),
+      playOnSpeaker: vi.fn(),
+      playSonglistOnSpeaker: vi.fn(async () => ({ urls: ['https://audio.test/1.mp3', 'https://audio.test/2.mp3'] })),
+      externalSearch: vi.fn(),
+    } as unknown as BridgeService;
+    const router = createRouter();
+    registerBridgeHandlers(router, bridge);
+
+    const response = await router.handle(request('POST', '/api/bridge/play-songlist', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+      songs: [song, secondSong],
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response).data).toEqual({ urls: ['https://audio.test/1.mp3', 'https://audio.test/2.mp3'] });
+    expect(bridge.playSonglistOnSpeaker).toHaveBeenCalledWith('acc-1', 'dev-1', [song, secondSong]);
+    expect(bridge.playOnSpeaker).not.toHaveBeenCalled();
+  });
+
   it('rejects missing or non-array import songs without calling the service', async () => {
     const bridge = {
       previewUrl: vi.fn(),

@@ -1,3 +1,4 @@
+import { requestNativeControl, requestNativePlayback } from './native_player.js';
 import { escapeHtml, setState, state } from './state.js';
 
 const playModes = ['order', 'loop', 'random', 'single'];
@@ -65,7 +66,12 @@ function nextIndex(direction) {
     const length = state.pluginPlayerQueue.length;
     if (!length) return -1;
     if (state.pluginPlayerMode === 'random' && direction > 0) {
-        return (state.pluginPlayerIndex + 1) % length;
+        if (length === 1) return state.pluginPlayerIndex;
+        let next = state.pluginPlayerIndex;
+        while (next === state.pluginPlayerIndex) {
+            next = Math.floor(Math.random() * length);
+        }
+        return next;
     }
     if (state.pluginPlayerMode === 'single') return state.pluginPlayerIndex;
     const next = state.pluginPlayerIndex + direction;
@@ -86,24 +92,34 @@ export function playPluginQueue(songs, startIndex = 0) {
 export function runPluginPlayerAction(action) {
     const command = String(action || '').replace(/^plugin-player-/, '');
     if (command === 'previous') {
-        setState({ pluginPlayerIndex: nextIndex(-1), pluginPlayerState: state.pluginPlayerQueue.length ? 'playing' : 'idle' });
+        const index = nextIndex(-1);
+        setState({ pluginPlayerIndex: index, pluginPlayerState: state.pluginPlayerQueue.length ? 'playing' : 'idle' });
+        requestNativeControl('previous');
         return;
     }
     if (command === 'next') {
-        setState({ pluginPlayerIndex: nextIndex(1), pluginPlayerState: state.pluginPlayerQueue.length ? 'playing' : 'idle' });
+        const index = nextIndex(1);
+        setState({ pluginPlayerIndex: index, pluginPlayerState: state.pluginPlayerQueue.length ? 'playing' : 'idle' });
+        requestNativeControl('next');
         return;
     }
     if (command === 'toggle') {
-        setState({ pluginPlayerState: state.pluginPlayerState === 'playing' ? 'paused' : (state.pluginPlayerQueue.length ? 'playing' : 'idle') });
+        const pausing = state.pluginPlayerState === 'playing';
+        const nextState = pausing ? 'paused' : (state.pluginPlayerQueue.length ? 'playing' : 'idle');
+        setState({ pluginPlayerState: nextState });
+        if (state.pluginPlayerQueue.length) requestNativeControl(pausing ? 'pause' : 'resume');
         return;
     }
     if (command === 'stop') {
         setState({ pluginPlayerState: 'stopped' });
+        requestNativeControl('stop');
         return;
     }
     if (command === 'mode') {
         const current = playModes.indexOf(state.pluginPlayerMode);
-        setState({ pluginPlayerMode: playModes[(current + 1) % playModes.length] || 'order' });
+        const mode = playModes[(current + 1) % playModes.length] || 'order';
+        setState({ pluginPlayerMode: mode });
+        requestNativeControl('mode', { mode });
     }
 }
 
@@ -163,7 +179,9 @@ export function bindPluginPlayerControls(root = document) {
         const button = event.target.closest('button[data-action^="plugin-player-"]');
         if (!button) return;
         if (button.dataset.action === 'plugin-player-select') {
-            setState({ pluginPlayerIndex: boundedIndex(button.dataset.index, state.pluginPlayerQueue.length), pluginPlayerState: 'playing' });
+            const index = boundedIndex(button.dataset.index, state.pluginPlayerQueue.length);
+            setState({ pluginPlayerIndex: index, pluginPlayerState: 'playing' });
+            requestNativePlayback(state.pluginPlayerQueue, index);
             return;
         }
         runPluginPlayerAction(button.dataset.action);

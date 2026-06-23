@@ -134,6 +134,27 @@ describe('plugin local player controls', () => {
     expect(state.pluginPlayerState).toBe('stopped');
   });
 
+  it('sends plugin player controls to the native bottom player', async () => {
+    const { postMessage } = installDom();
+    const { player } = await loadPluginPlayer();
+    player.playPluginQueue([
+      { title: '第一首', artist: '歌手 A' },
+      { title: '第二首', artist: '歌手 B' },
+    ], 0);
+
+    player.runPluginPlayerAction('plugin-player-next');
+    player.runPluginPlayerAction('plugin-player-toggle');
+    player.runPluginPlayerAction('plugin-player-toggle');
+    player.runPluginPlayerAction('plugin-player-previous');
+    player.runPluginPlayerAction('plugin-player-stop');
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'songloft:native-player:control', action: 'next' }, '*');
+    expect(postMessage).toHaveBeenCalledWith({ type: 'songloft:native-player:control', action: 'pause' }, '*');
+    expect(postMessage).toHaveBeenCalledWith({ type: 'songloft:native-player:control', action: 'resume' }, '*');
+    expect(postMessage).toHaveBeenCalledWith({ type: 'songloft:native-player:control', action: 'previous' }, '*');
+    expect(postMessage).toHaveBeenCalledWith({ type: 'songloft:native-player:control', action: 'stop' }, '*');
+  });
+
   it('renders the current queue with the active song highlighted', async () => {
     installDom();
     const { player } = await loadPluginPlayer();

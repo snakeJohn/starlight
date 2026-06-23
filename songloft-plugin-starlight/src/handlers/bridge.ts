@@ -165,6 +165,16 @@ export function registerBridgeHandlers(router: Router, bridge: BridgeService): v
       );
     }));
 
+  router.post('/api/bridge/play-songlist', async (req) =>
+    handle(() => {
+      const body = parseJsonBody<PlayBody & SongsBody>(req);
+      return bridge.playSonglistOnSpeaker(
+        requireString(body.account_id, 'account_id'),
+        requireString(body.device_id, 'device_id'),
+        requireSongs(body.songs),
+      );
+    }));
+
   router.post('/api/bridge/play-resolved-url', async (req) =>
     handle(() => {
       const body = parseJsonBody<ResolvedPlayBody>(req);
