@@ -226,7 +226,7 @@ describe('VoiceEngine Songloft library matching', () => {
         artist: '本地歌手',
         url: 'http://127.0.0.1:18191/api/v1/songs/72/play?access_token=test-plugin-token',
       }),
-    ], 0, 'single');
+    ], 0, 'single', { autoAdvance: false });
     expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：小幸运');
   });
 

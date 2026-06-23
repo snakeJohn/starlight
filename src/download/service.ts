@@ -9,7 +9,6 @@ import { StarlightError } from '../system/errors';
 import { sourceDiagnostics } from '../diagnostics/source_logs';
 
 const SETTINGS_KEY = 'starlight:download:settings';
-const STARLIGHT_PLUGIN_ENTRY_PATH = 'starlight';
 const DEFAULT_SETTINGS: DownloadSettings = {
   path_template: 'downloads/{artist}-{album}/{title}',
   embed_metadata: true,
@@ -177,8 +176,8 @@ export class DownloadService {
   ): Promise<DownloadResult | null> {
     attemptedSources.add(song.source_data.platform);
     try {
-      await this.resolveDownloadUrl(song);
-      const nativeSong = await this.importDownloadRemoteSong(song);
+      const url = await this.resolveDownloadUrl(song);
+      const nativeSong = await this.importDownloadRemoteSong(song, url);
       const songId = numericSongId(nativeSong);
       if (!songId) {
         throw new StarlightError('INTERNAL_ERROR', 'Songloft 未返回可下载的歌曲 ID', true, { upstream: 'songloft_remote_import' });
@@ -272,14 +271,10 @@ export class DownloadService {
     }
   }
 
-  private async importDownloadRemoteSong(song: SearchResultSong): Promise<SongloftRemoteSong> {
+  private async importDownloadRemoteSong(song: SearchResultSong, url: string): Promise<SongloftRemoteSong> {
     const token = await songloft.plugin.getToken();
     const host = await songloft.plugin.getHostUrl();
-    const payload = toRemoteSong({ ...song, duration: 0 }, '', {
-      pluginEntryPath: STARLIGHT_PLUGIN_ENTRY_PATH,
-      sourceData: downloadSourceData(song),
-      dedupKey: '',
-    });
+    const payload = toRemoteSong({ ...song, duration: 0 }, url);
     const imported = await postRemoteSongs(host, token, [payload]);
     if (!imported.ok) {
       throw new StarlightError('INTERNAL_ERROR', `导入下载歌曲失败: ${imported.status}${imported.body ? ` ${imported.body}` : ''}`, true, {
@@ -352,13 +347,6 @@ function safeJson(value: string): unknown {
 function numericSongId(song: SongloftRemoteSong): number {
   const id = Number(song.id);
   return Number.isFinite(id) && id > 0 ? id : 0;
-}
-
-function downloadSourceData(song: SearchResultSong): SearchResultSong['source_data'] & { starlight: { purpose: 'download' } } {
-  return {
-    ...song.source_data,
-    starlight: { purpose: 'download' },
-  };
 }
 
 function errorMessage(error: unknown): string {

@@ -101,6 +101,29 @@ describe('PlaylistManager standalone queue', () => {
     });
   });
 
+  it('does not automatically replay one-off standalone songs when auto advance is disabled', async () => {
+    vi.useFakeTimers();
+    const shortSong = { ...song, duration: 4 };
+    const { manager, minaService } = createManager();
+
+    try {
+      await expect(manager.playStandalone([shortSong], 0, 'single', { autoAdvance: false })).resolves.toBe(true);
+
+      expect(minaService.playURL).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(minaService.playURL).toHaveBeenCalledTimes(1);
+      expect(manager.getStatus()).toMatchObject({
+        state: 'playing',
+        play_mode: 'single',
+        current_index: 0,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('loads synthetic custom playlists and resolves dynamic song URLs at playback time', async () => {
     const dynamicSong = { ...song, id: -100000000, type: 'dynamic', title: '为龙', artist: '河图', url: '' };
     const dynamicPlaylistLoader = vi.fn(async () => [dynamicSong]);

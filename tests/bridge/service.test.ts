@@ -331,7 +331,7 @@ describe('BridgeService', () => {
         duration: 200,
         url: 'https://audio.test/song.mp3',
       }),
-    ], 0, 'single');
+    ], 0, 'single', { autoAdvance: false });
     expect(minaService.playURL).not.toHaveBeenCalled();
   });
 

@@ -259,7 +259,12 @@ export class BridgeService {
     try {
       const url = resolvedUrl ?? await this.previewUrl(song);
       const played = this.playlistManagerMap
-        ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone([toPlayerSong(song, url)], 0, 'single')
+        ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone(
+          [toPlayerSong(song, url)],
+          0,
+          'single',
+          { autoAdvance: false },
+        )
         : await this.minaService.playURL(accountId, deviceId, url);
       if (!played) {
         failures.push('音箱播放 URL 失败');

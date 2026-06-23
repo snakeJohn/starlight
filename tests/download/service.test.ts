@@ -122,13 +122,14 @@ describe('DownloadService', () => {
     });
   });
 
-  it('downloads a song by importing a current-plugin sourced remote song for fresh URL resolving', async () => {
+  it('downloads a song by importing the already resolved download URL without resolving again', async () => {
     const runtime = createRuntime();
+    const provider = createProvider('kg', vi.fn(async () => ({ list: [fallbackSong], total: 1 })));
     const fetchMock = installRemoteImport(501);
     const downloadMock = vi.fn(async () => ({ path: 'downloads/Singer/Song.flac', status: 'ok' }));
     const songsApi = songloft.songs as typeof songloft.songs & { download: typeof downloadMock };
     songsApi.download = downloadMock;
-    const service = new DownloadService(runtime);
+    const service = new DownloadService(runtime, createPlatforms([provider]));
     await service.saveSettings({ path_template: 'starlight/{artist}/{title}', embed_metadata: false });
 
     await expect(service.downloadSong(song)).resolves.toEqual({
@@ -145,24 +146,21 @@ describe('DownloadService', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const fetchCalls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
     const payload = JSON.parse(String(fetchCalls[0][1].body));
-    const sourceData = JSON.parse(payload[0].source_data);
     expect(payload).toEqual([
       expect.objectContaining({
         title: 'Song',
         duration: 0,
-        url: '',
-        plugin_entry_path: 'starlight',
+        url: 'https://download.test/song.flac',
+        plugin_entry_path: '',
+        source_data: '',
         dedup_key: '',
       }),
     ]);
-    expect(sourceData).toEqual({
-      ...song.source_data,
-      starlight: { purpose: 'download' },
-    });
     expect(downloadMock).toHaveBeenCalledWith(501, {
       path_template: 'starlight/{artist}/{title}',
       embed_metadata: false,
     });
+    expect(provider.search).not.toHaveBeenCalled();
   });
 
   it('rejects download when enabled download sources cannot resolve a URL', async () => {
@@ -205,10 +203,14 @@ describe('DownloadService', () => {
     });
     const fetchCalls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
     const payload = JSON.parse(String(fetchCalls[0][1].body));
-    expect(JSON.parse(payload[0].source_data)).toEqual({
-      ...fallbackSong.source_data,
-      starlight: { purpose: 'download' },
-    });
+    expect(payload).toEqual([
+      expect.objectContaining({
+        title: 'Song',
+        url: 'https://download.test/fallback.flac',
+        plugin_entry_path: '',
+        source_data: '',
+      }),
+    ]);
   });
 
   it('retries enabled download sources without using playback runtimes when one download source throws', async () => {

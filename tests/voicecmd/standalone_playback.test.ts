@@ -89,7 +89,7 @@ describe('VoiceEngine standalone playback queue', () => {
         artist: '筷子兄弟',
         url: 'https://audio.test/father.mp3',
       }),
-    ], 0, 'single');
+    ], 0, 'single', { autoAdvance: false });
     expect(minaService.playURL).not.toHaveBeenCalled();
   });
 });

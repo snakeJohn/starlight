@@ -217,7 +217,9 @@ export function registerSongloftLibraryHandlers(router: Router, options: Songlof
       const playMode: PlayMode = requestedPlayMode ? requestedPlayMode as PlayMode : 'single';
       const song = toPlayerSong(body.song);
       const manager = await options.playlistManagerMap.getOrCreate(accountId, deviceId);
-      const ok = await manager.playStandalone([song], 0, playMode);
+      const ok = await manager.playStandalone([song], 0, playMode, {
+        autoAdvance: Boolean(requestedPlayMode),
+      });
       if (!ok) {
         throw new StarlightError('DEVICE_OFFLINE', '音箱播放 Songloft 歌曲失败', true);
       }

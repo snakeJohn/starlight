@@ -122,7 +122,12 @@ export function registerDeviceHandlers(
         return jsonResponse({ success: false, error: 'device_id and url are required' });
       }
       const ok = playlistManagerMap
-        ? await (await playlistManagerMap.getOrCreate(account_id, device_id)).playStandalone([urlPlayerSong(url)], 0, 'single')
+        ? await (await playlistManagerMap.getOrCreate(account_id, device_id)).playStandalone(
+          [urlPlayerSong(url)],
+          0,
+          'single',
+          { autoAdvance: false },
+        )
         : await minaService.playURL(account_id, device_id, url);
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to play url' });

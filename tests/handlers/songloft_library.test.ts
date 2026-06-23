@@ -161,7 +161,7 @@ describe('registerSongloftLibraryHandlers', () => {
         url: '/api/v1/songs/501/play',
         cover_url: 'https://img.test/local.jpg',
       }),
-    ], 0, 'single');
+    ], 0, 'single', { autoAdvance: false });
     expect(parseResponseBody(response).data).toEqual({
       message: 'song started',
       current_song: expect.objectContaining({ title: '本地歌曲' }),

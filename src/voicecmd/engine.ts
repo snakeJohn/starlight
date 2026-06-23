@@ -984,7 +984,9 @@ export class VoiceEngine {
       if (standalone) {
         const playUrl = await URLBuilder.buildSongURL(standalone);
         if (playUrl) {
-          const ok = await pm.playStandalone([standaloneSongToPlayerSong(standalone, playUrl)], 0, 'single');
+          const ok = await pm.playStandalone([standaloneSongToPlayerSong(standalone, playUrl)], 0, 'single', {
+            autoAdvance: false,
+          });
           if (!ok) {
             songloft.log.error('[VoiceEngine] Failed to play standalone remote song: ' + standalone.title + ' - ' + standalone.artist);
             return;
@@ -996,7 +998,9 @@ export class VoiceEngine {
 
       const songloftSong = await this.findSongloftLibrarySong(songName);
       if (songloftSong) {
-        const ok = await pm.playStandalone([songloftSong], 0, 'single');
+        const ok = await pm.playStandalone([songloftSong], 0, 'single', {
+          autoAdvance: false,
+        });
         if (!ok) {
           songloft.log.error('[VoiceEngine] Failed to play Songloft library song: ' + songloftSong.title + ' - ' + songloftSong.artist);
           return;

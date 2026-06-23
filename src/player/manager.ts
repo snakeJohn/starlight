@@ -39,6 +39,10 @@ export interface DynamicPlaylistOptions {
   dynamicSongResolver?: (song: PlayerSong) => Promise<PlayerSong | null>;
 }
 
+export interface PlayStandaloneOptions {
+  autoAdvance?: boolean;
+}
+
 function recordSpeakerPlaybackDiagnostic(
   song: PlayerSong,
   status: 'success' | 'failed',
@@ -108,6 +112,7 @@ export class PlaylistManager {
   private playStartTimeMs: number = 0;  // 当前歌曲开始播放的时间戳(ms)
   private randomPlayed: Set<number> = new Set(); // 随机模式已播放索引
   private voiceSuspendedAt: number = 0; // suspendForVoiceInteraction 首次调用时间戳
+  private autoAdvance = true;
 
   constructor(
     accountId: string,
@@ -154,6 +159,7 @@ export class PlaylistManager {
     this.currentIndex = (startIndex !== undefined && startIndex >= 0 && startIndex < this.songs.length)
       ? startIndex : 0;
     this.playMode = mode || 'order';
+    this.autoAdvance = true;
     this.randomPlayed = new Set();
 
     // 开始播放当前歌曲
@@ -174,7 +180,12 @@ export class PlaylistManager {
    * 播放临时歌曲队列。
    * 用于搜索结果单曲推送或手动 URL 播放，不依赖 Songloft 歌单。
    */
-  async playStandalone(songs: PlayerSong[], startIndex = 0, mode: PlayMode = 'single'): Promise<boolean> {
+  async playStandalone(
+    songs: PlayerSong[],
+    startIndex = 0,
+    mode: PlayMode = 'single',
+    options: PlayStandaloneOptions = {},
+  ): Promise<boolean> {
     this.stopCheckTimer();
     this.clearVoiceSuspend();
     this.state = 'idle';
@@ -189,6 +200,7 @@ export class PlaylistManager {
     this.playlistId = 0;
     this.currentIndex = startIndex >= 0 && startIndex < songs.length ? startIndex : 0;
     this.playMode = mode;
+    this.autoAdvance = options.autoAdvance !== false;
     this.randomPlayed = new Set();
 
     const ok = await this.playCurrent();
@@ -377,7 +389,7 @@ export class PlaylistManager {
     this.state = 'playing';
 
     const song = this.getCurrentSong();
-    if (song && song.duration > 0 && this.playStartTimeMs > 0) {
+    if (this.autoAdvance && song && song.duration > 0 && this.playStartTimeMs > 0) {
       const elapsedSec = (Date.now() - this.playStartTimeMs) / 1000;
       const remaining = song.duration - elapsedSec;
       if (remaining > 0) {
@@ -455,6 +467,7 @@ export class PlaylistManager {
   resetAutoNextTimer(devicePositionSec?: number): void {
     this.stopCheckTimer();
     this.clearVoiceSuspend();
+    if (!this.autoAdvance) return;
     const song = this.getCurrentSong();
     if (!song || song.duration <= 0) return;
 
@@ -493,6 +506,7 @@ export class PlaylistManager {
     this.playMode = playMode;
     this.playlistId = playlistId;
     this.state = 'idle';
+    this.autoAdvance = true;
     this.randomPlayed = new Set();
   }
 
@@ -620,8 +634,10 @@ export class PlaylistManager {
     this.playStartTimeMs = Date.now();
 
     // 如果歌曲时长有效，注册定时器播放下一首
-    if (song.duration > 0) {
+    if (this.autoAdvance && song.duration > 0) {
       this.startCheckTimer(song.duration);
+    } else if (!this.autoAdvance) {
+      songloft.log.info('[PlaylistManager] Auto-next timer disabled for standalone playback');
     } else {
       songloft.log.warn('[PlaylistManager] Song duration invalid, no auto-next timer: ' + song.duration);
     }
