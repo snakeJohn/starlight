@@ -82,7 +82,7 @@ describe('plugin local player controls', () => {
     expect(html).not.toContain('global-player-');
   });
 
-  it('routes single song playback to the plugin queue instead of native postMessage', async () => {
+  it('routes single song playback to the plugin queue and native player request', async () => {
     const { postMessage } = installDom();
     const importedSong = { id: 99, type: 'remote', title: '晴天', artist: '周杰伦' };
     vi.stubGlobal('fetch', vi.fn(async () => okResponse({ total: 1, songs: [importedSong] }) as Response));
@@ -95,7 +95,11 @@ describe('plugin local player controls', () => {
       source_data: { platform: 'kw', quality: '320k', songInfo: {} },
     });
 
-    expect(postMessage).not.toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'songloft:native-player:play',
+      songs: [importedSong],
+      startIndex: 0,
+    }, '*');
     expect(state.pluginPlayerQueue).toEqual([importedSong]);
     expect(state.pluginPlayerIndex).toBe(0);
     expect(state.pluginPlayerState).toBe('playing');

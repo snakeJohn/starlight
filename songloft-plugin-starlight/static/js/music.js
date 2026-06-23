@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { playPluginQueue } from './plugin_player.js';
+import { requestNativePlayback } from './native_player.js';
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from './state.js';
 
 const platformSelectRoles = [
@@ -469,8 +470,9 @@ export async function previewSong(song) {
     }
 
     playPluginQueue(importedSongs, 0);
+    const nativePlayback = requestNativePlayback(importedSongs, 0);
     toast('已加入本插件播放队列');
-    return { ...result, plugin_player: { queued: importedSongs.length, startIndex: 0 } };
+    return { ...result, plugin_player: { queued: importedSongs.length, startIndex: 0 }, native_player: nativePlayback };
 }
 
 async function importSongs(songs, options = {}) {

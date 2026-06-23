@@ -116,7 +116,11 @@ describe('songlist speaker actions', () => {
       method: 'POST',
       body: JSON.stringify({ songs: [song] }),
     }));
-    expect(postMessage).not.toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'songloft:native-player:play',
+      songs: [nativeSong],
+      startIndex: 0,
+    }, '*');
     expect(state.pluginPlayerQueue).toEqual([nativeSong]);
     expect(state.pluginPlayerIndex).toBe(0);
     expect(state.pluginPlayerState).toBe('playing');
