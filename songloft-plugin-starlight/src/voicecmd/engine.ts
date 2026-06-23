@@ -850,10 +850,12 @@ export class VoiceEngine {
     this.cancelPendingResume();
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
 
-    // 空参数 + 有活跃歌单：直接恢复播放，无需搜索和打断
+    // 空参数 + 有活跃队列：保持或恢复当前播放，不切歌、不搜索、不打断。
     if (!playlistName && pm.hasPlaylist()) {
-      songloft.log.info('[VoiceEngine] Play playlist: resume last playback');
-      await pm.next();
+      songloft.log.info('[VoiceEngine] Play playlist: keep current playback');
+      if (!pm.isPlaying()) {
+        await pm.resumePlayback();
+      }
       return;
     }
 
@@ -948,11 +950,13 @@ export class VoiceEngine {
     this.cancelPendingResume();
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
 
-    // 空参数处理：继续上次播放
+    // 空参数处理：保持或恢复当前队列，不能误触发下一首。
     if (!songName) {
       if (pm.hasPlaylist()) {
-        songloft.log.info('[VoiceEngine] Play song: resume last playback');
-        await pm.next();
+        songloft.log.info('[VoiceEngine] Play song: keep current playback');
+        if (!pm.isPlaying()) {
+          await pm.resumePlayback();
+        }
         return;
       }
       songloft.log.warn('[VoiceEngine] No song name specified and no active playlist');

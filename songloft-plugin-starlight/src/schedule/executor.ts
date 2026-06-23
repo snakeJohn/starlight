@@ -5,12 +5,12 @@
 /// <reference types="@songloft/plugin-sdk" />
 
 import { ConfigManager } from '../config/manager';
-import { AccountManager } from '../account/manager';
 import { MinaService } from '../service/service';
 import { PlaylistManagerMap } from '../player/manager';
 import { IndexingManager } from '../indexing/manager';
 import { ConversationMonitor } from '../conversation/monitor';
-import type { ScheduledTask, TaskLog, TaskTarget, TaskParams, PlayMode } from '../types';
+import { normalizePlayMode } from '../player/modes';
+import type { ScheduledTask, TaskLog, TaskTarget, TaskParams } from '../types';
 
 /** 解析后的单个目标设备 */
 interface DeviceTarget {
@@ -25,7 +25,6 @@ interface DeviceTarget {
  */
 export class TaskExecutor {
   private configManager: ConfigManager;
-  private accountManager: AccountManager;
   private minaService: MinaService;
   private playlistManagerMap: PlaylistManagerMap;
   private indexingManager: IndexingManager;
@@ -33,14 +32,12 @@ export class TaskExecutor {
 
   constructor(
     configManager: ConfigManager,
-    accountManager: AccountManager,
     minaService: MinaService,
     playlistManagerMap: PlaylistManagerMap,
     indexingManager: IndexingManager,
     conversationMonitor: ConversationMonitor,
   ) {
     this.configManager = configManager;
-    this.accountManager = accountManager;
     this.minaService = minaService;
     this.playlistManagerMap = playlistManagerMap;
     this.indexingManager = indexingManager;
@@ -261,6 +258,16 @@ export class TaskExecutor {
    * @param withSong - 是否从指定歌曲开始播放（play_playlist_from）
    */
   private async executePlayPlaylist(target: DeviceTarget, params: TaskParams, withSong: boolean): Promise<string> {
+    if (typeof params.playlist_id === 'number' && Number.isFinite(params.playlist_id) && params.playlist_id !== 0) {
+      const playMode = normalizePlayMode(params.play_mode, 'order');
+      const pm = await this.playlistManagerMap.getOrCreate(target.accountId, target.deviceId);
+      const ok = await pm.play(params.playlist_id, 0, playMode);
+      if (!ok) {
+        throw new Error(`播放歌单失败: #${params.playlist_id}`);
+      }
+      return `播放歌单 #${params.playlist_id} 成功`;
+    }
+
     const playlistName = params.playlist_name;
     if (!playlistName) {
       throw new Error('未指定歌单名称');
@@ -291,7 +298,7 @@ export class TaskExecutor {
     }
 
     // 确定播放模式
-    const playMode: PlayMode = (params.play_mode as PlayMode) || 'order';
+    const playMode = normalizePlayMode(params.play_mode, 'order');
 
     // 获取或创建设备的播放管理器并开始播放
     const pm = await this.playlistManagerMap.getOrCreate(target.accountId, target.deviceId);
@@ -323,7 +330,7 @@ export class TaskExecutor {
     if (volume === undefined || volume === null) {
       throw new Error('未指定音量值');
     }
-    if (volume < 0 || volume > 100) {
+    if (typeof volume !== 'number' || !Number.isFinite(volume) || volume < 0 || volume > 100) {
       throw new Error(`音量值超出范围: ${volume}`);
     }
 
@@ -343,22 +350,26 @@ export class TaskExecutor {
     if (!playMode) {
       throw new Error('未指定播放模式');
     }
+    const normalizedMode = normalizePlayMode(playMode, 'order');
+    if (normalizedMode !== playMode) {
+      throw new Error(`无效的播放模式: ${playMode}`);
+    }
 
     // 优先通过现有播放管理器设置
     const pm = this.playlistManagerMap.get(target.accountId, target.deviceId);
     if (pm) {
-      await pm.setPlayMode(playMode as PlayMode);
+      await pm.setPlayMode(normalizedMode);
     } else {
       // 播放管理器不存在时，直接更新配置
       try {
         await this.configManager.updateDevice(target.accountId, target.deviceId, {
-          play_mode: playMode,
+          play_mode: normalizedMode,
         });
       } catch (e) {
         throw new Error(`更新播放模式配置失败: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 
-    return `设置播放模式为 ${playMode} 成功`;
+    return `设置播放模式为 ${normalizedMode} 成功`;
   }
 }

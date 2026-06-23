@@ -23,6 +23,32 @@ function parseResponseBody(response: HTTPResponse): any {
 }
 
 describe('registerDeviceHandlers', () => {
+  it('rejects non-finite volume values before calling Mina service', async () => {
+    const router = createRouter();
+    const minaService = {
+      setVolume: vi.fn(async () => true),
+    } as unknown as MinaService;
+
+    (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+      router,
+      minaService,
+      {} as AccountManager,
+    );
+
+    const response = await router.handle(request('POST', '/mina/volume', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+      volume: 'loud',
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response)).toMatchObject({
+      success: false,
+      error: 'volume must be a number between 0 and 100',
+    });
+    expect(minaService.setVolume).not.toHaveBeenCalled();
+  });
+
   it('refreshes conversation monitoring after a device is marked managed', async () => {
     const router = createRouter();
     const minaService = {

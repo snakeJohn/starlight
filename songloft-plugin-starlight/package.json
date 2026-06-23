@@ -1,6 +1,6 @@
 {
   "name": "songloft-plugin-starlight",
-  "version": "V-2026.06.23.12.55",
+  "version": "V-2026.06.23.06.20",
   "description": "Songloft smart speaker and LX Music source bridge plugin",
   "private": true,
   "scripts": {
@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "version:stamp": "node scripts/update-version.mjs",
-    "publish:release": "songloft-plugin publish",
+    "release:manifest": "node scripts/sync-release-manifest.mjs",
     "fetch:holidays": "node scripts/fetch-holidays.mjs"
   },
   "devDependencies": {

@@ -13,11 +13,9 @@ import {
   LoginState,
   formatUserAgent,
 } from './constants';
-import type { LoginStateType } from './constants';
-import type { XiaomiTokenInfo, ServiceTokenInfo } from '../types';
+import type { XiaomiTokenInfo } from '../types';
 import type {
   AuthLoginResult,
-  LoginStep1Data,
   CaptchaResult,
 } from './models';
 
@@ -342,7 +340,6 @@ export class MinaAuth {
 
     // 计算 clientSign
     const clientSign = computeClientSign(nonce, ssecurity);
-    console.log(`[loginStep2] nonce=${nonce}, ssecurity=${ssecurity}, clientSign=${clientSign}`);
     const locationWithSign = location + '&clientSign=' + encodeURIComponent(clientSign);
 
     // Step 3: 获取 serviceToken
@@ -370,17 +367,12 @@ export class MinaAuth {
       'Content-Type': 'application/x-www-form-urlencoded',
     };
 
-    console.log(`[loginStep3] STS request URL: ${location}`);
-    console.log(`[loginStep3] STS request headers: ${JSON.stringify(headers)}`);
-
     // 使用 fetchWithRedirects 自动跟随重定向链并携带 cookieJar 中的 cookies
     // 这与 WASM 版本的行为一致（WASM 版使用 autoRedirectClient + 全部 cookies）
     const { response: finalResponse } = await fetchWithRedirects(location, {
       method: 'GET',
       headers,
     }, this.cookieJar, MAX_REDIRECTS);
-
-    console.log(`[loginStep3] STS response status: ${finalResponse.status}`);
 
     // 从 cookieJar 中提取需要的值
     const serviceToken = this.cookieJar.getValue('serviceToken') || '';
@@ -470,7 +462,6 @@ export class MinaAuth {
     // 从原始 JSON 字符串提取 nonce，避免 JSON.parse 大整数精度丢失
     const nonce = extractBigIntField(jsonStr, 'nonce') || getStringValue(loginData, 'nonce', '');
     const clientSign = computeClientSign(nonce, ssecurity);
-    console.log(`[exchangeServiceToken] nonce=${nonce}, ssecurity=${ssecurity}, clientSign=${clientSign}`);
     const locationWithSign = location + '&clientSign=' + encodeURIComponent(clientSign);
 
     // Step 3: 访问 location URL 获取 serviceToken
@@ -739,28 +730,5 @@ function sha1(message: string): Uint8Array {
 /** 循环左移 */
 function rotl(n: number, s: number): number {
   return ((n << s) | (n >>> (32 - s))) | 0;
-}
-
-/**
- * ArrayBuffer 转 Base64
- */
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-/**
- * 从 Response 中获取 Set-Cookie 头
- */
-function getSetCookieHeaders(response: Response): string[] {
-  if (typeof (response.headers as any).getSetCookie === 'function') {
-    return (response.headers as any).getSetCookie() as string[];
-  }
-  const raw = response.headers.get('set-cookie');
-  return raw ? [raw] : [];
 }
 

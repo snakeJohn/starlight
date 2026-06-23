@@ -31,7 +31,7 @@ export function registerVoiceCommandHandlers(
 ): void {
 
   // GET /voice-commands - 获取语音口令配置
-  router.get('/voice-commands', async (req: HTTPRequest) => {
+  router.get('/voice-commands', async () => {
     try {
       const commands = await configManager.getVoiceCommands();
       const config = await configManager.getConfig();

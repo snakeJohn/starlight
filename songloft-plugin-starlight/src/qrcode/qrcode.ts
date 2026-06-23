@@ -6,7 +6,7 @@ import { CookieJar } from '../utils/cookie';
 import { fetchWithRedirects } from '../utils/http';
 import { MinaAuth } from '../mina/auth';
 import { generateDeviceId } from '../utils/crypto';
-import { ACCOUNT_BASE_URL, formatUserAgent, MINA_SID } from '../mina/constants';
+import { ACCOUNT_BASE_URL, formatUserAgent } from '../mina/constants';
 import type { XiaomiTokenInfo } from '../types';
 
 // ===== 常量 =====

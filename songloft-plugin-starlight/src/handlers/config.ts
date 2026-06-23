@@ -58,7 +58,7 @@ export function registerConfigHandlers(
 ): void {
 
   // GET /config - 获取配置
-  router.get('/config', async (req: HTTPRequest) => {
+  router.get('/config', async () => {
     try {
       const config = await configManager.getConfig();
       const aiConfig = await configManager.getAIConfig();

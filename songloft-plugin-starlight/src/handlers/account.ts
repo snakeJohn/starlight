@@ -4,7 +4,6 @@
 import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { AccountManager } from '../account/manager';
-import { AuthService } from '../auth/service';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
 function parseBody(req: HTTPRequest): any {
@@ -29,7 +28,6 @@ function parseBody(req: HTTPRequest): any {
 export function registerAccountHandlers(
   router: Router,
   accountManager: AccountManager,
-  authService: AuthService,
 ): void {
 
   // POST /accounts - 创建账号
@@ -48,7 +46,7 @@ export function registerAccountHandlers(
   });
 
   // GET /accounts - 获取账号列表（敏感信息脱敏）
-  router.get('/accounts', async (req: HTTPRequest) => {
+  router.get('/accounts', async () => {
     try {
       const accounts = await accountManager.getAccounts();
       const safeAccounts = accounts.map(a => ({

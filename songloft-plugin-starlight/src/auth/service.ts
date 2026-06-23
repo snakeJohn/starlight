@@ -4,14 +4,13 @@
 
 import { MinaAuth } from '../mina/auth';
 import { MinaHTTPClient } from '../mina/client';
-import { QRCodeLogin, QRCodeState, PollResult } from '../qrcode/qrcode';
+import { QRCodeLogin, PollResult } from '../qrcode/qrcode';
 import { ConfigManager } from '../config/manager';
 import { AccountManager } from '../account/manager';
 import { LoginSession, SessionManager } from './session';
 import { md5 } from '../utils/crypto';
 import {
   MINA_SID,
-  SERVICE_TOKEN_VALID_HOURS,
   TOKEN_REFRESH_THRESHOLD_HOURS,
   LoginState,
 } from '../mina/constants';
@@ -154,7 +153,7 @@ export class AuthService {
    * 手动设置 passToken + userId
    * 使用 passToken 换取 micoapi 的 serviceToken
    */
-  async setToken(accountId: string, passToken: string, userId: string): Promise<LoginResult> {
+  async setToken(_accountId: string, passToken: string, userId: string): Promise<LoginResult> {
     // 确保账号存在（使用 userId 作为账号标识）
     await this.ensureAccountExists(userId, userId);
     const effectiveAccountId = userId;
@@ -435,13 +434,13 @@ export class AuthService {
    */
   cleanup(): void {
     // 停止所有刷新定时器
-    for (const [accountId, timerId] of this.refreshTimers) {
+    for (const timerId of this.refreshTimers.values()) {
       clearInterval(timerId);
     }
     this.refreshTimers.clear();
 
     // 停止所有扫码登录
-    for (const [accountId, qrLogin] of this.qrLogins) {
+    for (const qrLogin of this.qrLogins.values()) {
       qrLogin.stopPolling();
     }
     this.qrLogins.clear();

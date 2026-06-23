@@ -61,6 +61,7 @@ describe('Songloft library UI', () => {
     expect(html).toContain('本地歌曲');
     expect(html).toContain('歌手');
     expect(html).toContain('data-action="speaker-songloft-song"');
+    expect(html).toContain('>推送音箱</button>');
     expect(html).toContain('data-index="2"');
     expect(html).not.toContain('>501<');
   });

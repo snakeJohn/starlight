@@ -2,7 +2,7 @@
 // 翻译自 Go 源码: plugins/songloft-plugin-xiaomi/handlers/indexing_handler.go
 
 import { jsonResponse } from '@songloft/plugin-sdk';
-import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
+import type { Router } from '@songloft/plugin-sdk';
 import { IndexingManager } from '../indexing/manager';
 
 /**
@@ -16,7 +16,7 @@ export function registerIndexingHandlers(
 ): void {
 
   // GET /indexing/status - 获取索引状态
-  router.get('/indexing/status', async (req: HTTPRequest) => {
+  router.get('/indexing/status', async () => {
     try {
       const status = indexingManager.getStatus();
       return jsonResponse({ success: true, data: status });
@@ -26,10 +26,10 @@ export function registerIndexingHandlers(
   });
 
   // POST /indexing/refresh - 刷新索引
-  router.post('/indexing/refresh', async (req: HTTPRequest) => {
+  router.post('/indexing/refresh', async () => {
     try {
       // 后台异步刷新，立即返回响应
-      indexingManager.refresh().catch(e => {
+      indexingManager.refresh().catch(() => {
         // 错误已在内部处理，这里只防止 unhandled rejection
       });
       return jsonResponse({ success: true, data: { message: 'index refresh started' } });

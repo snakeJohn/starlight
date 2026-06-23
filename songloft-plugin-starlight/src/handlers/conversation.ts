@@ -48,7 +48,7 @@ export function registerConversationHandlers(
   });
 
   // GET /conversation/status - 获取监听状态
-  router.get('/conversation/status', async (req: HTTPRequest) => {
+  router.get('/conversation/status', async () => {
     try {
       const status = await conversationMonitor.getStatus();
       return jsonResponse({ success: true, data: status });
@@ -80,7 +80,7 @@ export function registerConversationHandlers(
   });
 
   // GET /conversation/webhooks - 获取Webhook列表
-  router.get('/conversation/webhooks', async (req: HTTPRequest) => {
+  router.get('/conversation/webhooks', async () => {
     try {
       const webhooks = await configManager.getWebhooks();
       return jsonResponse({ success: true, data: webhooks, count: webhooks.length });

@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Stamp release version
+        run: npm run version:stamp
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -42,35 +45,44 @@ jobs:
       - name: Validate plugin
         run: npm run validate
 
-      - name: Read package metadata
-        id: meta
+      - name: Sync release manifest
+        id: release_manifest
+        run: npm run release:manifest
+
+      - name: Commit release metadata
+        id: release_commit
         shell: pwsh
         run: |
-          $manifest = Get-Content plugin.json | ConvertFrom-Json
-          $zipPath = "dist/$($manifest.entryPath).jsplugin.zip"
-          $zipHash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
-          "entry=$($manifest.entryPath)" >> $env:GITHUB_OUTPUT
-          "version=$($manifest.version)" >> $env:GITHUB_OUTPUT
-          "zip_path=$zipPath" >> $env:GITHUB_OUTPUT
-          "zip_hash=$zipHash" >> $env:GITHUB_OUTPUT
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json plugin.json
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            "sha=$(git rev-parse HEAD)" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          git commit -m "chore: update release metadata ${{ steps.release_manifest.outputs.release_version }} [skip ci]"
+          git push
+          "sha=$(git rev-parse HEAD)" >> $env:GITHUB_OUTPUT
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: starlight-jsplugin
-          path: songloft-plugin-starlight/${{ steps.meta.outputs.zip_path }}
+          name: starlight-${{ steps.release_manifest.outputs.release_version }}.zip
+          path: songloft-plugin-starlight/${{ steps.release_manifest.outputs.release_zip_path }}
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: starlight-${{ github.sha }}
-          name: Starlight ${{ steps.meta.outputs.version }} (${{ github.sha }})
-          target_commitish: ${{ github.sha }}
-          files: songloft-plugin-starlight/${{ steps.meta.outputs.zip_path }}
+          tag_name: ${{ steps.release_manifest.outputs.release_version }}
+          name: Starlight ${{ steps.release_manifest.outputs.release_version }}
+          target_commitish: ${{ steps.release_commit.outputs.sha }}
+          files: songloft-plugin-starlight/${{ steps.release_manifest.outputs.release_zip_path }}
           fail_on_unmatched_files: true
           body: |
-            Automated release for commit `${{ github.sha }}`.
+            Automated release for commit `${{ steps.release_commit.outputs.sha }}`.
 
-            - Plugin version: `${{ steps.meta.outputs.version }}`
-            - Entry: `${{ steps.meta.outputs.entry }}`
-            - zipHash: `${{ steps.meta.outputs.zip_hash }}`
+            - Release version: `${{ steps.release_manifest.outputs.release_version }}`
+            - Asset: `starlight-${{ steps.release_manifest.outputs.release_version }}.zip`
+            - entryHash: `${{ steps.release_manifest.outputs.entry_hash }}`
+            - zipHash: `${{ steps.release_manifest.outputs.zip_hash }}`

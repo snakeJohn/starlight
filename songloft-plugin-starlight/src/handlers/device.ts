@@ -8,6 +8,7 @@ import { AccountManager } from '../account/manager';
 import type { ConversationMonitor } from '../conversation/monitor';
 import { updateDeviceStatusCache } from './playlist';
 import type { PlayerSong, PlaylistManagerMap } from '../player/manager';
+import { parseVolume } from '../utils/volume';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
 function parseBody(req: HTTPRequest): any {
@@ -87,7 +88,10 @@ export function registerDeviceHandlers(
       if (volume === undefined || volume === null) {
         return jsonResponse({ success: false, error: 'volume is required' });
       }
-      const vol = Number(volume);
+      const vol = parseVolume(volume);
+      if (vol === null) {
+        return jsonResponse({ success: false, error: 'volume must be a number between 0 and 100' });
+      }
       const ok = await minaService.setVolume(account_id, device_id, vol);
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to set volume' });

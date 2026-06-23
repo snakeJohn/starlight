@@ -8,6 +8,7 @@ import { AccountManager } from '../account/manager';
 import { ConfigManager } from '../config/manager';
 import { MinaHTTPClient } from '../mina/client';
 import type { DeviceConfig, MinaDevice } from '../types';
+import { isValidVolume } from '../utils/volume';
 
 // ===== 导出类型 =====
 
@@ -186,6 +187,11 @@ export class MinaService {
    * 成功后更新本地配置 deviceConfig.volume
    */
   async setVolume(accountId: string, deviceId: string, volume: number): Promise<boolean> {
+    if (!isValidVolume(volume)) {
+      songloft.log.warn('[MinaService] setVolume: invalid volume: ' + String(volume));
+      return false;
+    }
+
     const client = this.getClient(accountId);
     if (!client) {
       songloft.log.warn('[MinaService] setVolume: no client for account: ' + accountId);

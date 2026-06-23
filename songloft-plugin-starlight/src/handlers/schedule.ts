@@ -5,6 +5,7 @@ import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { Scheduler } from '../schedule/scheduler';
 import { ConfigManager } from '../config/manager';
+import { isPlayMode } from '../player/modes';
 import type { ScheduledTask, TaskAction, TaskSchedule, TaskTarget, TaskParams } from '../types';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
@@ -28,13 +29,23 @@ function validateSchedule(schedule: TaskSchedule): string | null {
   if (!schedule.time || !/^\d{2}:\d{2}$/.test(schedule.time)) {
     return '时间格式应为 HH:MM';
   }
+  const [hour, minute] = schedule.time.split(':').map(Number);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return '时间范围应为 00:00-23:59';
+  }
   if (schedule.type === 'weekly') {
     if (!schedule.weekdays || schedule.weekdays.length === 0) {
       return '每周调度需指定星期几';
     }
+    if (!schedule.weekdays.every(day => Number.isInteger(day) && day >= 0 && day <= 6)) {
+      return '星期范围应为 0-6';
+    }
   } else if (schedule.type === 'monthly') {
     if (!schedule.monthdays || schedule.monthdays.length === 0) {
       return '每月调度需指定日期';
+    }
+    if (!schedule.monthdays.every(day => Number.isInteger(day) && day >= 1 && day <= 31)) {
+      return '日期范围应为 1-31';
     }
   } else {
     return '未知的调度类型: ' + schedule.type;
@@ -62,11 +73,18 @@ function validateTaskParams(action: TaskAction, params: TaskParams): string | nu
       if (!params.play_mode) {
         return '设置播放模式时必须指定播放模式';
       }
+      if (!isPlayMode(params.play_mode)) {
+        return '无效的播放模式: ' + params.play_mode;
+      }
       break;
     case 'set_volume':
-      if (params.volume === undefined || params.volume < 0 || params.volume > 100) {
+      if (typeof params.volume !== 'number' || !Number.isFinite(params.volume) || params.volume < 0 || params.volume > 100) {
         return '音量值应在 0-100 之间';
       }
+      break;
+    case 'enable_monitor':
+    case 'disable_monitor':
+      // 全局监听动作不需要设备或额外参数。
       break;
     default:
       return '未知的动作类型: ' + action;
@@ -94,6 +112,18 @@ function validateTaskTarget(target: TaskTarget): string | null {
   return null;
 }
 
+function isGlobalTaskAction(action: TaskAction): boolean {
+  return action === 'enable_monitor' || action === 'disable_monitor';
+}
+
+function normalizeTaskTarget(action: TaskAction, target: TaskTarget | undefined): TaskTarget {
+  if (isGlobalTaskAction(action)) {
+    return target || { all_managed: true, devices: [] };
+  }
+
+  return target as TaskTarget;
+}
+
 /**
  * 注册定时任务相关路由
  * GET    /schedules        → 获取定时任务列表
@@ -110,7 +140,7 @@ export function registerScheduleHandlers(
 ): void {
 
   // GET /schedules - 获取定时任务列表
-  router.get('/schedules', async (req: HTTPRequest) => {
+  router.get('/schedules', async () => {
     try {
       const tasks = await configManager.getScheduledTasks();
       const config = await configManager.getConfig();
@@ -150,7 +180,8 @@ export function registerScheduleHandlers(
       }
 
       // 验证目标设备
-      const targetErr = validateTaskTarget(target);
+      const normalizedTarget = normalizeTaskTarget(action, target);
+      const targetErr = isGlobalTaskAction(action) ? null : validateTaskTarget(normalizedTarget);
       if (targetErr) {
         return jsonResponse({ success: false, error: targetErr });
       }
@@ -162,7 +193,7 @@ export function registerScheduleHandlers(
         enabled: enabled !== false,
         action,
         schedule,
-        target,
+        target: normalizedTarget,
         params: params || {},
         created_at: now,
         updated_at: now,
@@ -203,7 +234,8 @@ export function registerScheduleHandlers(
       }
 
       // 验证目标设备
-      const targetErr = validateTaskTarget(target);
+      const normalizedTarget = normalizeTaskTarget(action, target);
+      const targetErr = isGlobalTaskAction(action) ? null : validateTaskTarget(normalizedTarget);
       if (targetErr) {
         return jsonResponse({ success: false, error: targetErr });
       }
@@ -213,7 +245,7 @@ export function registerScheduleHandlers(
         enabled: enabled !== false,
         action,
         schedule,
-        target,
+        target: normalizedTarget,
         params: params || {},
       });
       return jsonResponse({ success: true, data: { message: 'task updated' } });

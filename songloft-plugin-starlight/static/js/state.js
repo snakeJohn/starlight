@@ -13,13 +13,6 @@ export const state = {
     accountId: '',
     deviceId: '',
     deviceName: '',
-    playbackState: 'idle',
-    playerSongTitle: '',
-    playerSongMeta: '',
-    pluginPlayerQueue: [],
-    pluginPlayerIndex: -1,
-    pluginPlayerState: 'idle',
-    pluginPlayerMode: 'order',
     platform: 'kw',
     quality: '320k',
     searchQuery: null,
@@ -55,7 +48,6 @@ export const state = {
     downloadProgress: null,
     accounts: [],
     deviceGroups: [],
-    selectedSong: null,
     message: '就绪',
 };
 

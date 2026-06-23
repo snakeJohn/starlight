@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { maskRecord, maskSecret } from '../../src/system/logger';
 
@@ -65,5 +67,13 @@ describe('logger masking helpers', () => {
         { cookie: 'cook********7890' },
       ],
     });
+  });
+
+  test('Mina auth logging does not print login signing material', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/mina/auth.ts'), 'utf8');
+
+    expect(source).not.toMatch(/console\.log\([^)]*ssecurity=\$\{ssecurity\}/);
+    expect(source).not.toMatch(/console\.log\([^)]*clientSign=\$\{clientSign\}/);
+    expect(source).not.toMatch(/console\.log\([^)]*STS request URL/);
   });
 });

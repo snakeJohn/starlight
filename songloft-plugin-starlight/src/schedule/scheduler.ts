@@ -5,7 +5,7 @@
 /// <reference types="@songloft/plugin-sdk" />
 
 import { ConfigManager } from '../config/manager';
-import type { ScheduledTask, TaskSchedule, TaskLog } from '../types';
+import type { TaskSchedule, TaskLog } from '../types';
 import { TaskExecutor } from './executor';
 import { lookupHoliday } from '../utils/holiday';
 
