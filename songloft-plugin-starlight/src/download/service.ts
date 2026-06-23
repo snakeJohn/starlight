@@ -2,6 +2,7 @@
 
 import { toRemoteSong } from '../bridge/mapper';
 import { postRemoteSongs, type SongloftRemoteSong } from '../bridge/service';
+import { PlatformRegistry } from '../music/platforms/registry';
 import type { RuntimeManager } from '../music/runtime_manager';
 import type { SearchResultSong } from '../music/types';
 import { StarlightError } from '../system/errors';
@@ -53,7 +54,10 @@ interface SongDownloadApi {
 export class DownloadService {
   private batchTask: BatchTask | null = null;
 
-  constructor(private readonly runtimes: RuntimeManager) {}
+  constructor(
+    private readonly runtimes: RuntimeManager,
+    private readonly platforms: PlatformRegistry = new PlatformRegistry(),
+  ) {}
 
   async getSettings(): Promise<DownloadSettings> {
     const raw = await songloft.storage.get(SETTINGS_KEY);
@@ -78,25 +82,22 @@ export class DownloadService {
 
   async downloadSong(song: SearchResultSong): Promise<DownloadResult> {
     const settings = await this.getSettings();
-    await this.resolveDownloadUrl(song);
-    const nativeSong = await this.importDownloadRemoteSong(song);
-    const songId = numericSongId(nativeSong);
-    if (!songId) {
-      throw new StarlightError('INTERNAL_ERROR', 'Songloft 未返回可下载的歌曲 ID', true, { upstream: 'songloft_remote_import' });
+    const attemptedSources = new Set<string>();
+    const failures: string[] = [];
+
+    const directResult = await this.tryDownloadCandidate(song, settings, attemptedSources, failures);
+    if (directResult) {
+      return directResult;
     }
 
-    const songsApi = songloft.songs as typeof songloft.songs & SongDownloadApi;
-    const result = await songsApi.download(songId, {
-      path_template: settings.path_template,
-      embed_metadata: settings.embed_metadata,
-    });
+    for await (const candidate of this.iterDownloadFallbackCandidates(song.title, song.artist, attemptedSources, failures)) {
+      const result = await this.tryDownloadCandidate(candidate, settings, attemptedSources, failures);
+      if (result) {
+        return result;
+      }
+    }
 
-    return {
-      song_id: songId,
-      path: result?.path,
-      status: result?.status || 'ok',
-      ...(result?.error ? { error: result.error } : {}),
-    };
+    throw downloadFallbackError(attemptedSources.size, failures);
   }
 
   async startBatch(songs: SearchResultSong[]): Promise<{ started: true; total: number }> {
@@ -148,6 +149,80 @@ export class DownloadService {
     }
 
     return url;
+  }
+
+  private async tryDownloadCandidate(
+    song: SearchResultSong,
+    settings: DownloadSettings,
+    attemptedSources: Set<string>,
+    failures: string[],
+  ): Promise<DownloadResult | null> {
+    attemptedSources.add(song.source_data.platform);
+    try {
+      await this.resolveDownloadUrl(song);
+      const nativeSong = await this.importDownloadRemoteSong(song);
+      const songId = numericSongId(nativeSong);
+      if (!songId) {
+        throw new StarlightError('INTERNAL_ERROR', 'Songloft 未返回可下载的歌曲 ID', true, { upstream: 'songloft_remote_import' });
+      }
+
+      const songsApi = songloft.songs as typeof songloft.songs & SongDownloadApi;
+      const result = await songsApi.download(songId, {
+        path_template: settings.path_template,
+        embed_metadata: settings.embed_metadata,
+      });
+      if (result?.error || result?.status === 'failed') {
+        throw new StarlightError('INTERNAL_ERROR', result.error || 'Songloft 下载失败', true, {
+          upstream: 'songloft_download',
+          status: result.status || 'failed',
+        });
+      }
+
+      return {
+        song_id: songId,
+        path: result?.path,
+        status: result?.status || 'ok',
+      };
+    } catch (error) {
+      failures.push(errorMessage(error));
+      songloft.log.warn(`[DownloadService] Download candidate failed "${song.title}" from ${song.source_data.platform}: ${errorMessage(error)}`);
+      return null;
+    }
+  }
+
+  private async *iterDownloadFallbackCandidates(
+    title: string,
+    artist: string,
+    attemptedSources: Set<string>,
+    failures: string[],
+  ): AsyncGenerator<SearchResultSong, void, void> {
+    const keyword = [title, artist].map((item) => item.trim()).filter(Boolean).join(' ');
+    if (!keyword) {
+      return;
+    }
+
+    for (const platform of this.platforms.all()) {
+      attemptedSources.add(platform.id);
+      const provider = this.platforms.get(platform.id);
+      if (!provider) {
+        continue;
+      }
+
+      try {
+        const result = await provider.search(keyword, 1, 5);
+        const candidates = (result.list ?? [])
+          .map((candidate) => ({ song: candidate, score: scoreResolvedCandidate(title, artist, candidate) }))
+          .filter((candidate) => candidate.score > 0)
+          .sort((a, b) => b.score - a.score);
+
+        for (const candidate of candidates) {
+          yield candidate.song;
+        }
+      } catch (error) {
+        failures.push(errorMessage(error));
+        songloft.log.warn(`[DownloadService] Download fallback search failed on ${platform.id}: ${errorMessage(error)}`);
+      }
+    }
   }
 
   private async importDownloadRemoteSong(song: SearchResultSong): Promise<SongloftRemoteSong> {
@@ -237,6 +312,55 @@ function downloadSourceData(song: SearchResultSong): SearchResultSong['source_da
     ...song.source_data,
     starlight: { purpose: 'download' },
   };
+}
+
+function errorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/token[=:]\s*\S+/gi, 'token=[redacted]')
+    .slice(0, 500);
+}
+
+function downloadFallbackError(attemptedCount: number, failures: string[]): StarlightError {
+  const lastFailure = failures.length > 0 ? failures[failures.length - 1] : '未找到可用下载音源';
+  const message = `下载失败，已尝试 ${attemptedCount} 个下载音源；最后失败原因：${lastFailure}`;
+  const code = lastFailure.includes('下载音源无法解析歌曲地址') ? 'PLAY_URL_RESOLVE_FAILED' : 'INTERNAL_ERROR';
+  return new StarlightError(code, message, true, { attempts: attemptedCount, lastFailure });
+}
+
+function normalizeSongText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[《》【】[\]（）()\s_\-·,，.。]/g, '');
+}
+
+function textMatches(expected: string, actual: string): boolean {
+  const normalizedExpected = normalizeSongText(expected);
+  const normalizedActual = normalizeSongText(actual);
+  return Boolean(
+    normalizedExpected
+    && normalizedActual
+    && (normalizedActual === normalizedExpected
+      || normalizedActual.includes(normalizedExpected)
+      || normalizedExpected.includes(normalizedActual)),
+  );
+}
+
+function scoreResolvedCandidate(title: string, artist: string, song: SearchResultSong): number {
+  if (!textMatches(title, song.title)) {
+    return 0;
+  }
+
+  let score = normalizeSongText(title) === normalizeSongText(song.title) ? 100 : 60;
+  if (artist.trim()) {
+    if (!textMatches(artist, song.artist)) {
+      return 0;
+    }
+    score += normalizeSongText(artist) === normalizeSongText(song.artist) ? 40 : 20;
+  }
+  return score;
 }
 
 function sleep(ms: number): Promise<void> {

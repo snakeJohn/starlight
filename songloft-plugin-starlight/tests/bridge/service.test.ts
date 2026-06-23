@@ -57,17 +57,20 @@ function request(method: string, path: string, body?: unknown): HTTPRequest {
 function createService(options: {
   url?: string | null;
   playResult?: boolean;
+  playResults?: boolean[];
   usePlaylistManager?: boolean;
   providers?: MusicPlatformProvider[];
 } = {}) {
   const runtimes = {
     getMusicUrl: vi.fn(async () => ('url' in options ? options.url : 'https://audio.test/song.mp3')),
   } as unknown as RuntimeManager;
+  const playResults = [...(options.playResults ?? [])];
+  const nextPlayResult = () => playResults.length > 0 ? playResults.shift()! : (options.playResult ?? true);
   const minaService = {
-    playURL: vi.fn(async () => options.playResult ?? true),
+    playURL: vi.fn(async () => nextPlayResult()),
   } as unknown as MinaService;
   const playlistManager = {
-    playStandalone: vi.fn(async () => options.playResult ?? true),
+    playStandalone: vi.fn(async () => nextPlayResult()),
   };
   const playlistManagerMap = {
     getOrCreate: vi.fn(async () => playlistManager),
@@ -291,6 +294,80 @@ describe('BridgeService', () => {
     await expect(service.playOnSpeaker('acc-1', 'dev-1', song)).rejects.toMatchObject({
       code: 'DEVICE_OFFLINE',
     });
+  });
+
+  it('falls back to playback platform search when the current song URL cannot be resolved for speaker playback', async () => {
+    const fallbackSong = {
+      ...song,
+      source_data: {
+        platform: 'kg',
+        quality: '320k',
+        songInfo: { source: 'kg', name: 'Song', singer: 'Singer', album: 'Album', duration: 200, hash: 'fallback' },
+      },
+    } satisfies SearchResultSong;
+    const provider = createProvider('kg', [fallbackSong]);
+    const runtimes = {
+      getMusicUrl: vi.fn(async (_platform: string, _quality: string, songInfo: { musicId?: string; hash?: string }) =>
+        songInfo.hash === 'fallback' ? 'https://audio.test/fallback.mp3' : null),
+    } as unknown as RuntimeManager;
+    const platforms = {
+      all: vi.fn(() => [{ id: provider.id, name: provider.name }]),
+      get: vi.fn((id: string) => id === provider.id ? provider : null),
+    } as unknown as PlatformRegistry;
+    const minaService = {
+      playURL: vi.fn(async () => true),
+    } as unknown as MinaService;
+    const service = new BridgeService(platforms, runtimes, minaService);
+
+    await expect(service.playOnSpeaker('acc-1', 'dev-1', song)).resolves.toEqual({
+      url: 'https://audio.test/fallback.mp3',
+    });
+
+    expect(provider.search).toHaveBeenCalledWith('Song Singer', 1, 5);
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo);
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kg', '320k', fallbackSong.source_data.songInfo);
+    expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/fallback.mp3');
+  });
+
+  it('tries the next resolved playback candidate when speaker playback rejects the first one', async () => {
+    const rejectedSong = {
+      ...song,
+      source_data: {
+        platform: 'kw',
+        quality: '320k',
+        songInfo: { source: 'kw', name: 'Song', singer: 'Singer', album: 'Album', duration: 200, musicId: 'rejected' },
+      },
+    } satisfies SearchResultSong;
+    const acceptedSong = {
+      ...song,
+      source_data: {
+        platform: 'kg',
+        quality: '320k',
+        songInfo: { source: 'kg', name: 'Song', singer: 'Singer', album: 'Album', duration: 200, hash: 'accepted' },
+      },
+    } satisfies SearchResultSong;
+    const provider = createProvider('kw', [rejectedSong, acceptedSong]);
+    const runtimes = {
+      getMusicUrl: vi.fn(async (_platform: string, _quality: string, songInfo: { musicId?: string }) =>
+        songInfo.musicId === 'rejected' ? 'https://audio.test/rejected.mp3' : 'https://audio.test/accepted.mp3'),
+    } as unknown as RuntimeManager;
+    const platforms = {
+      all: vi.fn(() => [{ id: provider.id, name: provider.name }]),
+      get: vi.fn((id: string) => id === provider.id ? provider : null),
+    } as unknown as PlatformRegistry;
+    const playResults = [false, true];
+    const minaService = {
+      playURL: vi.fn(async () => playResults.shift() ?? true),
+    } as unknown as MinaService;
+    const service = new BridgeService(platforms, runtimes, minaService);
+
+    await expect(service.playResolvedOnSpeaker('acc-1', 'dev-1', 'Song', 'Singer')).resolves.toEqual({
+      url: 'https://audio.test/accepted.mp3',
+    });
+
+    expect(provider.search).toHaveBeenCalledWith('Song Singer', 1, 5);
+    expect(minaService.playURL).toHaveBeenNthCalledWith(1, 'acc-1', 'dev-1', 'https://audio.test/rejected.mp3');
+    expect(minaService.playURL).toHaveBeenNthCalledWith(2, 'acc-1', 'dev-1', 'https://audio.test/accepted.mp3');
   });
 
   it('tries platforms in order and returns the first external search hit', async () => {
