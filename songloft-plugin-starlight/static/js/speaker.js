@@ -363,10 +363,10 @@ function setSpeakerMessage(message) {
 
 function updatePlayerToggleButton(playbackState = state.playbackState) {
     const paused = playbackState === 'paused';
-    $$('[data-action="speaker-player-toggle"], [data-action="global-player-toggle"]').forEach(button => {
-        button.textContent = paused ? '继续播放' : '暂停播放';
-        button.title = paused ? '继续播放' : '暂停播放';
-        button.setAttribute?.('aria-label', paused ? '继续播放' : '暂停播放');
+    $$('[data-action="speaker-player-toggle"]').forEach(button => {
+        button.textContent = paused ? '继续' : '暂停';
+        button.title = paused ? '继续' : '暂停';
+        button.setAttribute?.('aria-label', paused ? '继续' : '暂停');
     });
 }
 
@@ -405,7 +405,7 @@ function renderPlayerStatus(status = {}) {
     const song = status.current_song || {};
     const titleText = song.title
         ? `${song.title}${song.artist ? ` - ${song.artist}` : ''}`
-        : '暂无播放信息';
+        : '暂无队列信息';
     const metaText = `${playStateLabel(status.state || state.playbackState)} · ${playModeLabel(status.play_mode)} · ${durationText(status.position)}/${durationText(status.duration)}`;
 
     const title = $('[data-role="speaker-player-title"]');
@@ -421,8 +421,6 @@ function renderPlayerStatus(status = {}) {
 
     setState({
         playbackState: status.state || state.playbackState,
-        playerSongTitle: song.title ? titleText : '',
-        playerSongMeta: song.title ? metaText : (state.deviceName || state.deviceId || '未选择设备'),
     });
     updatePlayerToggleButton(status.state || state.playbackState);
 }
@@ -441,7 +439,7 @@ export async function togglePlayerPlayback() {
 }
 
 export async function runPlayerAction(action) {
-    const command = String(action || '').replace(/^speaker-player-/, '').replace(/^global-player-/, '');
+    const command = String(action || '').replace(/^speaker-player-/, '');
     const endpointMap = {
         previous: '/miot/player/previous',
         toggle: '/miot/player/toggle',
@@ -644,7 +642,7 @@ function bindDeviceSelection() {
             renderDevices(state.deviceGroups);
             if (deviceSelect) deviceSelect.value = state.deviceId;
             await refreshPlayerStatus().catch(() => null);
-            toast('播放设备已选择');
+            toast('控制设备已选择');
         } catch (error) {
             toast(error.message, 'error');
         }
@@ -724,7 +722,7 @@ function bindPlayback() {
             await api.post('/miot/mina/play-url', selectedPayload({ url: body.url }));
             setState({ playbackState: 'playing' });
             updatePlayerToggleButton('playing');
-            setSpeakerMessage('URL 播放中');
+            setSpeakerMessage('URL 已发送');
             toast('URL 已发送');
         } catch (error) {
             toast(error.message, 'error');
@@ -746,18 +744,6 @@ function bindPlayback() {
         });
     }
 
-    document.addEventListener?.('click', async event => {
-        const button = event.target.closest('[data-action^="global-player-"]');
-        if (!button) return;
-        button.disabled = true;
-        try {
-            await runPlayerAction(button.dataset.action);
-        } catch (error) {
-            toast(error.message, 'error');
-        } finally {
-            button.disabled = false;
-        }
-    });
 }
 
 function bindRefresh() {

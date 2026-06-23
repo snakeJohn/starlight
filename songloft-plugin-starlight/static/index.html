@@ -61,7 +61,7 @@
                         <button class="ghost-button" type="button" data-action="import-selected-search">批量导入 Songloft 歌曲库</button>
                         <button class="ghost-button" type="button" data-action="add-selected-search-to-playlist">批量加入目标歌单</button>
                         <button class="ghost-button" type="button" data-action="download-selected-search">批量下载</button>
-                        <button class="ghost-button" type="button" data-action="speaker-selected-search">批量音箱播放</button>
+                        <button class="ghost-button" type="button" data-action="speaker-selected-search">批量推送音箱</button>
                     </div>
                     <div class="list-stack" data-role="search-results"></div>
                     <div data-role="search-pagination"></div>
@@ -160,20 +160,20 @@
                 <div class="two-column speaker-operations-layout">
                 <section class="surface-section speaker-player-panel">
                     <div class="section-bar">
-                        <h2>音箱播放</h2>
+                        <h2>音箱控制</h2>
                         <span data-role="speaker-player-state">未选择设备</span>
                     </div>
                     <label>
                         <span>控制设备</span>
-                        <select data-role="speaker-player-device" aria-label="音箱播放控制设备"></select>
+                        <select data-role="speaker-player-device" aria-label="音箱控制设备"></select>
                     </label>
                     <div class="player-status-card">
-                        <strong data-role="speaker-player-title">暂无播放信息</strong>
-                        <span data-role="speaker-player-meta">选择音箱后可管理当前播放。</span>
+                        <strong data-role="speaker-player-title">暂无队列信息</strong>
+                        <span data-role="speaker-player-meta">选择音箱后可管理当前队列。</span>
                     </div>
                     <div class="player-actions speaker-player-actions">
                         <button class="icon-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">上一首</button>
-                        <button class="icon-button" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">暂停播放</button>
+                        <button class="icon-button" type="button" data-action="speaker-player-toggle" title="暂停" aria-label="暂停">暂停</button>
                         <button class="icon-button" type="button" data-action="speaker-player-stop" title="停止" aria-label="停止">停止</button>
                         <button class="icon-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">下一首</button>
                     </div>

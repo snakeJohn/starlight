@@ -82,7 +82,7 @@ describe('speaker controls helpers', () => {
     }));
   });
 
-  it('runs global player controls against the selected speaker', async () => {
+  it('runs speaker page player controls against the selected speaker', async () => {
     installDom();
     const fetchMock = vi.fn(async () => okResponse({ message: 'playing next song' }) as Response);
     vi.stubGlobal('fetch', fetchMock);
@@ -90,7 +90,7 @@ describe('speaker controls helpers', () => {
     state.accountId = 'miot-account';
     state.deviceId = 'speaker-1';
 
-    await expect(speaker.runPlayerAction('global-player-next')).resolves.toMatchObject({ message: 'playing next song' });
+    await expect(speaker.runPlayerAction('speaker-player-next')).resolves.toMatchObject({ message: 'playing next song' });
 
     expect(fetchMock).toHaveBeenCalledWith('api/miot/player/next', expect.objectContaining({
       method: 'POST',

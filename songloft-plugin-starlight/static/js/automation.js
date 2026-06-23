@@ -299,9 +299,9 @@ function updateAutomationPlayerToggleButton(playbackState = automationPlayerTarg
     const button = $('[data-action="automation-player-toggle"]');
     if (!button) return;
     const paused = playbackState === 'paused';
-    button.textContent = paused ? '继续播放' : '暂停播放';
-    button.title = paused ? '继续播放' : '暂停播放';
-    button.setAttribute?.('aria-label', paused ? '继续播放' : '暂停播放');
+    button.textContent = paused ? '继续' : '暂停';
+    button.title = paused ? '继续' : '暂停';
+    button.setAttribute?.('aria-label', paused ? '继续' : '暂停');
 }
 
 export function selectAutomationPlayerDevice(accountId, deviceId, deviceName = '') {
@@ -732,7 +732,7 @@ function bindAutomation() {
             event.currentTarget.disabled = true;
             try {
                 await runAutomationPlayerAction(action);
-                toast('播放控制命令已发送');
+                toast('控制命令已发送');
             } catch (error) {
                 toast(error.message, 'error');
             } finally {

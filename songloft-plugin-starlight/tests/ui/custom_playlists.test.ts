@@ -139,11 +139,12 @@ describe('custom playlist music UI helpers', () => {
     expect(html).toContain('酷我');
     expect(html).toContain('刷新');
     expect(html).toContain('同步 Songloft 歌单');
-    expect(html).toContain('播放歌单');
+    expect(html).toContain('推送音箱');
     expect(html).toContain('查看歌曲');
     expect(html).toContain('data-action="view-custom-playlist"');
     expect(html).toContain('data-action="sync-custom-playlist"');
-    expect(html).toContain('data-action="play-custom-playlist"');
+    expect(html).toContain('data-action="speaker-custom-playlist"');
+    expect(html).not.toContain('播放歌单');
     expect(html).not.toContain('3360244412');
   });
 
@@ -176,10 +177,11 @@ describe('custom playlist music UI helpers', () => {
     expect(html).toContain('https://img.test/daohuaxiang.jpg');
     expect(html).toContain('稻花香');
     expect(html).toContain('加入歌单');
-    expect(html).toContain('音箱播放');
+    expect(html).toContain('推送音箱');
     expect(html).toContain('data-role="custom-playlist-song-check"');
     expect(html).toContain('data-action="add-selected-custom-playlist-songs"');
     expect(html).toContain('data-action="speaker-custom-playlist-song"');
+    expect(html).not.toContain('>播放</button>');
     expect(html).not.toContain('kw-1');
   });
 

@@ -29,7 +29,7 @@ describe('static UI layout copy', () => {
 
     expect(html).toContain('>上一首</button>');
     expect(html).toContain('data-action="speaker-player-toggle"');
-    expect(html).toContain('>暂停播放</button>');
+    expect(html).toContain('>暂停</button>');
     expect(html).toContain('>停止</button>');
     expect(html).toContain('>下一首</button>');
     expect(html).not.toContain('>Prev</button>');
@@ -105,6 +105,7 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-action="add-selected-search-to-playlist"');
     expect(html).toContain('data-action="download-selected-search"');
     expect(html).toContain('data-action="speaker-selected-search"');
+    expect(html).toContain('批量推送音箱');
   });
 
   it('defines scroll containers and mobile wrapping for long music lists', () => {
@@ -165,13 +166,13 @@ describe('static UI layout copy', () => {
         : html.indexOf('</main>'),
     );
 
-    expect(speakerHtml).toContain('<h2>音箱播放</h2>');
+    expect(speakerHtml).toContain('<h2>音箱控制</h2>');
     expect(speakerHtml).toContain('data-role="speaker-player-device"');
     expect(speakerHtml).toContain('data-action="speaker-player-previous"');
     expect(speakerHtml).toContain('data-action="speaker-player-toggle"');
     expect(speakerHtml).toContain('<h2>索引</h2>');
     expect(speakerHtml).toContain('data-action="refresh-index"');
-    expect(automationHtml).not.toContain('<h2>音箱播放</h2>');
+    expect(automationHtml).not.toContain('<h2>音箱控制</h2>');
     expect(automationHtml).not.toContain('<h2>索引</h2>');
   });
 
@@ -208,14 +209,29 @@ describe('static UI layout copy', () => {
     expect(html).not.toContain('name="ai_api_key"');
   });
 
-  it('renders a global player control in the status strip', () => {
+  it('does not render local or status-strip player controls', () => {
     const js = appJs();
     const stylesheet = css();
 
-    expect(js).toContain('data-role="global-player"');
-    expect(js).toContain('data-action="global-player-toggle"');
-    expect(js).toContain('data-action="global-player-next"');
-    expect(stylesheet).toContain('.global-player');
+    expect(js).not.toContain('plugin_player');
+    expect(js).not.toContain('renderPluginPlayer');
+    expect(js).not.toContain('bindPluginPlayerControls');
+    expect(js).not.toContain('data-role="global-player"');
+    expect(js).not.toContain('data-action="global-player-toggle"');
+    expect(stylesheet).not.toContain('.plugin-player');
+    expect(stylesheet).not.toContain('.global-player');
+  });
+
+  it('does not render visible buttons labelled as playback', () => {
+    const html = indexHtml();
+    const js = appJs();
+    const staticButtonLabels = Array.from(html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g))
+      .map((match) => match[1].replace(/<[^>]+>/g, '').trim())
+      .filter(Boolean);
+
+    expect(staticButtonLabels.filter((label) => label.includes('播放'))).toEqual([]);
+    expect(js).not.toContain('暂停播放');
+    expect(js).not.toContain('继续播放');
   });
 
   it('mounts a 12 hour speaker voice record widget in the speaker page', () => {

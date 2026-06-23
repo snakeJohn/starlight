@@ -44,7 +44,8 @@ describe('music media rendering', () => {
     expect(html).toContain('https://img.test/song.jpg');
     expect(html).toContain('晴天');
     expect(html).toContain('周杰伦');
-    expect(html).toContain('播放');
+    expect(html).not.toContain('data-action="preview"');
+    expect(html).not.toContain('>播放</button>');
     expect(html).toContain('data-action="download"');
     expect(html).toContain('>下载</button>');
     expect(html).toContain('导入 Songloft 歌曲库');
@@ -53,7 +54,7 @@ describe('music media rendering', () => {
     expect(html).not.toContain('228908');
   });
 
-  it('can render selectable song rows while preserving the play button', async () => {
+  it('can render selectable song rows without a visible local play button', async () => {
     const { renderSongRow } = await loadMusicModule();
 
     const html = renderSongRow({
@@ -68,8 +69,10 @@ describe('music media rendering', () => {
     expect(html).toContain('type="checkbox"');
     expect(html).toContain('data-role="search-song-check"');
     expect(html).toContain('data-index="3"');
-    expect(html).toContain('data-action="preview"');
-    expect(html).toContain('>播放</button>');
+    expect(html).not.toContain('data-action="preview"');
+    expect(html).not.toContain('>播放</button>');
+    expect(html).toContain('data-action="speaker"');
+    expect(html).toContain('>推送音箱</button>');
   });
 
   it('wraps long list content in a stable scroll container', async () => {

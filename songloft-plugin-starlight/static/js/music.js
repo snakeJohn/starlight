@@ -1,7 +1,5 @@
 import { api } from './api.js';
 import { authenticateSongloftResourceUrl } from './auth.js';
-import { playPluginQueue } from './plugin_player.js';
-import { requestNativePlayback } from './native_player.js';
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from './state.js';
 
 const platformSelectRoles = [
@@ -307,10 +305,9 @@ export function renderSongRow(song, index, extraActions = '', options = {}) {
                 <span class="row-meta">${escapeHtml(sourceMeta(song))}</span>
             </div>
             <div class="row-actions">
-                ${actionButton('preview', index, '播放')}
                 ${actionButton('import', index, '导入 Songloft 歌曲库')}
                 ${actionButton('download', index, '下载')}
-                ${actionButton('speaker', index, '音箱')}
+                ${actionButton('speaker', index, '推送音箱')}
                 ${customPlaylistAction(index)}
                 ${extraActions}
             </div>
@@ -497,20 +494,6 @@ async function downloadSongs(songs) {
     return result;
 }
 
-export async function previewSong(song) {
-    const result = await importSongs([song], { silent: true });
-    const importedSongs = Array.isArray(result?.songs) ? result.songs : [];
-    if (!importedSongs.length) {
-        toast('已导入 Songloft 歌曲库；当前 Songloft 未返回可播放歌曲记录', 'error');
-        return result;
-    }
-
-    playPluginQueue(importedSongs, 0);
-    const nativePlayback = requestNativePlayback(importedSongs, 0);
-    toast('已加入本插件播放队列');
-    return { ...result, plugin_player: { queued: importedSongs.length, startIndex: 0 }, native_player: nativePlayback };
-}
-
 async function importSongs(songs, options = {}) {
     const result = await api.post('/bridge/songs/import', { songs });
     if (!options.silent) {
@@ -533,7 +516,7 @@ async function playOnSpeaker(song) {
         throw new Error('请先在音箱页选择账号和设备');
     }
     const result = await api.post('/bridge/play-url', { ...payload, song });
-    toast('已发送到音箱播放');
+    toast('已推送到音箱');
     return result;
 }
 
@@ -547,7 +530,7 @@ async function playResolvedSongOnSpeaker(song) {
         title: songTitle(song),
         artist: songArtist(song),
     });
-    toast('已发送到音箱播放');
+    toast('已推送到音箱');
     return result;
 }
 
@@ -561,7 +544,7 @@ export async function playSonglistOnSpeaker(songs) {
         throw new Error('请先在音箱页选择账号和设备');
     }
     const result = await api.post('/bridge/play-songlist', { ...payload, songs });
-    toast('已发送到音箱播放');
+    toast('已推送到音箱');
     return result;
 }
 
@@ -571,12 +554,8 @@ export async function playSongloftSongOnSpeaker(song) {
         throw new Error('请先在音箱页选择账号和设备');
     }
     const result = await api.post('/songloft/player/song', { ...payload, song });
-    setState({
-        playbackState: 'playing',
-        playerSongTitle: songTitle(song),
-        playerSongMeta: `${songArtist(song)} · Songloft`,
-    });
-    toast('Songloft 歌曲已发送到音箱播放');
+    setState({ playbackState: 'playing' });
+    toast('Songloft 歌曲已推送到音箱');
     return result;
 }
 
@@ -674,7 +653,7 @@ export async function playCustomPlaylistOnSpeaker(playlist) {
         play_mode: 'order',
     });
     setState({ playbackState: 'playing' });
-    toast('歌单已发送到音箱播放');
+    toast('歌单已推送到音箱');
     return result;
 }
 
@@ -690,12 +669,11 @@ function bindSongActions(root, getSong) {
         const button = event.target.closest('button[data-action]');
         if (!button) return;
         const action = button.dataset.action;
-        if (!['preview', 'import', 'download', 'speaker', 'add-to-playlist'].includes(action)) return;
+        if (!['import', 'download', 'speaker', 'add-to-playlist'].includes(action)) return;
         const song = getSong(Number(button.dataset.index));
         if (!song) return;
         button.disabled = true;
         try {
-            if (action === 'preview') await previewSong(song);
             if (action === 'import') await importSongs([song]);
             if (action === 'download') await downloadSong(song);
             if (action === 'speaker') await playOnSpeaker(song);
@@ -756,9 +734,8 @@ function renderCustomPlaylistSongRow(song, index) {
                 <span class="row-meta">${escapeHtml(customPlaylistSongMeta(song))}</span>
             </div>
             <div class="row-actions">
-                ${hasSourceData ? `<button type="button" data-action="play-custom-playlist-song" data-index="${index}">播放</button>` : ''}
                 ${hasSourceData ? `<button type="button" data-action="download-custom-playlist-song" data-index="${index}">下载</button>` : ''}
-                <button type="button" data-action="speaker-custom-playlist-song" data-index="${index}">音箱播放</button>
+                <button type="button" data-action="speaker-custom-playlist-song" data-index="${index}">推送音箱</button>
                 <button type="button" data-action="add-custom-playlist-song" data-index="${index}">加入歌单</button>
             </div>
         </article>
@@ -792,7 +769,7 @@ export function renderCustomPlaylistItem(playlist) {
                 <button type="button" class="${viewed ? 'selected-action' : ''}" data-action="view-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">${viewed ? '正在查看' : '查看歌曲'}</button>
                 ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="refresh-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">刷新</button>` : ''}
                 ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="sync-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">同步 Songloft 歌单</button>` : ''}
-                ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="play-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">播放歌单</button>` : ''}
+                ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="speaker-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">推送音箱</button>` : ''}
                 ${selectable ? `<button type="button" class="${selected ? 'selected-action' : ''}" data-action="select-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">${selected ? '已选目标' : '设为目标'}</button>` : ''}
                 <button type="button" data-action="delete-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">删除</button>
             </div>
@@ -939,7 +916,7 @@ function bindCustomPlaylists() {
             if (button.dataset.action === 'sync-custom-playlist') {
                 await syncCustomPlaylistToSongloft(playlistId);
             }
-            if (button.dataset.action === 'play-custom-playlist') {
+            if (button.dataset.action === 'speaker-custom-playlist') {
                 const playlist = (state.customPlaylists || []).find(item => item.id === playlistId);
                 await playCustomPlaylistOnSpeaker(playlist);
             }
@@ -968,13 +945,9 @@ function bindCustomPlaylists() {
         const playlist = currentViewedCustomPlaylist();
         if (!playlist) return;
         const songs = Array.isArray(playlist.songs) ? playlist.songs : [];
-        if (!['play-custom-playlist-song', 'download-custom-playlist-song', 'speaker-custom-playlist-song', 'add-custom-playlist-song', 'add-selected-custom-playlist-songs', 'download-selected-custom-playlist-songs'].includes(button.dataset.action)) return;
+        if (!['download-custom-playlist-song', 'speaker-custom-playlist-song', 'add-custom-playlist-song', 'add-selected-custom-playlist-songs', 'download-selected-custom-playlist-songs'].includes(button.dataset.action)) return;
         button.disabled = true;
         try {
-            if (button.dataset.action === 'play-custom-playlist-song') {
-                const song = songs[Number(button.dataset.index)];
-                if (song) await previewSong(song);
-            }
             if (button.dataset.action === 'download-custom-playlist-song') {
                 const song = songs[Number(button.dataset.index)];
                 if (song) await downloadSong(song);
@@ -1446,7 +1419,7 @@ export function renderSongloftSongRow(song, index) {
                 <span class="row-meta">${escapeHtml([songloftTypeLabel(song), durationLabel(song?.duration)].filter(Boolean).join(' · '))}</span>
             </div>
             <div class="row-actions">
-                <button type="button" data-action="speaker-songloft-song" data-index="${index}">音箱播放</button>
+                <button type="button" data-action="speaker-songloft-song" data-index="${index}">推送音箱</button>
             </div>
         </article>
     `;
@@ -1518,7 +1491,7 @@ async function loadSongListDetailPage(page = 1) {
     $('[data-role="songlist-title"]').textContent = context.title;
     const detail = $('[data-role="songlist-detail"]');
     detail.innerHTML = songs.length
-        ? `${renderListScroller(songs.map((song, index) => renderSongRow(song, index)).join(''), 'songlist-detail-scroll')}<div class="inline-actions"><button class="primary-button" type="button" data-action="play-songlist">播放整个歌单</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button><button class="ghost-button" type="button" data-action="download-songlist">下载当前歌单</button></div>`
+        ? `${renderListScroller(songs.map((song, index) => renderSongRow(song, index)).join(''), 'songlist-detail-scroll')}<div class="inline-actions"><button class="primary-button" type="button" data-action="speaker-songlist">推送整个歌单</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button><button class="ghost-button" type="button" data-action="download-songlist">下载当前歌单</button></div>`
         : '<div class="empty-state">歌单没有可显示歌曲。</div>';
     renderPaginationInto('songlist-detail-pagination', { scope: 'songlist-detail', page, total, pageSize: pageSizes.songlistDetail });
 }
@@ -1602,14 +1575,14 @@ function bindSongLists() {
     bindPagination('songlist-pagination', loadSongListsPage);
     bindPagination('songlist-detail-pagination', loadSongListDetailPage);
     detail.addEventListener('click', async event => {
-        const playButton = event.target.closest('[data-action="play-songlist"]');
+        const speakerButton = event.target.closest('[data-action="speaker-songlist"]');
         const importButton = event.target.closest('[data-action="import-songlist"]');
         const downloadButton = event.target.closest('[data-action="download-songlist"]');
-        if (!playButton && !importButton && !downloadButton) return;
-        const button = playButton || importButton || downloadButton;
+        if (!speakerButton && !importButton && !downloadButton) return;
+        const button = speakerButton || importButton || downloadButton;
         button.disabled = true;
         try {
-            if (playButton) await playSonglistOnSpeaker(state.songlistSongs || []);
+            if (speakerButton) await playSonglistOnSpeaker(state.songlistSongs || []);
             if (importButton) await importSongs(state.songlistSongs || []);
             if (downloadButton) await downloadSongs(state.songlistSongs || []);
         } catch (error) {
