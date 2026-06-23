@@ -140,6 +140,29 @@ export class BridgeService {
     return { url: fallbackUrl };
   }
 
+  async playSonglistOnSpeaker(accountId: string, deviceId: string, songs: SearchResultSong[]): Promise<{ urls: string[] }> {
+    if (songs.length === 0) {
+      throw new StarlightError('BAD_REQUEST', 'songs must not be empty');
+    }
+
+    const playerSongs: PlayerSong[] = [];
+    const urls: string[] = [];
+    for (const song of songs) {
+      const url = await this.previewUrl(song);
+      playerSongs.push(toPlayerSong(song, url));
+      urls.push(url);
+    }
+
+    const played = this.playlistManagerMap
+      ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone(playerSongs, 0, 'songlist')
+      : await this.minaService.playURL(accountId, deviceId, urls[0]);
+    if (!played) {
+      throw new StarlightError('DEVICE_OFFLINE', '音箱播放 URL 失败', true);
+    }
+
+    return { urls };
+  }
+
   async playResolvedOnSpeaker(accountId: string, deviceId: string, title: string, artist = ''): Promise<{ url: string }> {
     const attemptedSources = new Set<string>();
     const failures: string[] = [];

@@ -288,6 +288,23 @@ describe('BridgeService', () => {
     expect(minaService.playURL).not.toHaveBeenCalled();
   });
 
+  it('loads speaker songlists into a temporary multi-song playlist when a playlist manager is available', async () => {
+    const { service, minaService, playlistManager, playlistManagerMap, runtimes } = createService({ usePlaylistManager: true });
+
+    await expect(service.playSonglistOnSpeaker('acc-1', 'dev-1', [song, secondSong])).resolves.toEqual({
+      urls: ['https://audio.test/song.mp3', 'https://audio.test/song.mp3'],
+    });
+
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo);
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', secondSong.source_data.songInfo);
+    expect(playlistManagerMap.getOrCreate).toHaveBeenCalledWith('acc-1', 'dev-1');
+    expect(playlistManager.playStandalone).toHaveBeenCalledWith([
+      expect.objectContaining({ title: 'Song', url: 'https://audio.test/song.mp3' }),
+      expect.objectContaining({ title: 'Second Song', url: 'https://audio.test/song.mp3' }),
+    ], 0, 'songlist');
+    expect(minaService.playURL).not.toHaveBeenCalled();
+  });
+
   it('throws DEVICE_OFFLINE when MIoT speaker playback fails', async () => {
     const { service } = createService({ playResult: false });
 

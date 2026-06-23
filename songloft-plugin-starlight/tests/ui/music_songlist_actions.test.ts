@@ -76,7 +76,7 @@ describe('songlist speaker actions', () => {
     vi.restoreAllMocks();
   });
 
-  it('imports all detail songs before playing the first song on the selected speaker', async () => {
+  it('plays all detail songs as a speaker queue after importing them', async () => {
     installToastDom();
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => okResponse({ ok: true }) as Response);
     vi.stubGlobal('fetch', fetchMock);
@@ -93,11 +93,11 @@ describe('songlist speaker actions', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('api/bridge/songs/import');
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ songs });
-    expect(fetchMock.mock.calls[1]?.[0]).toBe('api/bridge/play-url');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('api/bridge/play-songlist');
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
       account_id: 'miot-account',
       device_id: 'speaker-1',
-      song: songs[0],
+      songs,
     });
   });
 

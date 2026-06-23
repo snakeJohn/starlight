@@ -519,7 +519,13 @@ export async function playSonglistOnSpeaker(songs) {
         throw new Error('歌单没有可播放歌曲');
     }
     await importSongs(songs);
-    return playOnSpeaker(songs[0]);
+    const payload = selectedDevicePayload();
+    if (!payload.account_id || !payload.device_id) {
+        throw new Error('请先在音箱页选择账号和设备');
+    }
+    const result = await api.post('/bridge/play-songlist', { ...payload, songs });
+    toast('已发送到音箱播放');
+    return result;
 }
 
 export async function playSongloftSongOnSpeaker(song) {
