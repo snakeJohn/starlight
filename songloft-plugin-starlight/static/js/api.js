@@ -1,8 +1,6 @@
-const BASE = 'api';
+import { getAuthToken } from './auth.js';
 
-function getAuthToken() {
-    return globalThis.window?.SongloftPlugin?.getAuthToken?.() || '';
-}
+const BASE = 'api';
 
 function hasAuthorization(headers) {
     return Object.keys(headers).some(key => key.toLowerCase() === 'authorization');

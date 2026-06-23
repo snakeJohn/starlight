@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { authenticateSongloftResourceUrl } from './auth.js';
 import { playPluginQueue } from './plugin_player.js';
 import { requestNativePlayback } from './native_player.js';
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from './state.js';
@@ -192,9 +193,9 @@ function firstText(...values) {
 function normalizeCoverUrl(value) {
     const url = cleanDisplayText(value).replace('{size}', '400');
     if (!url) return '';
-    if (/^(https?:)?\/\//i.test(url)) return url;
+    if (/^(https?:)?\/\//i.test(url)) return authenticateSongloftResourceUrl(url);
     if (/^(data:image\/|blob:)/i.test(url)) return url;
-    if (url.startsWith('/')) return url;
+    if (url.startsWith('/')) return authenticateSongloftResourceUrl(url);
     return '';
 }
 

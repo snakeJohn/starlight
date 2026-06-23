@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 interface MusicRenderingModule {
   cleanDisplayText(value: unknown): string;
@@ -21,6 +21,10 @@ async function loadMusicModule(): Promise<MusicRenderingModule> {
 }
 
 describe('music media rendering', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('renders song rows with cover artwork and without stable provider ids', async () => {
     const { renderSongRow } = await loadMusicModule();
 
@@ -137,6 +141,30 @@ describe('music media rendering', () => {
     expect(mediaCoverUrl({ album_img: 'https://img.test/album.jpg' })).toBe('https://img.test/album.jpg');
     expect(mediaCoverUrl({ cover: 'https://img.test/cover.jpg' })).toBe('https://img.test/cover.jpg');
     expect(mediaCoverUrl({ source_data: { picUrl: 'https://img.test/source.jpg' } })).toBe('https://img.test/source.jpg');
+  });
+
+  it('adds the Songloft access token to protected song cover resources', async () => {
+    vi.stubGlobal('window', {
+      SongloftPlugin: {
+        getAuthToken: () => 'ui-token',
+      },
+    });
+    const { mediaCoverUrl, renderSongRow } = await loadMusicModule();
+
+    expect(mediaCoverUrl({ cover_url: '/api/v1/songs/484/cover' }))
+      .toBe('/api/v1/songs/484/cover?access_token=ui-token');
+    expect(mediaCoverUrl({ cover_url: '/api/v1/songs/484/cover?size=small' }))
+      .toBe('/api/v1/songs/484/cover?size=small&access_token=ui-token');
+    expect(mediaCoverUrl({ cover_url: '/api/v1/songs/484/cover?access_token=existing' }))
+      .toBe('/api/v1/songs/484/cover?access_token=existing');
+
+    const html = renderSongRow({
+      title: 'Songloft 歌曲',
+      artist: '歌手',
+      cover_url: 'http://192.168.31.63:18191/api/v1/songs/484/cover',
+    }, 0);
+
+    expect(html).toContain('http://192.168.31.63:18191/api/v1/songs/484/cover?access_token=ui-token');
   });
 
   it('ignores bare numeric cover fields that would navigate inside the plugin route', async () => {

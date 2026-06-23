@@ -1,3 +1,4 @@
+import { authenticateSongloftResourceUrl } from './auth.js';
 import { requestNativeControl, requestNativePlayback } from './native_player.js';
 import { escapeHtml, setState, state } from './state.js';
 
@@ -48,7 +49,7 @@ function coverUrl(item = {}) {
         songInfo.cover,
     ];
     const url = candidates.map(cleanText).find(value => /^(https?:)?\/\//i.test(value) || /^(data:image\/|blob:)/i.test(value) || value.startsWith('/'));
-    return url || '';
+    return url ? authenticateSongloftResourceUrl(url) : '';
 }
 
 function currentSong() {

@@ -49,6 +49,19 @@ function installDom(postMessage = vi.fn()) {
   return { postMessage };
 }
 
+function installDomWithToken(token: string, postMessage = vi.fn()) {
+  const dom = installDom(postMessage);
+  vi.stubGlobal('window', {
+    setTimeout: vi.fn(),
+    dispatchEvent: vi.fn(),
+    parent: { postMessage },
+    SongloftPlugin: {
+      getAuthToken: () => token,
+    },
+  });
+  return dom;
+}
+
 async function loadPluginPlayer() {
   const player = await import('../../static/js/plugin_player.js') as PluginPlayerModule;
   const stateModule = await import('../../static/js/state.js') as StateModule;
@@ -169,5 +182,17 @@ describe('plugin local player controls', () => {
     expect(html).toContain('第一首');
     expect(html).toContain('第二首');
     expect(html).toContain('plugin-player-queue-item active');
+  });
+
+  it('adds the Songloft access token to local player cover images', async () => {
+    installDomWithToken('ui-token');
+    const { player } = await loadPluginPlayer();
+    player.playPluginQueue([
+      { title: '本地歌曲', artist: '歌手', cover_url: '/api/v1/songs/484/cover' },
+    ], 0);
+
+    const html = player.renderPluginPlayer();
+
+    expect(html).toContain('/api/v1/songs/484/cover?access_token=ui-token');
   });
 });
