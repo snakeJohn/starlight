@@ -12,9 +12,6 @@ jobs:
   build-release:
     name: Build plugin and publish release
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: songloft-plugin-starlight
 
     steps:
       - name: Checkout
@@ -25,7 +22,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: songloft-plugin-starlight/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -69,7 +66,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: starlight-${{ steps.release_manifest.outputs.release_version }}.zip
-          path: songloft-plugin-starlight/${{ steps.release_manifest.outputs.release_zip_path }}
+          path: ${{ steps.release_manifest.outputs.release_zip_path }}
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -77,7 +74,7 @@ jobs:
           tag_name: ${{ steps.release_manifest.outputs.release_version }}
           name: Starlight ${{ steps.release_manifest.outputs.release_version }}
           target_commitish: ${{ steps.release_commit.outputs.sha }}
-          files: songloft-plugin-starlight/${{ steps.release_manifest.outputs.release_zip_path }}
+          files: ${{ steps.release_manifest.outputs.release_zip_path }}
           fail_on_unmatched_files: true
           body: |
             Automated release for commit `${{ steps.release_commit.outputs.sha }}`.

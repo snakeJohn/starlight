@@ -7,6 +7,7 @@ import type { SearchResultSong } from '../music/types';
 import { toRemoteSong, type RemoteSongPayload } from './mapper';
 import { MinaService } from '../service/service';
 import type { PlayerSong, PlaylistManagerMap } from '../player/manager';
+import { normalizeHostBaseUrl } from '../utils/http';
 
 export class BridgeService {
   constructor(
@@ -421,7 +422,8 @@ function remoteImportSongsFromBody(body: unknown): SongloftRemoteSong[] {
 }
 
 export async function postRemoteSongs(host: string, token: string, payloads: RemoteSongPayload[]): Promise<RemoteImportResult> {
-  const response = await fetch(`${host}/api/v1/songs/remote`, {
+  const baseHost = normalizeHostBaseUrl(host);
+  const response = await fetch(`${baseHost}/api/v1/songs/remote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify(payloads),

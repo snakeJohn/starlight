@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { toRemoteSong } from '../../src/bridge/mapper';
+import { remoteSongDedupKey, toRemoteSong } from '../../src/bridge/mapper';
+import type { SearchResultSong } from '../../src/music/types';
 
 describe('toRemoteSong', () => {
   it('maps LX result to Songloft remote song payload', () => {
@@ -22,14 +23,10 @@ describe('toRemoteSong', () => {
       cover_url: 'https://img.test/a.jpg',
       duration: 200,
       url: 'https://audio.test/song.mp3',
-      plugin_entry_path: 'starlight-playback',
-      dedup_key: 'kw:123',
+      plugin_entry_path: '',
+      source_data: '',
+      dedup_key: '',
     });
-    expect(remote.source_data).toBe(JSON.stringify({
-      platform: 'kw',
-      quality: '320k',
-      songInfo: { source: 'kw', name: 'Song', singer: 'Singer', album: 'Album', duration: 200, musicId: '123' },
-    }));
   });
 
   it.each([
@@ -37,7 +34,7 @@ describe('toRemoteSong', () => {
     ['hash', { hash: 'hash-1' }],
     ['copyrightId', { copyrightId: 'copy-1' }],
   ])('uses %s as a fallback dedup id', (_name, idFields) => {
-    const remote = toRemoteSong({
+    const song = {
       title: 'Song',
       artist: 'Singer',
       album: '',
@@ -48,9 +45,9 @@ describe('toRemoteSong', () => {
         quality: '320k',
         songInfo: { source: 'kg', name: 'Song', singer: 'Singer', album: '', duration: 0, ...idFields },
       },
-    }, 'https://audio.test/fallback.mp3');
+    } satisfies SearchResultSong;
 
-    expect(remote.dedup_key).toBe(`kg:${Object.values(idFields)[0]}`);
+    expect(remoteSongDedupKey(song)).toBe(`kg:${Object.values(idFields)[0]}`);
   });
 
   it('can map a resolved URL as a pure external remote song', () => {

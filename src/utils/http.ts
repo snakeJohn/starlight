@@ -264,6 +264,29 @@ export async function fetchJSON<T = unknown>(url: string, options: FetchOptions 
 
 let _hostBaseUrl = '';
 
+/** 规范化宿主服务地址，只保留协议、域名和端口。 */
+export function normalizeHostBaseUrl(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const parseTarget = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  try {
+    const parsed = new URL(parseTarget);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return `${parsed.protocol}//${parsed.host}`;
+    }
+  } catch {
+    // Fall through to conservative string cleanup for malformed legacy values.
+  }
+
+  return trimmed
+    .split(/[?#]/, 1)[0]
+    .replace(/\/api\/v1(?:\/.*)?$/i, '')
+    .replace(/\/+$/, '');
+}
+
 /** 获取宿主 API 基础 URL */
 export function getHostBaseUrl(): string {
   return _hostBaseUrl;
@@ -271,7 +294,7 @@ export function getHostBaseUrl(): string {
 
 /** 设置宿主 API 基础 URL（如 "http://127.0.0.1:58091"） */
 export function setHostBaseUrl(url: string): void {
-  _hostBaseUrl = url.endsWith('/') ? url.slice(0, -1) : url;
+  _hostBaseUrl = normalizeHostBaseUrl(url);
 }
 
 /** 解析宿主 API 基础 URL：优先使用旧配置，否则使用 Songloft SDK 提供的宿主地址。 */

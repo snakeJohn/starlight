@@ -184,10 +184,29 @@ describe('BridgeService', () => {
       expect.objectContaining({
         title: 'Song',
         url: 'https://audio.test/song.mp3',
-        plugin_entry_path: 'starlight-playback',
-        dedup_key: 'kw:123',
+        plugin_entry_path: '',
+        source_data: '',
+        dedup_key: '',
       }),
     ]);
+  });
+
+  it('normalizes Songloft host before posting remote songs', async () => {
+    const nativeSong = { id: 101, type: 'remote', title: 'Song', artist: 'Singer' };
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: vi.fn(async () => ({ songs: [nativeSong], count: 1 })),
+    }) as unknown as Response);
+    globalThis.fetch = fetchMock;
+    (globalThis as typeof globalThis & {
+      songloft: { plugin: { getHostUrl: () => Promise<string> } };
+    }).songloft.plugin.getHostUrl = vi.fn(async () => 'http://127.0.0.1:18191/api/v1/jsplugin/starlight');
+    const { service } = createService();
+
+    await service.importSongs([song]);
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:18191/api/v1/songs/remote', expect.any(Object));
   });
 
   it('throws INTERNAL_ERROR when Songloft remote import fails', async () => {

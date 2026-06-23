@@ -36,12 +36,12 @@ describe('release registry', () => {
   });
 
   it('publishes the same release tag and asset name that plugin metadata advertises', () => {
-    const workflow = readFileSync(resolve(process.cwd(), '../.github/workflows/release.yml'), 'utf8');
+    const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8');
 
     expect(workflow).toContain('npm run version:stamp');
     expect(workflow).toContain('npm run release:manifest');
     expect(workflow).toContain('tag_name: ${{ steps.release_manifest.outputs.release_version }}');
-    expect(workflow).toContain('files: songloft-plugin-starlight/${{ steps.release_manifest.outputs.release_zip_path }}');
+    expect(workflow).toContain('files: ${{ steps.release_manifest.outputs.release_zip_path }}');
     expect(workflow).toContain('starlight-${{ steps.release_manifest.outputs.release_version }}.zip');
     expect(workflow).not.toContain('tag_name: starlight-${{ github.sha }}');
     expect(workflow).not.toContain('files: songloft-plugin-starlight/${{ steps.meta.outputs.zip_path }}');

@@ -10,3 +10,6 @@ coverage/
 .env.*
 *.tmp
 *.temp
+.DS_Store
+.mimusic-dev.json
+.songloft-dev.json

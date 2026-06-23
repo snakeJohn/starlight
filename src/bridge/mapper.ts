@@ -26,6 +26,8 @@ export function remoteSongDedupKey(song: SearchResultSong): string {
 }
 
 export function toRemoteSong(song: SearchResultSong, url: string, options: RemoteSongOptions = {}): RemoteSongPayload {
+  const pluginEntryPath = options.pluginEntryPath ?? '';
+  const includeSourceData = options.includeSourceData ?? Boolean(pluginEntryPath);
   return {
     title: song.title,
     artist: song.artist,
@@ -33,8 +35,8 @@ export function toRemoteSong(song: SearchResultSong, url: string, options: Remot
     cover_url: song.cover_url,
     duration: song.duration,
     url,
-    plugin_entry_path: options.pluginEntryPath ?? 'starlight-playback',
-    source_data: options.includeSourceData === false ? '' : JSON.stringify(options.sourceData ?? song.source_data),
-    dedup_key: options.dedupKey ?? remoteSongDedupKey(song),
+    plugin_entry_path: pluginEntryPath,
+    source_data: includeSourceData ? JSON.stringify(options.sourceData ?? song.source_data) : '',
+    dedup_key: options.dedupKey ?? (pluginEntryPath ? remoteSongDedupKey(song) : ''),
   };
 }
