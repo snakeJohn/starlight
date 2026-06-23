@@ -23,6 +23,9 @@ const RELOGIN_MIN_INTERVAL_MS = 60 * 1000;
 /** Token 刷新定时器间隔（毫秒）= 2小时 */
 const TOKEN_REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000;
 
+/** Songloft 插件 HTTP 请求不能被小米长轮询长时间占住。 */
+const QR_POLL_HTTP_WAIT_MS = 1500;
+
 /**
  * AuthService - 认证服务
  * 协调 MinaAuth、QRCodeLogin、AccountManager 完成完整的认证流程
@@ -33,6 +36,8 @@ export class AuthService {
   private accountManager: AccountManager;
   private sessionManager: SessionManager;
   private qrLogins: Map<string, QRCodeLogin>;     // accountId → QRCodeLogin
+  private qrPollResults: Map<string, PollResult>; // accountId → 最近一次扫码轮询结果
+  private qrPollInFlight: Map<string, Promise<PollResult>>; // accountId → 后台长轮询
   private refreshTimers: Map<string, any>;          // accountId → timer ID
   private lastReloginTime: Map<string, number>;     // accountId → timestamp（60s间隔保护）
 
@@ -41,6 +46,8 @@ export class AuthService {
     this.accountManager = accountManager;
     this.sessionManager = new SessionManager();
     this.qrLogins = new Map();
+    this.qrPollResults = new Map();
+    this.qrPollInFlight = new Map();
     this.refreshTimers = new Map();
     this.lastReloginTime = new Map();
   }
@@ -193,6 +200,16 @@ export class AuthService {
    * @returns 二维码信息或 null
    */
   async startQRCodeLogin(accountId: string): Promise<{ qrcodeUrl: string; loginUrl: string } | null> {
+    const previous = this.qrLogins.get(accountId);
+    if (previous) {
+      previous.stopPolling();
+    }
+    this.qrPollInFlight.delete(accountId);
+    this.qrPollResults.set(accountId, {
+      state: 'waiting',
+      message: '等待扫码或在米家 App 中确认登录',
+    });
+
     // 创建 QRCodeLogin 实例
     const qrLogin = new QRCodeLogin();
     this.qrLogins.set(accountId, qrLogin);
@@ -201,6 +218,10 @@ export class AuthService {
     const qrInfo = await qrLogin.getQRCode();
     if (!qrInfo) {
       this.qrLogins.delete(accountId);
+      this.qrPollResults.set(accountId, {
+        state: 'failed',
+        message: 'failed to get QR code',
+      });
       return null;
     }
 
@@ -217,12 +238,70 @@ export class AuthService {
    */
   async pollQRCode(accountId: string): Promise<PollResult> {
     const qrLogin = this.qrLogins.get(accountId);
+    const cached = this.qrPollResults.get(accountId);
     if (!qrLogin) {
+      if (cached && this.isQRCodePollTerminal(cached.state)) {
+        return cached;
+      }
       return { state: 'failed', message: '没有进行中的扫码登录' };
     }
 
-    const result = await qrLogin.poll();
+    let pollTask = this.qrPollInFlight.get(accountId);
+    if (!pollTask) {
+      pollTask = this.runQRCodePoll(accountId, qrLogin);
+      this.qrPollInFlight.set(accountId, pollTask);
+      pollTask.finally(() => {
+        if (this.qrPollInFlight.get(accountId) === pollTask) {
+          this.qrPollInFlight.delete(accountId);
+        }
+      }).catch(() => undefined);
+    }
 
+    const result = await this.waitForQRCodePollResult(pollTask, QR_POLL_HTTP_WAIT_MS);
+    if (result) {
+      return result;
+    }
+
+    return cached || {
+      state: 'waiting',
+      message: '等待扫码或在米家 App 中确认登录',
+    };
+  }
+
+  private async runQRCodePoll(accountId: string, qrLogin: QRCodeLogin): Promise<PollResult> {
+    let result: PollResult;
+    try {
+      result = await qrLogin.poll();
+    } catch (e: any) {
+      result = { state: 'failed', message: `poll error: ${e.message || e}` };
+    }
+
+    if (this.qrLogins.get(accountId) !== qrLogin) {
+      return result;
+    }
+
+    await this.finishQRCodePoll(accountId, result);
+    this.qrPollResults.set(accountId, result);
+    return result;
+  }
+
+  private async waitForQRCodePollResult(pollTask: Promise<PollResult>, timeoutMs: number): Promise<PollResult | null> {
+    let timer: any = null;
+    try {
+      return await Promise.race([
+        pollTask,
+        new Promise<null>(resolve => {
+          timer = setTimeout(() => resolve(null), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
+  private async finishQRCodePoll(accountId: string, result: PollResult): Promise<void> {
     // 扫码成功，完成后续流程
     if (result.state === 'confirmed' && result.tokenInfo) {
       this.qrLogins.delete(accountId);
@@ -274,8 +353,10 @@ export class AuthService {
     if (result.state === 'expired' || result.state === 'failed') {
       this.qrLogins.delete(accountId);
     }
+  }
 
-    return result;
+  private isQRCodePollTerminal(state: string): boolean {
+    return state === 'confirmed' || state === 'expired' || state === 'failed';
   }
 
   // ===== 认证状态 =====
@@ -444,6 +525,8 @@ export class AuthService {
       qrLogin.stopPolling();
     }
     this.qrLogins.clear();
+    this.qrPollResults.clear();
+    this.qrPollInFlight.clear();
 
     // 清理会话
     this.lastReloginTime.clear();
