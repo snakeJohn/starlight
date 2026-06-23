@@ -10,7 +10,9 @@ function operationLabel(operation) {
 }
 
 function stageLabel(stage) {
-    return stage === 'native-download' ? 'Songloft 下载' : '音源解析';
+    if (stage === 'native-download') return 'Songloft 下载';
+    if (stage === 'speaker-play') return '音箱播放';
+    return '音源解析';
 }
 
 function timeLabel(value) {

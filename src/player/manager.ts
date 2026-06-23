@@ -9,6 +9,7 @@ import { MinaService } from '../service/service';
 import { URLBuilder } from './url_builder';
 import { resolveHostBaseUrl, callHostAPI } from '../utils/http';
 import type { PlayState, PlayMode, PlayerStatus } from '../types';
+import { sourceDiagnostics } from '../diagnostics/source_logs';
 
 // ===== 歌曲类型 =====
 
@@ -36,6 +37,54 @@ export interface PlayerSong {
 export interface DynamicPlaylistOptions {
   dynamicPlaylistLoader?: (playlistId: number) => Promise<PlayerSong[] | null>;
   dynamicSongResolver?: (song: PlayerSong) => Promise<PlayerSong | null>;
+}
+
+function recordSpeakerPlaybackDiagnostic(
+  song: PlayerSong,
+  status: 'success' | 'failed',
+  message: string,
+  durationMs = 0,
+): void {
+  sourceDiagnostics.record({
+    operation: 'playback',
+    stage: 'speaker-play',
+    status,
+    sourceId: 'miot',
+    sourceName: '小爱音箱',
+    platform: song.type || 'remote',
+    quality: song.format || '',
+    title: song.title,
+    artist: song.artist,
+    durationMs,
+    message,
+  });
+}
+
+function isLoopbackPlaybackUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    return hostname === 'localhost'
+      || hostname === '127.0.0.1'
+      || hostname.startsWith('127.')
+      || hostname === '::1'
+      || hostname === '[::1]'
+      || hostname === '0.0.0.0';
+  } catch {
+    return false;
+  }
+}
+
+function safePlaybackUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has('access_token')) {
+      parsed.searchParams.set('access_token', '[redacted]');
+    }
+    return parsed.toString();
+  } catch {
+    return url.replace(/access_token=[^&\s]+/gi, 'access_token=[redacted]');
+  }
 }
 
 // ===== PlaylistManager - 单设备播放管理器 =====
@@ -543,12 +592,28 @@ export class PlaylistManager {
 
     songloft.log.info(`[PlaylistManager] Playing song index=${this.currentIndex} title=${song.title} artist=${song.artist} duration=${song.duration}`);
 
-    // 调用小爱音箱播放
-    const ok = await this.minaService.playURL(this.accountId, this.deviceId, songURL);
-    if (!ok) {
-      songloft.log.error('[PlaylistManager] Failed to play URL on device');
+    if (isLoopbackPlaybackUrl(songURL)) {
+      const message = `播放地址是本地回环地址，音箱无法访问：${safePlaybackUrl(songURL)}`;
+      songloft.log.error('[PlaylistManager] ' + message);
+      recordSpeakerPlaybackDiagnostic(song, 'failed', message);
       return 'failed';
     }
+
+    // 调用小爱音箱播放
+    const startedAt = Date.now();
+    const ok = await this.minaService.playURL(this.accountId, this.deviceId, songURL);
+    if (!ok) {
+      const message = `音箱接口未接受播放 URL：${safePlaybackUrl(songURL)}`;
+      songloft.log.error('[PlaylistManager] Failed to play URL on device');
+      recordSpeakerPlaybackDiagnostic(song, 'failed', message, Date.now() - startedAt);
+      return 'failed';
+    }
+    recordSpeakerPlaybackDiagnostic(
+      song,
+      'success',
+      `音箱接口已接受播放 URL：${safePlaybackUrl(songURL)}`,
+      Date.now() - startedAt,
+    );
 
     this.clearVoiceSuspend();
     this.state = 'playing';

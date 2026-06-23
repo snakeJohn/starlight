@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlaylistManager, type PlayerSong } from '../../src/player/manager';
 import type { ConfigManager } from '../../src/config/manager';
 import type { MinaService } from '../../src/service/service';
+import { sourceDiagnostics } from '../../src/diagnostics/source_logs';
 
 const song: PlayerSong = {
   id: 0,
@@ -42,6 +43,46 @@ function createManager(options: {
 }
 
 describe('PlaylistManager standalone queue', () => {
+  beforeEach(() => {
+    sourceDiagnostics.clear();
+  });
+
+  it('records speaker playback diagnostics when an external URL is accepted by the speaker API', async () => {
+    const { manager } = createManager();
+
+    await expect(manager.playStandalone([song], 0, 'single')).resolves.toBe(true);
+
+    expect(sourceDiagnostics.list({ operation: 'playback' })).toContainEqual(expect.objectContaining({
+      stage: 'speaker-play',
+      status: 'success',
+      sourceName: '小爱音箱',
+      title: '单曲',
+      artist: '歌手',
+      message: expect.stringContaining('音箱接口已接受'),
+    }));
+  });
+
+  it('rejects loopback Songloft playback URLs before sending them to the speaker', async () => {
+    const localSong = {
+      ...song,
+      id: 42,
+      type: 'remote',
+      url: '/api/v1/songs/42/play',
+    };
+    const { manager, minaService } = createManager();
+
+    await expect(manager.playStandalone([localSong], 0, 'single')).resolves.toBe(false);
+
+    expect(minaService.playURL).not.toHaveBeenCalled();
+    expect(sourceDiagnostics.list({ operation: 'playback' })).toContainEqual(expect.objectContaining({
+      stage: 'speaker-play',
+      status: 'failed',
+      sourceName: '小爱音箱',
+      title: '单曲',
+      message: expect.stringContaining('本地回环地址'),
+    }));
+  });
+
   it('plays a single temporary song queue and keeps previous/next available', async () => {
     const { manager, minaService } = createManager();
 

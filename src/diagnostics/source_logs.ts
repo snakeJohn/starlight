@@ -1,5 +1,5 @@
 export type SourceDiagnosticOperation = 'playback' | 'download';
-export type SourceDiagnosticStage = 'resolve' | 'native-download';
+export type SourceDiagnosticStage = 'resolve' | 'native-download' | 'speaker-play';
 export type SourceDiagnosticStatus = 'success' | 'failed';
 
 export interface SourceDiagnosticInput {
