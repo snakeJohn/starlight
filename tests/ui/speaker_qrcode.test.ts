@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-type Listener = (event: { currentTarget: FakeElement; target?: FakeElement }) => unknown;
+type Listener = (event: { currentTarget: FakeElement | null; target?: FakeElement }) => unknown;
 
 interface SpeakerModule {
   initSpeakerUI(): Promise<void>;
@@ -41,7 +41,10 @@ class FakeElement {
   }
 
   async dispatch(type: string): Promise<void> {
-    await this.listeners.get(type)?.({ currentTarget: this, target: this });
+    const event = { currentTarget: this as FakeElement | null, target: this };
+    const result = this.listeners.get(type)?.(event);
+    event.currentTarget = null;
+    await result;
   }
 
   appendChild(): void {
@@ -76,13 +79,19 @@ function installSpeakerDom() {
   const qrImage = new FakeElement();
   const qrLink = new FakeElement();
   const qrStatus = new FakeElement();
+  const refreshVoiceRecords = new FakeElement();
+  const voiceRecordList = new FakeElement();
+  const voiceRecordSummary = new FakeElement();
   const elements = new Map<string, FakeElement>([
     ['[data-action="qr-start"]', qrStart],
     ['[data-action="qr-poll"]', qrPoll],
+    ['[data-action="refresh-voice-records"]', refreshVoiceRecords],
     ['[data-role="qr-box"]', qrBox],
     ['[data-role="qr-image"]', qrImage],
     ['[data-role="qr-link"]', qrLink],
     ['[data-role="qr-status"]', qrStatus],
+    ['[data-role="voice-record-list"]', voiceRecordList],
+    ['[data-role="voice-record-summary"]', voiceRecordSummary],
     ['[data-role="account-list"]', new FakeElement()],
     ['[data-role="account-select"]', new FakeElement()],
     ['[data-role="auth-summary"]', new FakeElement()],
@@ -117,7 +126,7 @@ function installSpeakerDom() {
     setTimeout: vi.fn(),
   });
 
-  return { qrStart, elements, qrBox, qrImage, qrLink, qrStatus };
+  return { qrStart, refreshVoiceRecords, elements, qrBox, qrImage, qrLink, qrStatus, voiceRecordList, voiceRecordSummary };
 }
 
 describe('speaker QR login UI', () => {
@@ -223,5 +232,29 @@ describe('speaker QR login UI', () => {
     expect(qrLink.href).toBe('#');
     expect(qrLink.textContent).toBe('');
     expect(qrStatus.textContent).toBe('登录成功，账号已保存');
+  });
+
+  it('keeps the voice record refresh button stable after async loading', async () => {
+    const { refreshVoiceRecords, voiceRecordSummary } = installSpeakerDom();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/miot/accounts') || url.endsWith('/miot/auth/status') || url.endsWith('/miot/mina/devices')) {
+        return jsonResponse({ success: true, data: [] });
+      }
+      if (url.includes('/miot/conversation/messages')) {
+        return jsonResponse({ success: true, data: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const modulePath = '../../static/js/speaker.js';
+    const { initSpeakerUI } = await import(modulePath) as SpeakerModule;
+    await initSpeakerUI();
+
+    await expect(refreshVoiceRecords.dispatch('click')).resolves.toBeUndefined();
+
+    expect(refreshVoiceRecords.disabled).toBe(false);
+    expect(voiceRecordSummary.textContent).toBe('12 小时内 0 条');
   });
 });

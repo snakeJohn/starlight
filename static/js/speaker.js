@@ -811,14 +811,15 @@ function bindRefresh() {
     $('[data-action="refresh-speaker"]')?.addEventListener('click', refreshSpeaker);
     $('[data-action="refresh-devices"]')?.addEventListener('click', () => loadDevices().catch(error => toast(error.message, 'error')));
     $('[data-action="refresh-voice-records"]')?.addEventListener('click', async event => {
-        event.currentTarget.disabled = true;
+        const button = event.currentTarget;
+        if (button) button.disabled = true;
         try {
             await loadVoiceRecords();
             toast('语音记录已刷新');
         } catch (error) {
             toast(error.message, 'error');
         } finally {
-            event.currentTarget.disabled = false;
+            if (button) button.disabled = false;
         }
     });
     $('[data-action="clear-voice-records"]')?.addEventListener('click', async event => {
