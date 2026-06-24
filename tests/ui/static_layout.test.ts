@@ -302,6 +302,30 @@ describe('static UI layout copy', () => {
     expect(speakerHtml).toContain('保存设备</button>');
   });
 
+  it('integrates speaker settings into the device control panel', () => {
+    const html = indexHtml();
+    const stylesheet = css();
+    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
+    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
+    const speakerHtml = html.slice(speakerStart, songlistsStart);
+    const deviceStart = speakerHtml.indexOf('<section class="surface-section speaker-device-panel">');
+    const operationsStart = speakerHtml.indexOf('<div class="two-column speaker-operations-layout">');
+    const deviceHtml = speakerHtml.slice(deviceStart, operationsStart);
+
+    expect(deviceStart).toBeGreaterThanOrEqual(0);
+    expect(deviceHtml).toContain('data-role="speaker-config-form"');
+    expect(deviceHtml.indexOf('data-role="speaker-config-form"')).toBeLessThan(deviceHtml.indexOf('data-role="device-list"'));
+    expect(deviceHtml).toContain('speaker-device-settings settings-form');
+    expect(deviceHtml).toContain('speaker-device-actions');
+    expect(speakerHtml).not.toContain('<h2>音箱设置</h2>');
+    expect(stylesheet).toContain('.speaker-device-panel');
+    expect(stylesheet).toContain('.device-selection-grid');
+    expect(stylesheet).toContain('.speaker-device-settings');
+    expect(stylesheet).toContain('.speaker-device-actions');
+    expect(stylesheet).toContain('grid-template-columns: minmax(0, 0.82fr) minmax(0, 1fr) minmax(0, 0.92fr);');
+    expect(stylesheet).not.toContain('grid-template-columns: minmax(150px, 0.82fr) minmax(190px, 1fr) minmax(220px, 0.92fr);');
+  });
+
   it('moves visible settings into speaker and automation pages and removes the settings tab', () => {
     const html = indexHtml();
     const stateJs = readFileSync(resolve(process.cwd(), 'static/js/state.js'), 'utf8');

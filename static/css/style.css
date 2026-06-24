@@ -946,6 +946,91 @@ textarea:focus {
     grid-template-columns: minmax(0, 1.28fr) minmax(240px, 0.72fr);
 }
 
+.speaker-top-layout {
+    grid-template-columns: minmax(320px, 1fr) minmax(420px, 1fr);
+    align-items: stretch;
+}
+
+.speaker-top-layout > .surface-section {
+    margin-top: 0;
+}
+
+.speaker-device-panel {
+    min-width: 0;
+    display: grid;
+    gap: 14px;
+    align-content: start;
+}
+
+.device-selection-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.82fr) minmax(0, 1fr) minmax(0, 0.92fr);
+    gap: 10px;
+    align-items: end;
+}
+
+.speaker-device-actions {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 112px), 1fr));
+    gap: 8px;
+}
+
+.speaker-device-actions button {
+    width: 100%;
+}
+
+.speaker-device-settings {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    border-top: 1px solid var(--surface-line);
+    padding-top: 12px;
+}
+
+.device-settings-header {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.device-settings-header strong {
+    font-size: 14px;
+}
+
+.speaker-device-settings .wide-field {
+    grid-column: 1 / -1;
+}
+
+.speaker-device-settings .speaker-settings-toggles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 0;
+}
+
+.speaker-settings-actions {
+    justify-content: space-between;
+    align-items: center;
+}
+
+.speaker-settings-actions .primary-button {
+    flex: 0 0 140px;
+}
+
+.speaker-settings-actions [data-role="config-state"] {
+    min-width: 0;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+
+.speaker-device-panel [data-role="device-list"] {
+    margin-top: 0;
+    border-top: 1px solid var(--surface-line);
+    padding-top: 12px;
+}
+
 .speaker-side-stack,
 .speaker-player-panel {
     min-width: 0;
@@ -1250,6 +1335,15 @@ legend {
     .split-view {
         grid-template-columns: 1fr;
     }
+
+    .device-selection-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+
+    .speaker-device-actions {
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 760px) {
@@ -1331,6 +1425,25 @@ legend {
 
     .wide-field {
         grid-column: auto;
+    }
+
+    .device-selection-grid,
+    .speaker-device-actions,
+    .speaker-device-settings .speaker-settings-toggles {
+        grid-template-columns: 1fr;
+    }
+
+    .speaker-device-actions {
+        grid-column: auto;
+    }
+
+    .speaker-settings-actions {
+        align-items: stretch;
+    }
+
+    .speaker-settings-actions .primary-button {
+        flex: 1 1 100%;
+        width: 100%;
     }
 
     .song-row,

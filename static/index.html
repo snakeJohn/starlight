@@ -119,7 +119,7 @@
                     <button class="ghost-button" type="button" data-action="refresh-speaker">刷新</button>
                 </div>
 
-                <div class="two-column">
+                <div class="two-column speaker-top-layout">
                     <section class="surface-section">
                         <div class="section-bar">
                             <h2>账号</h2>
@@ -140,12 +140,12 @@
                         <div class="list-stack tight" data-role="account-list"></div>
                     </section>
 
-                    <section class="surface-section">
+                    <section class="surface-section speaker-device-panel">
                         <div class="section-bar">
                             <h2>设备</h2>
                             <button class="ghost-button" type="button" data-action="refresh-devices">刷新</button>
                         </div>
-                        <div class="control-grid">
+                        <div class="device-selection-grid">
                             <label>
                                 <span>账号</span>
                                 <select data-role="account-select"></select>
@@ -154,9 +154,32 @@
                                 <span>设备</span>
                                 <select data-role="device-select"></select>
                             </label>
-                            <button class="primary-button" type="button" data-action="save-device-selection">保存设备</button>
-                            <button class="ghost-button" type="button" data-action="clear-device-selection">取消选择</button>
+                            <div class="speaker-device-actions">
+                                <button class="primary-button" type="button" data-action="save-device-selection">保存设备</button>
+                                <button class="ghost-button" type="button" data-action="clear-device-selection">取消选择</button>
+                            </div>
                         </div>
+                        <form class="speaker-device-settings settings-form" data-role="speaker-config-form" data-config-form>
+                            <div class="device-settings-header">
+                                <strong>设备设置</strong>
+                                <button class="ghost-button" type="button" data-action="load-config">加载</button>
+                            </div>
+                            <label class="wide-field">
+                                <span>Songloft 访问地址</span>
+                                <input name="server_host" data-role="server-host-input" placeholder="例如: http://192.168.31.63:18191">
+                                <small class="field-help">音箱访问 Songloft 播放接口用的局域网或公网地址，留空时自动识别当前 Songloft 地址。</small>
+                            </label>
+                            <div class="server-host-warning" data-role="server-host-warning" hidden></div>
+                            <div class="toggle-grid speaker-settings-toggles">
+                                <label class="toggle-line"><input name="conversation_monitor_enabled" type="checkbox"><span>对话监听</span></label>
+                                <label class="toggle-line"><input name="voice_command_enabled" type="checkbox" disabled><span>语音口令</span></label>
+                                <label class="toggle-line"><input name="force_mp3" type="checkbox"><span>强制 MP3</span></label>
+                            </div>
+                            <div class="inline-actions speaker-settings-actions">
+                                <button class="primary-button" type="submit">保存设置</button>
+                                <span data-role="config-state">未加载</span>
+                            </div>
+                        </form>
                         <div class="list-stack tight" data-role="device-list"></div>
                     </section>
                 </div>
@@ -205,27 +228,6 @@
                             </div>
                             <button class="primary-button" type="button" data-action="refresh-index">刷新索引</button>
                         </section>
-                        <form class="surface-section settings-form" data-role="speaker-config-form" data-config-form>
-                            <div class="section-bar">
-                                <h2>音箱设置</h2>
-                                <button class="ghost-button" type="button" data-action="load-config">加载</button>
-                            </div>
-                            <label class="wide-field">
-                                <span>Songloft 访问地址</span>
-                                <input name="server_host" data-role="server-host-input" placeholder="例如: http://192.168.31.63:18191">
-                                <small class="field-help">音箱访问 Songloft 播放接口用的局域网或公网地址，留空时自动识别当前 Songloft 地址。</small>
-                            </label>
-                            <div class="server-host-warning" data-role="server-host-warning" hidden></div>
-                            <div class="toggle-grid">
-                                <label class="toggle-line"><input name="conversation_monitor_enabled" type="checkbox"><span>对话监听</span></label>
-                                <label class="toggle-line"><input name="voice_command_enabled" type="checkbox" disabled><span>语音口令</span></label>
-                                <label class="toggle-line"><input name="force_mp3" type="checkbox"><span>强制 MP3</span></label>
-                            </div>
-                            <div class="inline-actions">
-                                <button class="primary-button" type="submit">保存设置</button>
-                                <span data-role="config-state">未加载</span>
-                            </div>
-                        </form>
                     </div>
                 </div>
                 <section class="surface-section voice-record-panel">
