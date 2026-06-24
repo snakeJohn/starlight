@@ -1,6 +1,6 @@
 {
   "name": "songloft-plugin-starlight",
-  "version": "V-2026.06.24.05.39",
+  "version": "V-2026.06.24.09.51",
   "description": "Songloft smart speaker and LX Music source bridge plugin",
   "private": true,
   "scripts": {
