@@ -36,5 +36,7 @@ type Buffer = Uint8Array & {
 
 declare const Buffer: {
   from(data: string, encoding?: string): Buffer;
+  from(data: number[]): Buffer;
   alloc(size: number): Buffer;
+  concat(list: Buffer[]): Buffer;
 };

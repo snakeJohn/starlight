@@ -1,4 +1,4 @@
-import { fetchJson, fetchResolvedUrl } from '../http';
+import { fetchJson, fetchResolvedUrl, fetchResponse } from '../http';
 import type { LeaderboardBoard, MusicPlatformProvider, SongListSummary } from '../types';
 import { normalizeSong, normalizeSongListSummary, numberValue, stringValue } from '../types';
 import type { SearchResultSong } from '../../types';
@@ -32,6 +32,13 @@ function headers(keyword = ''): HeadersInit {
     sign: signature.sign,
     channel: '0146921',
     'User-Agent': 'Mozilla/5.0 (Linux; Android 11.0.0; zh-cn; MI 11 Build/OPR1.170623.032) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30',
+  };
+}
+
+function playlistHeaders(): HeadersInit {
+  return {
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1',
+    Referer: 'https://m.music.migu.cn/',
   };
 }
 
@@ -87,7 +94,33 @@ async function resolveMiguPlaylistId(value: string): Promise<string> {
     return direct;
   }
   if (/^https?:\/\//.test(value)) {
-    return parseMiguPlaylistId(await fetchResolvedUrl(value, { headers: headers() }));
+    try {
+      const response = await fetchResponse(value, {
+        headers: {
+          ...playlistHeaders(),
+          'X-Fetch-No-Redirect': '1',
+        },
+      });
+      const resolved = parseMiguPlaylistId(response.headers.get('location') || '') || parseMiguPlaylistId(response.url);
+      if (resolved) {
+        return resolved;
+      }
+    } catch {
+      // Fall through to runtime variants that ignore the custom redirect header.
+    }
+    try {
+      const response = await fetchResponse(value, {
+        headers: playlistHeaders(),
+        redirect: 'manual',
+      });
+      const resolved = parseMiguPlaylistId(response.headers.get('location') || '') || parseMiguPlaylistId(response.url);
+      if (resolved) {
+        return resolved;
+      }
+    } catch {
+      // Fall through to the default redirect-following path.
+    }
+    return parseMiguPlaylistId(await fetchResolvedUrl(value, { headers: playlistHeaders() }));
   }
   return '';
 }
@@ -95,7 +128,7 @@ async function resolveMiguPlaylistId(value: string): Promise<string> {
 async function loadMiguPlaylistInfo(listId: string): Promise<{ name: string; cover_url: string }> {
   try {
     const body = await fetchJson<any>(`https://c.musicapp.migu.cn/MIGUM3.0/resource/playlist/v2.0?playlistId=${encodeURIComponent(listId)}`, {
-      headers: headers(),
+      headers: playlistHeaders(),
     });
     return {
       name: stringValue(body.data?.title || body.data?.name),
@@ -138,8 +171,11 @@ export class MiguProvider implements MusicPlatformProvider {
   async songListDetail(id: string, page: number, pageSize: number): Promise<{ songs: SearchResultSong[]; total: number; name: string; cover_url?: string }> {
     try {
       const listId = await resolveMiguPlaylistId(id);
+      if (!listId) {
+        throw new Error('migu playlist id resolve failed');
+      }
       const songsBody = await fetchJson<any>(`https://app.c.nf.migu.cn/MIGUM3.0/resource/playlist/song/v2.0?pageNo=${page}&pageSize=${pageSize}&playlistId=${encodeURIComponent(listId)}`, {
-        headers: headers(),
+        headers: playlistHeaders(),
       });
       const info = await loadMiguPlaylistInfo(listId);
       return {

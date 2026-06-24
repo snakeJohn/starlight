@@ -106,4 +106,293 @@ describe('MiguProvider', () => {
       }],
     });
   });
+
+  test('resolves Migu short playlist links from redirect location headers when response.url is unchanged', async () => {
+    const shortLink = 'https://c.migu.cn/00DbQM?ifrom=45400458358ff67ed138b9dbdc4c3c9b';
+    const location = 'https://h5.nf.migu.cn/app/v4/p/share/playlist/index.html?id=234913063&channel=0146921&appId=music';
+    const cryptoMd5 = vi.fn(() => 'migu-sign');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === shortLink) {
+        expect(init?.redirect).toBe('manual');
+        return new Response('', {
+          status: 302,
+          headers: { location },
+        });
+      }
+      if (url.includes('playlist/song/v2.0')) {
+        expect(url).toContain('playlistId=234913063');
+        return new Response(JSON.stringify({
+          data: {
+            totalCount: 1,
+            songList: [{
+              name: '稻花香',
+              singerList: [{ name: '周杰伦' }],
+              album: '魔杰座',
+              duration: 180,
+              img1: '/cover.jpg',
+              songId: 'mg-song-1',
+            }],
+          },
+        }));
+      }
+      if (url.includes('resource/playlist/v2.0')) {
+        expect(url).toContain('playlistId=234913063');
+        return new Response(JSON.stringify({
+          code: '000000',
+          data: {
+            title: '测试歌单',
+            imgItem: { img: 'https://img.test/mg-list.jpg' },
+          },
+        }));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: { md5: cryptoMd5 },
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await new MiguProvider().songListDetail(shortLink, 1, 30);
+
+    expect(result).toMatchObject({
+      name: '测试歌单',
+      cover_url: 'https://img.test/mg-list.jpg',
+      total: 1,
+      songs: [{
+        title: '稻花香',
+        artist: '周杰伦',
+      }],
+    });
+  });
+
+  test('resolves Migu short playlist links when runtime only exposes a case-sensitive Location header', async () => {
+    const shortLink = 'https://c.migu.cn/00DbQM?ifrom=45400458358ff67ed138b9dbdc4c3c9b';
+    const location = 'https://h5.nf.migu.cn/app/v4/p/share/playlist/index.html?id=234913063&channel=0146921&appId=music';
+    const cryptoMd5 = vi.fn(() => 'migu-sign');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === shortLink) {
+        if (init?.redirect === 'manual') {
+          return {
+            ok: false,
+            status: 302,
+            url,
+            headers: {
+              get(name: string) {
+                return name === 'Location' ? location : null;
+              },
+            },
+            text: async () => '',
+          } as unknown as Response;
+        }
+        return {
+          ok: false,
+          status: 302,
+          url,
+          headers: {
+            get() {
+              return null;
+            },
+          },
+          text: async () => '',
+        } as unknown as Response;
+      }
+      if (url.includes('playlist/song/v2.0')) {
+        expect(url).toContain('playlistId=234913063');
+        return new Response(JSON.stringify({
+          data: {
+            totalCount: 1,
+            songList: [{
+              name: '稻花香',
+              singerList: [{ name: '周杰伦' }],
+              album: '魔杰座',
+              duration: 180,
+              img1: '/cover.jpg',
+              songId: 'mg-song-1',
+            }],
+          },
+        }));
+      }
+      if (url.includes('resource/playlist/v2.0')) {
+        expect(url).toContain('playlistId=234913063');
+        return new Response(JSON.stringify({
+          code: '000000',
+          data: {
+            title: '测试歌单',
+            imgItem: { img: 'https://img.test/mg-list.jpg' },
+          },
+        }));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: { md5: cryptoMd5 },
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await new MiguProvider().songListDetail(shortLink, 1, 30);
+
+    expect(result).toMatchObject({
+      name: '测试歌单',
+      cover_url: 'https://img.test/mg-list.jpg',
+      total: 1,
+      songs: [{
+        title: '稻花香',
+        artist: '周杰伦',
+      }],
+    });
+  });
+
+  test('resolves Migu short playlist links when the runtime only honors X-Fetch-No-Redirect headers', async () => {
+    const shortLink = 'https://c.migu.cn/00DbQM?ifrom=45400458358ff67ed138b9dbdc4c3c9b';
+    const location = 'https://h5.nf.migu.cn/app/v4/p/share/playlist/index.html?id=234913063&channel=0146921&appId=music';
+    const cryptoMd5 = vi.fn(() => 'migu-sign');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const headers = (init?.headers || {}) as Record<string, string>;
+      if (url === shortLink) {
+        if (headers['X-Fetch-No-Redirect'] === '1') {
+          return {
+            ok: false,
+            status: 302,
+            url: '',
+            headers: {
+              Location: location,
+            },
+            text: async () => '',
+          } as unknown as Response;
+        }
+        if (init?.redirect === 'manual') {
+          return {
+            ok: true,
+            status: 200,
+            url: '',
+            headers: {},
+            text: async () => '<html></html>',
+          } as unknown as Response;
+        }
+        const response = new Response('<html></html>', { status: 200 });
+        Object.defineProperty(response, 'url', { configurable: true, value: shortLink });
+        return response;
+      }
+      if (url.includes('playlist/song/v2.0')) {
+        expect(url).toContain('playlistId=234913063');
+        return new Response(JSON.stringify({
+          data: {
+            totalCount: 1,
+            songList: [{
+              name: '稻花香',
+              singerList: [{ name: '周杰伦' }],
+              album: '魔杰座',
+              duration: 180,
+              img1: '/cover.jpg',
+              songId: 'mg-song-1',
+            }],
+          },
+        }));
+      }
+      if (url.includes('resource/playlist/v2.0')) {
+        expect(url).toContain('playlistId=234913063');
+        return new Response(JSON.stringify({
+          code: '000000',
+          data: {
+            title: '测试歌单',
+            imgItem: { img: 'https://img.test/mg-list.jpg' },
+          },
+        }));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: { md5: cryptoMd5 },
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await new MiguProvider().songListDetail(shortLink, 1, 30);
+
+    expect(fetchMock).toHaveBeenCalledWith(shortLink, expect.objectContaining({
+      headers: expect.objectContaining({ 'X-Fetch-No-Redirect': '1' }),
+    }));
+    expect(result).toMatchObject({
+      name: '测试歌单',
+      cover_url: 'https://img.test/mg-list.jpg',
+      total: 1,
+      songs: [{
+        title: '稻花香',
+        artist: '周杰伦',
+      }],
+    });
+  });
+
+  test('uses mobile web headers for Migu playlist detail endpoints that reject signed-only requests', async () => {
+    const shortLink = 'https://c.migu.cn/00DbQM?ifrom=45400458358ff67ed138b9dbdc4c3c9b';
+    const finalUrl = 'https://h5.nf.migu.cn/app/v4/p/share/playlist/index.html?id=234913063&channel=0146921&appId=music';
+    const cryptoMd5 = vi.fn(() => 'migu-sign');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const headers = (init?.headers || {}) as Record<string, string>;
+      if (url === shortLink) {
+        const response = new Response('', { status: 200 });
+        Object.defineProperty(response, 'url', { configurable: true, value: finalUrl });
+        return response;
+      }
+      if (url.includes('playlist/song/v2.0')) {
+        if (headers.Referer !== 'https://m.music.migu.cn/') {
+          return new Response(JSON.stringify({ code: '199997', info: 'timestamp不对' }));
+        }
+        return new Response(JSON.stringify({
+          code: '000000',
+          data: {
+            totalCount: 1,
+            songList: [{
+              name: '稻花香',
+              singerList: [{ name: '周杰伦' }],
+              album: '魔杰座',
+              duration: 180,
+              img1: '/cover.jpg',
+              songId: 'mg-song-1',
+            }],
+          },
+        }));
+      }
+      if (url.includes('resource/playlist/v2.0')) {
+        if (headers.Referer !== 'https://m.music.migu.cn/') {
+          return new Response(JSON.stringify({ code: '199997', info: 'timestamp不对' }));
+        }
+        return new Response(JSON.stringify({
+          code: '000000',
+          data: {
+            title: '测试歌单',
+            imgItem: { img: 'https://img.test/mg-list.jpg' },
+          },
+        }));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: { md5: cryptoMd5 },
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await new MiguProvider().songListDetail(shortLink, 1, 30);
+
+    expect(result).toMatchObject({
+      name: '测试歌单',
+      cover_url: 'https://img.test/mg-list.jpg',
+      total: 1,
+      songs: [{
+        title: '稻花香',
+        artist: '周杰伦',
+      }],
+    });
+  });
 });
