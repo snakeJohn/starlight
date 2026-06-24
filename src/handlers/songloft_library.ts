@@ -78,6 +78,16 @@ function requireId(value: unknown, name = 'id'): string {
   return id;
 }
 
+function requirePositiveInteger(value: unknown, name = 'id'): number {
+  const id = requireId(value, name);
+  const parsed = Number(id);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new StarlightError('BAD_REQUEST', `invalid ${name}`);
+  }
+
+  return parsed;
+}
+
 function parseBody(req: { body?: unknown }): Record<string, unknown> {
   if (!req.body) return {};
   if (typeof req.body === 'string') {
@@ -190,7 +200,7 @@ export function registerSongloftLibraryHandlers(router: Router, options: Songlof
     handle(async () => normalizeList(await songloft.playlists.list())));
 
   router.get('/api/songloft/playlists/:id/songs', async (_req, params) =>
-    handle(async () => normalizeList(await songloft.playlists.getSongs(requireId(params.id) as unknown as number))));
+    handle(async () => normalizeList(await songloft.playlists.getSongs(requirePositiveInteger(params.id, 'playlist id')))));
 
   router.get('/api/songloft/local-songs', async () =>
     handle(async () => {

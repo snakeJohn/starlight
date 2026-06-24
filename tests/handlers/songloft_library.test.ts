@@ -36,7 +36,7 @@ type SongloftSongsStub = {
 
 type SongloftPlaylistsStub = {
   list: () => Promise<unknown>;
-  getSongs: (playlistId: string) => Promise<unknown>;
+  getSongs: (playlistId: number) => Promise<unknown>;
 };
 
 describe('registerSongloftLibraryHandlers', () => {
@@ -82,20 +82,41 @@ describe('registerSongloftLibraryHandlers', () => {
     });
   });
 
-  it('returns playlist songs from songloft.playlists.getSongs and normalizes songs/count responses', async () => {
+  it('returns playlist songs from songloft.playlists.getSongs using numeric playlist ids', async () => {
     (songloft.playlists as unknown as SongloftPlaylistsStub).getSongs = vi.fn(async () => ({
       songs: [{ id: 'song-2', title: 'Playlist Song' }],
       count: 11,
     }));
     const { router } = createHarness();
 
-    const response = await router.handle(request('GET', '/api/songloft/playlists/playlist-1/songs'));
+    const response = await router.handle(request('GET', '/api/songloft/playlists/2/songs'));
 
     expect(response.statusCode).toBe(200);
-    expect(songloft.playlists.getSongs).toHaveBeenCalledWith('playlist-1');
+    expect(songloft.playlists.getSongs).toHaveBeenCalledWith(2);
     expect(parseResponseBody(response).data).toEqual({
       list: [{ id: 'song-2', title: 'Playlist Song' }],
       total: 11,
+    });
+  });
+
+  it('rejects non-numeric playlist ids before calling songloft.playlists.getSongs', async () => {
+    (songloft.playlists as unknown as SongloftPlaylistsStub).getSongs = vi.fn(async () => ({
+      songs: [],
+      count: 0,
+    }));
+    const { router } = createHarness();
+
+    const response = await router.handle(request('GET', '/api/songloft/playlists/playlist-1/songs'));
+
+    expect(response.statusCode).toBe(400);
+    expect(songloft.playlists.getSongs).not.toHaveBeenCalled();
+    expect(parseResponseBody(response)).toEqual({
+      success: false,
+      data: null,
+      error: expect.objectContaining({
+        code: 'BAD_REQUEST',
+        message: expect.stringContaining('playlist id'),
+      }),
     });
   });
 
