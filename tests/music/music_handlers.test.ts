@@ -407,4 +407,52 @@ describe('registerMusicHandlers', () => {
       message: '不支持的音乐平台',
     });
   });
+
+  test('lyric route validates source_data and rejects empty payloads', async () => {
+    const { router } = createHarness();
+
+    const response = await router.handle(request('POST', '/api/music/lyric', {}));
+
+    expect(response.statusCode).toBe(400);
+    expect(parseResponseBody(response).error.code).toBe('BAD_REQUEST');
+  });
+
+  test('lyric route resolves lyrics from the platform source data', async () => {
+    const lyricText = '[ti:风起天阑]\n[ar:河图]\n[al:风起天阑]\n[by:]\n[offset:0]\n[00:00.00]风起天阑';
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        data: {
+          songinfo: {
+            songName: '风起天阑',
+            artist: '河图',
+            album: '风起天阑',
+          },
+          lrclist: [{ time: '0.00', lineLyric: '风起天阑' }],
+        },
+      }),
+    }) as unknown as Response);
+    vi.stubGlobal('fetch', fetchMock);
+    const { router } = createHarness();
+
+    const response = await router.handle(request('POST', '/api/music/lyric', {
+      source_data: {
+        platform: 'kw',
+        songInfo: {
+          source: 'kw',
+          name: '风起天阑',
+          singer: '河图',
+          album: '风起天阑',
+          duration: 301,
+          songmid: '62355680',
+        },
+      },
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response).data).toMatchObject({
+      lyric: lyricText,
+    });
+  });
 });

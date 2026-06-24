@@ -33,6 +33,9 @@ export interface LxSongInfo {
   strMediaMid?: string;
   albumMid?: string;
   albumId?: string;
+  lrcUrl?: string;
+  mrcUrl?: string;
+  trcUrl?: string;
   types?: Array<{ type: MusicQuality | string; size?: string }>;
 }
 

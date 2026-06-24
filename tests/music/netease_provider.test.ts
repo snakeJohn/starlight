@@ -5,6 +5,8 @@ function okJson(data: unknown): Response {
   return new Response(JSON.stringify(data), { status: 200 });
 }
 
+const originalCrypto = globalThis.crypto;
+
 function wySong(id: number): Record<string, unknown> {
   return {
     id,
@@ -19,6 +21,98 @@ describe('NeteaseProvider', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: originalCrypto,
+    });
+  });
+
+  it('uses the lxserver eapi song search flow for Netease songs', async () => {
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        md5: vi.fn(() => 'digest'),
+        aesEncrypt: vi.fn(() => ({ toString: (format?: string) => format === 'hex' ? 'ENCODED' : 'ENCODED' })),
+      },
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toContain('/eapi/search/song/list/page');
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBe('params=ENCODED');
+      return okJson({
+        code: 200,
+        data: {
+          totalCount: 1,
+          resources: [{
+            baseInfo: {
+              simpleSongData: {
+                id: 1001,
+                name: '风起天阑',
+                ar: [{ name: '河图' }],
+                al: { id: 2001, name: '风起天阑', picUrl: 'https://img.test/wy.jpg' },
+                dt: 301000,
+                privilege: { maxbr: 320000 },
+              },
+            },
+          }],
+        },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new NeteaseProvider().search('风起天阑 河图', 1, 5);
+
+    expect(result).toMatchObject({
+      total: 1,
+      list: [{
+        title: '风起天阑',
+        artist: '河图',
+        album: '风起天阑',
+        cover_url: 'https://img.test/wy.jpg',
+      }],
+    });
+  });
+
+  it('uses the lxserver eapi playlist search flow for Netease playlists', async () => {
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        md5: vi.fn(() => 'digest'),
+        aesEncrypt: vi.fn(() => ({ toString: (format?: string) => format === 'hex' ? 'ENCODED' : 'ENCODED' })),
+      },
+    });
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toContain('/eapi/cloudsearch/pc');
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBe('params=ENCODED');
+      return okJson({
+        code: 200,
+        result: {
+          playlistCount: 1,
+          playlists: [{
+            id: 3001,
+            name: '河图精选',
+            coverImgUrl: 'https://img.test/wy-list.jpg',
+            playCount: 88,
+            description: '古风歌单',
+          }],
+        },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new NeteaseProvider().songListSearch('河图', 1, 10);
+
+    expect(result).toEqual({
+      total: 1,
+      list: [{
+        id: '3001',
+        name: '河图精选',
+        cover_url: 'https://img.test/wy-list.jpg',
+        play_count: 88,
+        description: '古风歌单',
+      }],
+    });
   });
 
   it('loads playlist pages from trackIds when playlist tracks only contains the first 10 songs', async () => {

@@ -18,12 +18,15 @@ function singerNames(value: any): string {
 
 function mapTxSong(item: any): SearchResultSong {
   const albumMid = stringValue(item.album?.mid || item.albumMid);
+  const singerMid = stringValue(item.singer?.[0]?.mid);
   return normalizeSong('tx', {
-    name: item.name || item.title,
+    name: `${item.name || item.title || ''}${stringValue(item.title_extra)}`,
     singer: singerNames(item.singer),
     album: item.album?.name || item.albumName,
     duration: item.interval,
-    img: albumMid ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg` : '',
+    img: albumMid
+      ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`
+      : singerMid ? `https://y.gtimg.cn/music/photo_new/T001R500x500M000${singerMid}.jpg` : '',
     musicId: item.id || item.songId,
     songmid: item.mid || item.songmid,
     strMediaMid: item.file?.media_mid || item.strMediaMid,
@@ -59,16 +62,58 @@ export class QQMusicProvider implements MusicPlatformProvider {
   async search(keyword: string, page: number, pageSize: number): Promise<{ list: SearchResultSong[]; total: number }> {
     try {
       const body = await fetchJson<any>('https://u.y.qq.com/cgi-bin/musicu.fcg', musicuBody({
-        comm: { ct: '11', cv: '14090508' },
+        comm: {
+          ct: '11',
+          cv: '14090508',
+          v: '14090508',
+          tmeAppID: 'qqmusic',
+          phonetype: 'EBG-AN10',
+          deviceScore: '553.47',
+          devicelevel: '50',
+          newdevicelevel: '20',
+          rom: 'HuaWei/EMOTION/EmotionUI_14.2.0',
+          os_ver: '12',
+          OpenUDID: '0',
+          OpenUDID2: '0',
+          QIMEI36: '0',
+          udid: '0',
+          chid: '0',
+          aid: '0',
+          oaid: '0',
+          taid: '0',
+          tid: '0',
+          wid: '0',
+          uid: '0',
+          sid: '0',
+          modeSwitch: '6',
+          teenMode: '0',
+          ui_mode: '2',
+          nettype: '1020',
+          v4ip: '',
+        },
         req: {
           module: 'music.search.SearchCgiService',
           method: 'DoSearchForQQMusicMobile',
-          param: { search_type: 0, query: keyword, page_num: page, num_per_page: pageSize, highlight: 0 },
+          param: {
+            search_type: 0,
+            query: keyword,
+            page_num: page,
+            num_per_page: pageSize,
+            highlight: 0,
+            nqc_flag: 0,
+            multi_zhida: 0,
+            cat: 2,
+            grp: 1,
+            sin: 0,
+            sem: 0,
+          },
         },
       }));
       const data = body.req?.data || {};
       return {
-        list: Array.isArray(data.body?.item_song) ? data.body.item_song.map(mapTxSong) : [],
+        list: Array.isArray(data.body?.item_song)
+          ? data.body.item_song.filter((item: any) => item?.file?.media_mid).map(mapTxSong)
+          : [],
         total: numberValue(data.meta?.estimate_sum),
       };
     } catch {

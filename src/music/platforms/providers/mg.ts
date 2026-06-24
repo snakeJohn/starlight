@@ -51,6 +51,9 @@ function mapMgSong(item: any): SearchResultSong {
     songmid: item.songId || item.id,
     copyrightId: item.copyrightId,
     albumId: item.albumId,
+    lrcUrl: item.lrcUrl,
+    mrcUrl: item.mrcUrl,
+    trcUrl: item.trcUrl,
     types: [],
   });
 }

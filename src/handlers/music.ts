@@ -5,9 +5,10 @@ import { StarlightError } from '../system/errors';
 import { apiError, apiOk } from '../system/response';
 import type { PlatformRegistry } from '../music/platforms/registry';
 import type { MusicPlatformProvider } from '../music/platforms/types';
+import { resolveMusicLyric } from '../music/platforms/lyrics';
 import type { RuntimeManager } from '../music/runtime_manager';
 import type { SourceImportFile, SourceManager } from '../music/source_manager';
-import type { LxSongInfo } from '../music/types';
+import type { LxSongInfo, MusicPlatform } from '../music/types';
 
 interface SearchBody {
   keyword?: unknown;
@@ -39,6 +40,13 @@ interface UrlBody {
     quality?: unknown;
     songInfo?: unknown;
     starlight?: unknown;
+  };
+}
+
+interface LyricBody {
+  source_data?: {
+    platform?: unknown;
+    songInfo?: unknown;
   };
 }
 
@@ -362,7 +370,26 @@ export function registerMusicHandlers(
       );
     }));
 
-  router.post('/api/music/lyric', async () => handle(() => ({ lyric: '' })));
+  router.post('/api/music/lyric', async (req) =>
+    handle(async () => {
+      const body = parseJsonBody<LyricBody>(req);
+      const sourceData = body.source_data;
+      if (!sourceData || typeof sourceData !== 'object') {
+        throw new StarlightError('BAD_REQUEST', 'source_data is required');
+      }
+      const platform = stringField(sourceData.platform);
+      if (!platform) {
+        throw new StarlightError('BAD_REQUEST', 'source_data.platform is required');
+      }
+      if (!platforms.get(platform)) {
+        throw new StarlightError('MUSIC_PLATFORM_UNSUPPORTED', '不支持的音乐平台', false);
+      }
+      const songInfo = sourceData.songInfo;
+      if (!songInfo || typeof songInfo !== 'object') {
+        throw new StarlightError('BAD_REQUEST', 'source_data.songInfo is required');
+      }
+      return resolveMusicLyric(platform as MusicPlatform, songInfo as LxSongInfo);
+    }));
 }
 
 function musicUrlResolveFailureMessage(operation: 'playback' | 'download', attemptedCount: number, lastFailure: string | null): string {

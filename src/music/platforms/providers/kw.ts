@@ -30,13 +30,22 @@ function kwAlbumId(item: any): string {
   return stringValue(item.ALBUMID || item.albumid || item.albumId);
 }
 
+function isUsableCover(value: unknown): boolean {
+  const text = stringValue(value).trim();
+  if (!text) return false;
+  if (/^\d+$/.test(text)) return false;
+  return /^(https?:)?\/\//i.test(text) || text.startsWith('/') || text.includes('.jpg') || text.includes('.png') || text.includes('.webp');
+}
+
 function kwCover(item: any): string {
-  return stringValue(
-    item.pic
-    || item.albumpic
-    || item.prob_albumpic
-    || (item.web_albumpic_short ? `https://img4.kuwo.cn/star/albumcover/1000${item.web_albumpic_short}` : ''),
-  );
+  const direct = [item.pic, item.albumpic, item.prob_albumpic]
+    .map((value) => stringValue(value))
+    .find((value) => isUsableCover(value));
+  if (direct) {
+    return direct;
+  }
+  const short = stringValue(item.web_albumpic_short);
+  return short ? `https://img4.kuwo.cn/star/albumcover/1000${short}` : '';
 }
 
 function mapKwSong(item: any, coverOverride = ''): SearchResultSong {

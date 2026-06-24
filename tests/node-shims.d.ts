@@ -28,3 +28,13 @@ type BufferEncoding = 'utf8';
 declare const process: {
   cwd(): string;
 };
+
+type Buffer = Uint8Array & {
+  toString(encoding?: string): string;
+  subarray(start?: number, end?: number): Uint8Array;
+};
+
+declare const Buffer: {
+  from(data: string, encoding?: string): Buffer;
+  alloc(size: number): Buffer;
+};

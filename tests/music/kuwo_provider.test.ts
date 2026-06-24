@@ -11,6 +11,36 @@ describe('KuwoProvider', () => {
     vi.unstubAllGlobals();
   });
 
+  it('ignores numeric placeholder covers and falls back to web_albumpic_short', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      expect(url).toContain('search.kuwo.cn/r.s');
+      return response(JSON.stringify({
+        TOTAL: '1',
+        abslist: [{
+          MUSICRID: 'MUSIC_62355680',
+          SONGNAME: '风起天阑',
+          ARTIST: '河图',
+          ALBUM: '风起天阑',
+          DURATION: 301,
+          pic: '1',
+          albumpic: '2',
+          prob_albumpic: '3',
+          web_albumpic_short: '/44/10/2400396154.jpg',
+        }],
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new KuwoProvider().search('风起天阑 河图', 1, 5);
+
+    expect(result.list[0]).toMatchObject({
+      title: '风起天阑',
+      artist: '河图',
+      cover_url: 'https://img4.kuwo.cn/star/albumcover/1000/44/10/2400396154.jpg',
+    });
+  });
+
   it('fills ranking song covers from album info when rank rows have only album IDs', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);

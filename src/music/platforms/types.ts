@@ -37,6 +37,9 @@ export interface RawSong {
   strMediaMid?: unknown;
   albumMid?: unknown;
   albumId?: unknown;
+  lrcUrl?: unknown;
+  mrcUrl?: unknown;
+  trcUrl?: unknown;
   types?: unknown;
 }
 
@@ -83,6 +86,9 @@ export function normalizeSong(platform: MusicPlatform, raw: RawSong): SearchResu
         strMediaMid: stringValue(raw.strMediaMid),
         albumMid: stringValue(raw.albumMid),
         albumId: stringValue(raw.albumId),
+        lrcUrl: stringValue(raw.lrcUrl),
+        mrcUrl: stringValue(raw.mrcUrl),
+        trcUrl: stringValue(raw.trcUrl),
         types: Array.isArray(raw.types) ? raw.types : [],
       },
     },

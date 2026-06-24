@@ -1,4 +1,5 @@
 import { fetchJson } from '../http';
+import { neteaseEapiRequest } from '../netease_eapi';
 import type { LeaderboardBoard, MusicPlatformProvider, SongListSummary } from '../types';
 import { normalizeSong, normalizeSongListSummary, numberValue, stringValue } from '../types';
 import type { SearchResultSong } from '../../types';
@@ -67,15 +68,18 @@ export class NeteaseProvider implements MusicPlatformProvider {
 
   async search(keyword: string, page: number, pageSize: number): Promise<{ list: SearchResultSong[]; total: number }> {
     try {
-      const body = await fetchJson<any>('https://music.163.com/api/search/get/web', form({
-        s: keyword,
-        type: 1,
+      const body = await neteaseEapiRequest<any>('/api/search/song/list/page', {
+        keyword,
+        needCorrect: '1',
+        channel: 'typing',
         offset: pageSize * (page - 1),
+        scene: 'normal',
+        total: page === 1,
         limit: pageSize,
-      }));
+      });
       return {
-        list: Array.isArray(body.result?.songs) ? body.result.songs.map(mapWySong) : [],
-        total: numberValue(body.result?.songCount),
+        list: Array.isArray(body.data?.resources) ? body.data.resources.map(mapWySong) : [],
+        total: numberValue(body.data?.totalCount),
       };
     } catch {
       return { list: [], total: 0 };
@@ -84,12 +88,13 @@ export class NeteaseProvider implements MusicPlatformProvider {
 
   async songListSearch(keyword: string, page: number, pageSize: number): Promise<{ list: SongListSummary[]; total: number }> {
     try {
-      const body = await fetchJson<any>('https://music.163.com/api/search/get/web', form({
+      const body = await neteaseEapiRequest<any>('/api/cloudsearch/pc', {
         s: keyword,
         type: 1000,
-        offset: pageSize * (page - 1),
         limit: pageSize,
-      }));
+        total: page === 1,
+        offset: pageSize * (page - 1),
+      });
       return {
         list: Array.isArray(body.result?.playlists) ? body.result.playlists.map(summarizeWyList) : [],
         total: numberValue(body.result?.playlistCount),
