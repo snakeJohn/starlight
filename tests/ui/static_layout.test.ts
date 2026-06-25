@@ -182,6 +182,14 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('@media (max-width: 760px)');
   });
 
+  it('allows page scroll chaining after nested list controls reach their edge', () => {
+    const stylesheet = css();
+
+    expect(stylesheet).not.toContain('overscroll-behavior: contain');
+    expect(stylesheet).toMatch(/\.list-scroll\s*\{[^}]*overscroll-behavior-y:\s*auto/s);
+    expect(stylesheet).toMatch(/\.source-log-list\s*\{[^}]*overscroll-behavior-y:\s*auto/s);
+  });
+
   it('keeps download settings and progress at the bottom of merged source management', () => {
     const html = indexHtml();
     const sourcesStart = html.indexOf('<section class="tab-panel" id="tab-sources">');

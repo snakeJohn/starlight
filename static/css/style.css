@@ -423,7 +423,7 @@ textarea:focus {
 .list-scroll {
     max-height: min(62vh, 680px);
     overflow-y: auto;
-    overscroll-behavior: contain;
+    overscroll-behavior-y: auto;
     padding-right: 4px;
     scrollbar-gutter: stable;
 }
@@ -790,6 +790,7 @@ textarea:focus {
     gap: 10px;
     max-height: 62vh;
     overflow-y: auto;
+    overscroll-behavior-y: auto;
     scrollbar-gutter: stable;
 }
 
