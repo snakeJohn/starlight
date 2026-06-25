@@ -64,6 +64,40 @@ export async function fetchJson<T>(url: string, init: RequestInit = {}): Promise
   return JSON.parse(await fetchText(url, init)) as T;
 }
 
+export async function fetchBytes(url: string, init: RequestInit = {}): Promise<Uint8Array> {
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  }
+  const arrayBuffer = (response as { arrayBuffer?: unknown }).arrayBuffer;
+  if (typeof arrayBuffer === 'function') {
+    return new Uint8Array(await arrayBuffer.call(response));
+  }
+  const body = (response as { body?: unknown }).body;
+  if (body instanceof Uint8Array) {
+    return new Uint8Array(body);
+  }
+  if (body instanceof ArrayBuffer) {
+    return new Uint8Array(body);
+  }
+  if (Array.isArray(body)) {
+    return new Uint8Array(body);
+  }
+  if (typeof body === 'string') {
+    return binaryTextToBytes(body);
+  }
+  const text = await response.text();
+  return binaryTextToBytes(text);
+}
+
+function binaryTextToBytes(text: string): Uint8Array {
+  const bytes = new Uint8Array(text.length);
+  for (let index = 0; index < text.length; index += 1) {
+    bytes[index] = text.charCodeAt(index) & 0xff;
+  }
+  return bytes;
+}
+
 export async function fetchResolvedUrl(url: string, init: RequestInit = {}): Promise<string> {
   const response = await fetchResponse(url, init);
   if (!response.ok) {

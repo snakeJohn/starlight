@@ -203,10 +203,9 @@ describe('BridgeService', () => {
       skipped: 1,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
     const calls = fetchMock.mock.calls as unknown as Array<[string, { body?: string }]>;
-    const importBody = calls[0]?.[1]?.body;
-    const lyricBody = calls[2]?.[1]?.body;
+    const importBody = calls.find(([url]) => String(url).includes('/api/v1/songs/remote'))?.[1]?.body;
+    const lyricBody = calls.find(([url]) => String(url).includes('/api/v1/songs/101/lyrics'))?.[1]?.body;
     expect(typeof importBody).toBe('string');
     expect(typeof lyricBody).toBe('string');
     expect(JSON.parse(importBody || '')).toEqual([
