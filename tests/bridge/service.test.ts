@@ -21,7 +21,7 @@ const song = {
   source_data: {
     platform: 'kw',
     quality: '320k',
-    songInfo: { source: 'kw', name: 'Song', singer: 'Singer', album: 'Album', duration: 200, musicId: '123' },
+    songInfo: { source: 'kw', name: 'Song', singer: 'Singer', album: 'Album', duration: 200, musicId: '123', songmid: '123' },
   },
 } satisfies SearchResultSong;
 
@@ -42,6 +42,13 @@ function parseResponseBody(response: HTTPResponse): any {
   const body = response.body;
   const text = typeof body === 'string' ? body : new TextDecoder().decode(body);
   return JSON.parse(text);
+}
+
+function responseJson(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 function request(method: string, path: string, body?: unknown): HTTPRequest {
@@ -159,7 +166,27 @@ describe('BridgeService', () => {
   });
 
   it('imports songs best-effort and skips songs whose URLs cannot be resolved', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/songs/remote')) {
+        return responseJson({ songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }], count: 1 }, 201);
+      }
+      if (url.includes('m.kuwo.cn/newh5/singles/songinfoandlrc')) {
+        return responseJson({
+          data: {
+            songinfo: { songName: 'Song', artist: 'Singer', album: 'Album' },
+            lrclist: [
+              { time: 0, lineLyric: 'Song' },
+              { time: 0, lineLyric: 'Wind rises' },
+            ],
+          },
+        });
+      }
+      if (url.includes('/api/v1/songs/101/lyrics')) {
+        return responseJson({ message: 'ok', file_write_status: 'unchanged' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
     globalThis.fetch = fetchMock;
     const runtimes = {
       getMusicUrl: vi.fn(async (_platform: string, _quality: string, songInfo: { musicId?: string }) =>
@@ -176,14 +203,115 @@ describe('BridgeService', () => {
       skipped: 1,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const calls = fetchMock.mock.calls as unknown as Array<[string, { body: string }]>;
-    expect(JSON.parse(calls[0][1].body)).toEqual([
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const calls = fetchMock.mock.calls as unknown as Array<[string, { body?: string }]>;
+    const importBody = calls[0]?.[1]?.body;
+    const lyricBody = calls[2]?.[1]?.body;
+    expect(typeof importBody).toBe('string');
+    expect(typeof lyricBody).toBe('string');
+    expect(JSON.parse(importBody || '')).toEqual([
       expect.objectContaining({
         title: 'Song',
         url: 'https://audio.test/song.mp3',
       }),
     ]);
+    expect(JSON.parse(lyricBody || '')).toMatchObject({
+      lyric_source: 'scraped',
+      lyric: expect.stringContaining('[00:00.00]Song'),
+      tlyric: expect.stringContaining('[00:00.00]Wind rises'),
+    });
+  });
+
+  it('syncs lyrics into Songloft after importing a remote song', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/v1/songs/remote')) {
+        return responseJson({ songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }], count: 1 }, 201);
+      }
+      if (url.includes('m.kuwo.cn/newh5/singles/songinfoandlrc')) {
+        return responseJson({
+          data: {
+            songinfo: { songName: 'Song', artist: 'Singer', album: 'Album' },
+            lrclist: [
+              { time: 0, lineLyric: 'Song' },
+              { time: 0, lineLyric: 'Wind rises' },
+            ],
+          },
+        });
+      }
+      if (url.includes('/api/v1/songs/101/lyrics')) {
+        expect(init?.method).toBe('PUT');
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          lyric_source: 'scraped',
+          lyric: expect.stringContaining('[00:00.00]Song'),
+          tlyric: expect.stringContaining('[00:00.00]Wind rises'),
+        });
+        return responseJson({ message: '歌词已更新', file_write_status: 'unchanged' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const { service } = createService();
+
+    await expect(service.importSongs([song])).resolves.toMatchObject({
+      total: 1,
+      songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:18191/api/v1/songs/remote', expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:18191/api/v1/songs/101/lyrics', expect.any(Object));
+  });
+
+  it('keeps imported songs when lyric fetching fails', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/songs/remote')) {
+        return responseJson({ songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }], count: 1 }, 201);
+      }
+      if (url.includes('m.kuwo.cn/newh5/singles/songinfoandlrc')) {
+        return responseJson({ message: 'upstream failed' }, 500);
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const { service } = createService();
+
+    await expect(service.importSongs([song])).resolves.toMatchObject({
+      total: 1,
+      songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }],
+    });
+  });
+
+  it('keeps imported songs when lyric update fails', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/api/v1/songs/remote')) {
+        return responseJson({ songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }], count: 1 }, 201);
+      }
+      if (url.includes('m.kuwo.cn/newh5/singles/songinfoandlrc')) {
+        return responseJson({
+          data: {
+            songinfo: { songName: 'Song', artist: 'Singer', album: 'Album' },
+            lrclist: [
+              { time: 0, lineLyric: 'Song' },
+              { time: 0, lineLyric: 'Wind rises' },
+            ],
+          },
+        });
+      }
+      if (url.includes('/api/v1/songs/101/lyrics')) {
+        expect(init?.method).toBe('PUT');
+        return responseJson({ message: 'write failed' }, 500);
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const { service } = createService();
+
+    await expect(service.importSongs([song])).resolves.toMatchObject({
+      total: 1,
+      songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }],
+    });
   });
 
   it('imports resolved remote songs into Songloft and returns native song records', async () => {
