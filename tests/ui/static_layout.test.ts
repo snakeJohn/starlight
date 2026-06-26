@@ -26,6 +26,38 @@ function diagnosticsJs(): string {
   return readFileSync(resolve(process.cwd(), 'static/js/diagnostics.js'), 'utf8');
 }
 
+function musicSourcesJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/music_modules/sources.js'), 'utf8');
+}
+
+function musicDownloadsJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/music_modules/downloads.js'), 'utf8');
+}
+
+function musicSearchJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/music_modules/search.js'), 'utf8');
+}
+
+function musicSonglistsJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/music_modules/songlists.js'), 'utf8');
+}
+
+function musicRankingsJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/music_modules/rankings.js'), 'utf8');
+}
+
+function musicSongloftLibraryJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/music_modules/songloft_library.js'), 'utf8');
+}
+
+function musicCustomPlaylistsJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/music_modules/custom_playlists.js'), 'utf8');
+}
+
+function apiJs(): string {
+  return readFileSync(resolve(process.cwd(), 'static/js/api.js'), 'utf8');
+}
+
 function css(): string {
   return readFileSync(resolve(process.cwd(), 'static/css/style.css'), 'utf8');
 }
@@ -67,10 +99,16 @@ describe('static UI layout copy', () => {
 
   it('separates playlist import from custom playlist management and explains the target playlist', () => {
     const html = indexHtml();
+    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+    const customPlaylists = musicCustomPlaylistsJs();
 
     expect(html).toContain('<h2>导入歌单</h2>');
-    expect(html).toContain('加入目标歌单');
-    expect(html).toContain('搜索结果、榜单和歌单详情里的“加入歌单”会保存到这里');
+    expect(html).toContain('Songloft 目标歌单');
+    expect(html).toContain('搜索结果、榜单和歌单详情里的“加入歌单”会保存到选中的 Songloft 歌单');
+    expect(music).toContain("from './music_modules/custom_playlists.js'");
+    expect(customPlaylists).toContain("api.post('/custom-playlists/import'");
+    expect(customPlaylists).toContain("api.post(`/custom-playlists/${encodeURIComponent(playlistId)}/sync-songloft`)");
+    expect(customPlaylists).toContain('data-action="add-selected-custom-playlist-songs"');
   });
 
   it('orders songlist management before import and discovery', () => {
@@ -139,6 +177,9 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-action="clear-search-selection"');
     expect(html).toContain('data-action="import-selected-search"');
     expect(html).toContain('data-action="add-selected-search-to-playlist"');
+    expect(html).not.toContain('data-action="add-selected-search-to-songloft"');
+    expect(html).not.toContain('批量加入SL歌曲库');
+    expect(html).not.toContain('加入SL歌单');
     expect(html).toContain('data-action="download-selected-search"');
     expect(html).toContain('data-action="speaker-selected-search"');
     expect(html).toContain('批量推送音箱');
@@ -146,8 +187,10 @@ describe('static UI layout copy', () => {
 
   it('passes the selected quality through search requests', () => {
     const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+    const search = musicSearchJs();
 
-    expect(music).toContain('quality: query.quality');
+    expect(music).toContain("from './music_modules/search.js'");
+    expect(search).toContain('quality: query.quality');
   });
 
   it('adds highest-quality selectors to songlist and ranking pages', () => {
@@ -166,10 +209,14 @@ describe('static UI layout copy', () => {
 
   it('passes songlist and ranking quality through detail requests', () => {
     const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+    const songlists = musicSonglistsJs();
+    const rankings = musicRankingsJs();
 
-    expect(music).toContain('quality=${encodeURIComponent(context.quality)}');
-    expect(music).toContain('quality: body.quality || state.songlistQuality');
-    expect(music).toContain('const quality = $(\'[data-role="ranking-quality"]\')?.value || state.rankingQuality');
+    expect(music).toContain("from './music_modules/songlists.js'");
+    expect(music).toContain("from './music_modules/rankings.js'");
+    expect(songlists).toContain('quality=${encodeURIComponent(context.quality)}');
+    expect(songlists).toContain('quality: body.quality || state.songlistQuality');
+    expect(rankings).toContain('const quality = $(\'[data-role="ranking-quality"]\')?.value || state.rankingQuality');
   });
 
   it('defines scroll containers and mobile wrapping for long music lists', () => {
@@ -212,7 +259,7 @@ describe('static UI layout copy', () => {
 
   it('merges playback and download source management into one paged selectable control', () => {
     const html = indexHtml();
-    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+    const sourcesModule = musicSourcesJs();
     const sourcesStart = html.indexOf('<section class="tab-panel" id="tab-sources">');
     const logsStart = html.indexOf('<section class="tab-panel" id="tab-logs">');
     const sourcesHtml = html.slice(sourcesStart, logsStart);
@@ -224,29 +271,36 @@ describe('static UI layout copy', () => {
     expect(sourcesHtml).toContain('data-role="source-pagination"');
     expect(sourcesHtml).toContain('data-role="source-list"');
     expect(sourcesHtml).not.toContain('data-role="download-source-pagination"');
-    expect(music).toContain('const sourcePageSize = 10');
-    expect(music).toContain('data-role="${selectRole}"');
-    expect(music).toContain('mergeSourceRows');
-    expect(music).toContain("'toggle-playback-source'");
-    expect(music).toContain("'toggle-download-source'");
-    expect(music).toContain('/music/sources/batch-toggle');
-    expect(music).toContain('/download/sources/batch-toggle');
+    expect(sourcesModule).toContain('const sourcePageSize = 10');
+    expect(sourcesModule).toContain('data-role="${selectRole}"');
+    expect(sourcesModule).toContain('mergeSourceRows');
+    expect(sourcesModule).toContain("'toggle-playback-source'");
+    expect(sourcesModule).toContain("'toggle-download-source'");
+    expect(sourcesModule).toContain('/music/sources/batch-toggle');
+    expect(sourcesModule).toContain('/download/sources/batch-toggle');
   });
 
   it('imports zip packages by extracting contained JavaScript source files', () => {
-    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+    const sourcesModule = musicSourcesJs();
 
-    expect(music).toContain("import { readJavaScriptSourceFiles } from './zip_sources.js'");
-    expect(music).toContain('files: await readJavaScriptSourceFiles(file)');
-    expect(music).toContain('sourceImportSummary');
-    expect(music).toContain("api.post('/music/sources/import'");
-    expect(music).toContain("api.post('/download/sources/import'");
+    expect(sourcesModule).toContain("import { readJavaScriptSourceFiles } from '../zip_sources.js'");
+    expect(sourcesModule).toContain('files: await readJavaScriptSourceFiles(file)');
+    expect(sourcesModule).toContain('sourceImportSummary');
+    expect(sourcesModule).toContain("api.post('/music/sources/import'");
+    expect(sourcesModule).toContain("api.post('/download/sources/import'");
   });
 
   it('hides the top status platform chip', () => {
     const js = appJs();
 
     expect(js).not.toContain('<strong>平台</strong>');
+  });
+
+  it('does not render per-module init chips in the top status strip', () => {
+    const js = appJs();
+
+    expect(js).not.toContain('data-domain="${domain.id}"');
+    expect(js).not.toContain('${domainChips}');
   });
 
   it('marks ranking and automation layouts for narrower side panels and wrapping voice rows', () => {
@@ -440,6 +494,8 @@ describe('static UI layout copy', () => {
 
   it('mounts Songloft library controls for songs, playlists, and local songs', () => {
     const html = indexHtml();
+    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+    const songloftLibrary = musicSongloftLibraryJs();
 
     expect(html).toContain('<h2>Songloft 曲库</h2>');
     expect(html).toContain('data-action="load-songloft-songs"');
@@ -452,6 +508,71 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-role="songloft-local-songs"');
     expect(html).toContain('data-role="songloft-playlists"');
     expect(html).toContain('data-role="songloft-playlist-songs"');
+    expect(music).toContain("from './music_modules/songloft_library.js'");
+    expect(songloftLibrary).toContain("api.get('/songloft/songs')");
+    expect(songloftLibrary).toContain("api.get('/songloft/local-songs')");
+    expect(songloftLibrary).toContain("api.get('/songloft/playlists')");
+    expect(songloftLibrary).toContain("[data-action=\"view-songloft-playlist\"]");
+    expect(songloftLibrary).toContain("api.post('/custom-playlists/import-songloft'");
+    expect(songloftLibrary).toContain('import-songloft-playlist-to-custom');
+  });
+
+  it('mounts a unified Songloft target playlist dialog', () => {
+    const html = indexHtml();
+    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+    const state = stateJs();
+
+    expect(html).toContain('data-role="songloft-playlist-target-dialog"');
+    expect(html).toContain('data-role="songloft-target-playlist-select"');
+    expect(html).toContain('data-role="songloft-target-playlist-filter"');
+    expect(html).toContain('data-role="songloft-target-playlist-name"');
+    expect(html).toContain('data-action="refresh-songloft-target-playlists"');
+    expect(html).toContain('data-action="confirm-songloft-target"');
+    expect(html).toContain('data-role="songloft-target-song-count"');
+    expect(state).toContain('songloftTargetPlaylistId');
+    expect(state).toContain('songloftTargetPlaylistName');
+    expect(state).toContain('songloftTargetPlaylists');
+    expect(state).toContain('songloftTargetPendingSongs');
+    expect(music).toContain("from './music_modules/songloft_playlist_target.js'");
+    expect(music).toContain('bindSongloftPlaylistTarget');
+    expect(music).toContain('openSongloftPlaylistTarget');
+  });
+
+  it('wires unified playlist actions across search, songlists, rankings, and imported playlists', () => {
+    const html = indexHtml();
+    const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
+    const renderers = readFileSync(resolve(process.cwd(), 'static/js/music_modules/renderers.js'), 'utf8');
+    const search = musicSearchJs();
+    const songlists = musicSonglistsJs();
+    const rankings = musicRankingsJs();
+    const customPlaylists = musicCustomPlaylistsJs();
+
+    expect(html).toContain('data-action="add-selected-search-to-playlist"');
+    expect(renderers).toContain('add-to-playlist');
+    expect(renderers).not.toContain('add-to-songloft-playlist');
+    expect(renderers).toContain('import-songlist-to-playlist');
+    expect(music).toContain('if (action === \'add-to-playlist\') await openSongloftPlaylistTarget([song])');
+    expect(music).not.toContain('addSongToCustomPlaylist(selectedCustomPlaylistId(), song)');
+    expect(search).toContain('add-selected-search-to-playlist');
+    expect(search).not.toContain('add-selected-search-to-songloft');
+    expect(songlists).toContain('add-selected-songlist-detail-to-playlist');
+    expect(songlists).toContain('/songloft/playlists/import-source-songlist');
+    expect(rankings).toContain('add-selected-ranking-to-playlist');
+    expect(customPlaylists).toContain('add-selected-custom-playlist-songs');
+    expect(customPlaylists).toContain('add-custom-playlist-song');
+    expect(customPlaylists).not.toContain('add-selected-custom-playlist-songs-to-songloft');
+    expect(customPlaylists).not.toContain('add-custom-playlist-song-to-songloft');
+    expect(html).not.toContain('加入SL歌曲库');
+    expect(html).not.toContain('加入SL歌单');
+  });
+
+  it('keeps song row actions from squeezing playlist detail song titles', () => {
+    const stylesheet = css();
+
+    expect(stylesheet).toMatch(/\.song-row\.media-row\s*\{[\s\S]*grid-template-columns:\s*48px minmax\(0,\s*1fr\);/);
+    expect(stylesheet).toMatch(/\.song-row\.media-row \.row-actions\s*\{[\s\S]*grid-column:\s*2 \/ -1;/);
+    expect(stylesheet).toMatch(/\.song-row\.selectable-song-row\s*\{[\s\S]*grid-template-columns:\s*28px 48px minmax\(0,\s*1fr\);/);
+    expect(stylesheet).toMatch(/\.song-row\.selectable-song-row \.row-actions\s*\{[\s\S]*grid-column:\s*3 \/ -1;/);
   });
 
   it('keeps mobile voice records and bottom tabs within the viewport', () => {
@@ -460,7 +581,21 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('--bottom-tabs-height');
     expect(stylesheet).toContain('padding-bottom: var(--bottom-tabs-height)');
     expect(stylesheet).toContain('minmax(min(100%, 280px), 1fr)');
+    expect(stylesheet).toContain('grid-auto-flow: column;');
+    expect(stylesheet).toContain('grid-auto-columns: minmax(0, 1fr);');
     expect(stylesheet).not.toContain('grid-template-columns: repeat(auto-fit, minmax(280px, 1fr))');
+    expect(stylesheet).not.toContain('grid-template-columns: repeat(8, minmax(0, 1fr));');
+  });
+
+  it('wraps custom playlist detail actions and stacks voice record meta on mobile', () => {
+    const stylesheet = css();
+
+    expect(stylesheet).toContain('.custom-playlist-detail-panel .section-bar');
+    expect(stylesheet).toContain('.custom-playlist-detail-panel .inline-actions');
+    expect(stylesheet).toContain('.voice-record-meta');
+    expect(stylesheet).toMatch(/@media \(max-width: 760px\)\s*\{[\s\S]*\.custom-playlist-detail-panel \.section-bar\s*\{[\s\S]*flex-wrap:\s*wrap/s);
+    expect(stylesheet).toMatch(/@media \(max-width: 760px\)\s*\{[\s\S]*\.custom-playlist-detail-panel \.inline-actions\s*\{[\s\S]*width:\s*100%/s);
+    expect(stylesheet).toMatch(/@media \(max-width: 760px\)\s*\{[\s\S]*\.voice-record-meta\s*\{[\s\S]*flex-direction:\s*column/s);
   });
 
   it('adds a source diagnostics log menu with filtering and clearing controls', () => {
@@ -480,5 +615,45 @@ describe('static UI layout copy', () => {
     expect(diagnostics).toContain('/diagnostics/source-logs');
     expect(diagnostics).toContain('renderSourceLogs');
     expect(stylesheet).toContain('.source-log-row');
+  });
+
+  it('keeps static assets and plugin API requests relative to the Songloft plugin entry path', () => {
+    const html = indexHtml();
+    const api = apiJs();
+
+    expect(html).toContain('href="static/css/style.css"');
+    expect(html).toContain('src="static/js/app.js"');
+    expect(html).toContain('href="static/icon.svg"');
+    expect(html).not.toContain('/api/v1/jsplugin/starlight/static/');
+    expect(api).toContain("const BASE = 'api'");
+    expect(api).not.toContain('/api/v1/jsplugin');
+  });
+
+  it('maps Starlight visual tokens to Songloft and Material theme variables', () => {
+    const stylesheet = css();
+
+    expect(stylesheet).toContain('--host-surface');
+    expect(stylesheet).toContain('--md-sys-color-surface');
+    expect(stylesheet).toContain('--md-surface');
+    expect(stylesheet).toContain('--host-primary');
+    expect(stylesheet).toContain('--md-sys-color-primary');
+    expect(stylesheet).toContain('--host-outline');
+    expect(stylesheet).toContain('--md-sys-color-outline-variant');
+    expect(stylesheet).toContain('--host-on-surface');
+    expect(stylesheet).toContain('--md-sys-color-on-surface');
+  });
+
+  it('defines layered glass tokens and applies them to shell surfaces and controls', () => {
+    const stylesheet = css();
+
+    expect(stylesheet).toContain('--surface-elevated');
+    expect(stylesheet).toContain('--surface-control');
+    expect(stylesheet).toContain('--hairline');
+    expect(stylesheet).toContain('--focus-ring');
+    expect(stylesheet).toMatch(/\.side-rail,\s*\.status-strip\s*\{[^}]*background:\s*var\(--surface-elevated\)/s);
+    expect(stylesheet).toMatch(/\.bottom-tabs\s*\{[^}]*background:\s*var\(--surface-elevated\)/s);
+    expect(stylesheet).toMatch(/input,\s*select,\s*textarea\s*\{[^}]*background:\s*var\(--surface-control\)/s);
+    expect(stylesheet).toMatch(/input,\s*select,\s*textarea\s*\{[^}]*border:\s*1px solid var\(--hairline\)/s);
+    expect(stylesheet).toMatch(/input:focus,\s*select:focus,\s*textarea:focus\s*\{[^}]*box-shadow:\s*0 0 0 3px var\(--focus-ring\)/s);
   });
 });

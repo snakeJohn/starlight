@@ -7,7 +7,7 @@ import { ConfigManager } from '../config/manager';
 import { ConversationMonitor } from '../conversation/monitor';
 import { Scheduler } from '../schedule/scheduler';
 import { VoiceEngine } from '../voicecmd/engine';
-import { resolveHostBaseUrl, setHostBaseUrl } from '../utils/http';
+import { getHostBaseUrl, setHostBaseUrl } from '../utils/http';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
 function parseBody(req: HTTPRequest): any {
@@ -44,6 +44,14 @@ function getServerHostStatus(host: string): string {
   return 'ok';
 }
 
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, parsed));
+}
+
 /**
  * 注册配置相关路由
  * GET  /config → 获取配置
@@ -62,12 +70,20 @@ export function registerConfigHandlers(
     try {
       const config = await configManager.getConfig();
       const aiConfig = await configManager.getAIConfig();
-      const songloftHost = await resolveHostBaseUrl(config.server_host);
+      let suggestedAddresses: string[] = [];
+      try {
+        const plugin = songloft.plugin as unknown as { getNetworkAddresses?: () => Promise<string[]> };
+        if (typeof plugin.getNetworkAddresses === 'function') {
+          suggestedAddresses = await plugin.getNetworkAddresses();
+        }
+      } catch {
+        suggestedAddresses = [];
+      }
       return jsonResponse({
         success: true,
         data: {
           server_host: config.server_host,
-          songloft_host: songloftHost,
+          songloft_host: getHostBaseUrl(),
           conversation_monitor_enabled: config.conversation_monitor_enabled,
           voice_command_enabled: config.voice_command_enabled,
           scheduled_tasks_enabled: config.scheduled_tasks_enabled,
@@ -76,11 +92,17 @@ export function registerConfigHandlers(
           external_search_enabled: !!config.external_search_enabled,
           external_search_url: config.external_search_url || '',
           external_search_token: config.external_search_token || '',
+          external_search_playlist_id: config.external_search_playlist_id ?? '',
+          external_search_timeout: config.external_search_timeout ?? 6,
           extra_music_api_models: config.extra_music_api_models || [],
           indicator_light_enabled: !!config.indicator_light_enabled,
           interrupt_tts_hint_enabled: !!config.interrupt_tts_hint_enabled,
           interrupt_tts_hint_text: config.interrupt_tts_hint_text || '正在搜索，请稍候',
+          conversation_poll_interval: config.conversation_poll_interval ?? 1,
+          smart_resume_timeout: config.smart_resume_timeout ?? 30,
+          max_song_index: config.max_song_index ?? 10000,
           server_host_status: getServerHostStatus(config.server_host),
+          suggested_addresses: suggestedAddresses,
           ai_config: aiConfig,
         },
       });
@@ -94,6 +116,8 @@ export function registerConfigHandlers(
     try {
       const body = parseBody(req);
       const config = await configManager.getConfig();
+      let shouldRestartConversationMonitor = false;
+      let shouldStopConversationMonitor = false;
 
       // 更新 server_host
       if (body.server_host !== undefined) {
@@ -115,10 +139,11 @@ export function registerConfigHandlers(
         const enabled = !!body.conversation_monitor_enabled;
         config.conversation_monitor_enabled = enabled;
         if (enabled) {
-          conversationMonitor.stop();   // 先确保清理旧状态
-          conversationMonitor.start();  // 再干净启动
+          shouldRestartConversationMonitor = true;
+          shouldStopConversationMonitor = false;
         } else {
-          conversationMonitor.stop();
+          shouldStopConversationMonitor = true;
+          shouldRestartConversationMonitor = false;
         }
       }
 
@@ -149,6 +174,18 @@ export function registerConfigHandlers(
         config.external_search_enabled = !!body.external_search_enabled;
       }
 
+      // 更新 external_search_playlist_id
+      if (body.external_search_playlist_id !== undefined) {
+        config.external_search_playlist_id = typeof body.external_search_playlist_id === 'string'
+          ? body.external_search_playlist_id.trim()
+          : String(body.external_search_playlist_id);
+      }
+
+      // 更新 external_search_timeout
+      if (body.external_search_timeout !== undefined) {
+        config.external_search_timeout = clampNumber(body.external_search_timeout, 3, 60, 6);
+      }
+
       // 更新 indicator_light_enabled
       if (body.indicator_light_enabled !== undefined) {
         config.indicator_light_enabled = !!body.indicator_light_enabled;
@@ -164,6 +201,25 @@ export function registerConfigHandlers(
         config.interrupt_tts_hint_text = typeof body.interrupt_tts_hint_text === 'string'
           ? body.interrupt_tts_hint_text.trim()
           : '正在搜索，请稍候';
+      }
+
+      // 更新 conversation_poll_interval（联动 Monitor 重启）
+      if (body.conversation_poll_interval !== undefined) {
+        config.conversation_poll_interval = clampNumber(body.conversation_poll_interval, 1, 30, 1);
+        if (config.conversation_monitor_enabled) {
+          shouldRestartConversationMonitor = true;
+          shouldStopConversationMonitor = false;
+        }
+      }
+
+      // 更新 smart_resume_timeout
+      if (body.smart_resume_timeout !== undefined) {
+        config.smart_resume_timeout = clampNumber(body.smart_resume_timeout, 5, 120, 30);
+      }
+
+      // 更新 max_song_index
+      if (body.max_song_index !== undefined) {
+        config.max_song_index = clampNumber(body.max_song_index, 1000, 100000, 10000);
       }
 
       // 更新 extra_music_api_models
@@ -210,10 +266,19 @@ export function registerConfigHandlers(
 
       await configManager.saveConfig(config);
 
+      if (shouldStopConversationMonitor) {
+        conversationMonitor.stop();
+      } else if (shouldRestartConversationMonitor) {
+        conversationMonitor.stop();
+        conversationMonitor.start();
+      }
+
       // 检查保存后的地址是否有效，附带 warning
       let warning = '';
-      if (config.server_host && isLoopbackAddress(config.server_host)) {
-        warning = 'Songloft 访问地址为本地回环地址，MIoT 智能音箱可能无法通过此地址播放音乐。';
+      if (!config.server_host) {
+        warning = 'Songloft 访问地址为空，MIoT 智能音箱将无法播放音乐。请配置局域网或公网可访问地址。';
+      } else if (isLoopbackAddress(config.server_host)) {
+        warning = 'Songloft 访问地址为本地回环地址，MIoT 智能音箱无法通过此地址播放音乐。请配置局域网或公网可访问地址。';
       }
 
       const resp: any = { success: true };

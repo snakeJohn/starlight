@@ -26,7 +26,11 @@ export interface LxSongInfo {
   singer: string;
   album: string;
   duration: number;
+  id?: string;
+  mid?: string;
   musicId?: string;
+  rid?: string;
+  songId?: string;
   songmid?: string;
   hash?: string;
   copyrightId?: string;

@@ -40,9 +40,14 @@ function defaultPluginConfig(): PluginConfig {
     external_search_enabled: false,
     external_search_url: '',
     external_search_token: '',
+    external_search_playlist_id: '',
+    external_search_timeout: 6,
     indicator_light_enabled: true,
     interrupt_tts_hint_enabled: false,
     interrupt_tts_hint_text: '正在搜索，请稍候',
+    conversation_poll_interval: 1,
+    smart_resume_timeout: 30,
+    max_song_index: 10000,
     ai_config: defaultAIConfig(),
   };
 }
@@ -86,9 +91,10 @@ export class ConfigManager {
 
   // ===== 全局配置 =====
 
-  /** 获取插件全局配置 */
+  /** 获取插件全局配置（与默认值合并，确保新增字段有默认值） */
   async getConfig(): Promise<PluginConfig> {
-    return this.load<PluginConfig>(STORAGE_KEY_CONFIG, defaultPluginConfig());
+    const stored = await this.load<Partial<PluginConfig>>(STORAGE_KEY_CONFIG, {});
+    return { ...defaultPluginConfig(), ...stored };
   }
 
   /** 保存插件全局配置 */

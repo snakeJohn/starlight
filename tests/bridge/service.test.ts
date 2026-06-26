@@ -61,6 +61,13 @@ function request(method: string, path: string, body?: unknown): HTTPRequest {
   } as HTTPRequest;
 }
 
+async function flushBackgroundSync(): Promise<void> {
+  for (let index = 0; index < 20; index += 1) {
+    await Promise.resolve();
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function createService(options: {
   url?: string | null;
   playResult?: boolean;
@@ -171,7 +178,7 @@ describe('BridgeService', () => {
       if (url.includes('/api/v1/songs/remote')) {
         return responseJson({ songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }], count: 1 }, 201);
       }
-      if (url.includes('m.kuwo.cn/newh5/singles/songinfoandlrc')) {
+      if (url.includes('openapi/v1/www/lyric/getlyric') || url.includes('newh5/singles/songinfoandlrc')) {
         return responseJson({
           data: {
             songinfo: { songName: 'Song', artist: 'Singer', album: 'Album' },
@@ -201,7 +208,9 @@ describe('BridgeService', () => {
     await expect(service.importSongsBestEffort([song, secondSong])).resolves.toMatchObject({
       total: 1,
       skipped: 1,
+      songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }],
     });
+    await flushBackgroundSync();
 
     const calls = fetchMock.mock.calls as unknown as Array<[string, { body?: string }]>;
     const importBody = calls.find(([url]) => String(url).includes('/api/v1/songs/remote'))?.[1]?.body;
@@ -227,7 +236,7 @@ describe('BridgeService', () => {
       if (url.includes('/api/v1/songs/remote')) {
         return responseJson({ songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }], count: 1 }, 201);
       }
-      if (url.includes('m.kuwo.cn/newh5/singles/songinfoandlrc')) {
+      if (url.includes('openapi/v1/www/lyric/getlyric') || url.includes('newh5/singles/songinfoandlrc')) {
         return responseJson({
           data: {
             songinfo: { songName: 'Song', artist: 'Singer', album: 'Album' },
@@ -256,6 +265,7 @@ describe('BridgeService', () => {
       total: 1,
       songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }],
     });
+    await flushBackgroundSync();
 
     expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:18191/api/v1/songs/remote', expect.any(Object));
     expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:18191/api/v1/songs/101/lyrics', expect.any(Object));
@@ -313,6 +323,32 @@ describe('BridgeService', () => {
     });
   });
 
+  it('returns imported songs without waiting for lyric synchronization to finish', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/songs/remote')) {
+        return responseJson({ songs: [{ id: 101, type: 'remote', title: 'Song', artist: 'Singer' }], count: 1 }, 201);
+      }
+      if (url.includes('newh5/singles/songinfoandlrc')) {
+        return await new Promise<Response>(() => {});
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const { service } = createService();
+
+    const result = Promise.race([
+      service.importSongs([song]).then(() => 'resolved'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 10)),
+    ]);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(result).resolves.toBe('resolved');
+    vi.useRealTimers();
+  });
+
   it('imports resolved remote songs into Songloft and returns native song records', async () => {
     const nativeSong = { id: 101, type: 'remote', title: 'Song', artist: 'Singer' };
     const fetchMock = vi.fn(async () => ({
@@ -339,9 +375,9 @@ describe('BridgeService', () => {
       expect.objectContaining({
         title: 'Song',
         url: 'https://audio.test/song.mp3',
-        plugin_entry_path: '',
-        source_data: '',
-        dedup_key: '',
+        plugin_entry_path: 'starlight',
+        source_data: JSON.stringify(song.source_data),
+        dedup_key: 'kw:123',
       }),
     ]);
   });
@@ -395,31 +431,121 @@ describe('BridgeService', () => {
 
   it('retries duplicate-conflicting remote imports one by one and treats existing songs as imported', async () => {
     const duplicateBody = '{"detail":"constraint failed: UNIQUE constraint failed: songs.plugin_entry_path, songs.dedup_key (2067)"}';
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        text: vi.fn(async () => duplicateBody),
-      } as unknown as Response)
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        text: vi.fn(async () => duplicateBody),
-      } as unknown as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-      } as Response);
+    let remoteImportCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/songs/remote')) {
+        remoteImportCalls += 1;
+        if (remoteImportCalls <= 2) {
+          return new Response(duplicateBody, { status: 500 });
+        }
+        return responseJson({ songs: [{ id: 102, title: 'Second Song', artist: 'Singer' }], count: 1 }, 201);
+      }
+      if (url === 'http://127.0.0.1:18191/api/v1/songs?type=remote&keyword=Song&limit=20&offset=0') {
+        return responseJson({ songs: [{ id: 101, title: 'Song', artist: 'Singer', plugin_entry_path: 'starlight', dedup_key: 'kw:123' }] });
+      }
+      if (url.includes('openapi/v1/www/lyric/getlyric') || url.includes('newh5/singles/songinfoandlrc')) {
+        return responseJson({ data: { songinfo: {}, lrclist: [] } });
+      }
+      if (url.includes('/api/v1/songs/') && url.includes('/lyrics')) {
+        return responseJson({ message: 'ok' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
     globalThis.fetch = fetchMock;
     const { service } = createService();
 
-    await expect(service.importSongs([song, secondSong])).resolves.toMatchObject({ total: 2 });
+    await expect(service.importSongs([song, secondSong])).resolves.toMatchObject({
+      total: 2,
+      songs: [{ id: 101 }, { id: 102 }],
+    });
+    await flushBackgroundSync();
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(remoteImportCalls).toBe(3);
     const calls = fetchMock.mock.calls as unknown as Array<[string, { body: string }]>;
-    expect(JSON.parse(calls[0][1].body)).toHaveLength(2);
-    expect(JSON.parse(calls[1][1].body)).toHaveLength(1);
-    expect(JSON.parse(calls[2][1].body)).toHaveLength(1);
+    const remoteBodies = calls
+      .filter(([url]) => String(url).endsWith('/api/v1/songs/remote'))
+      .map(([, init]) => JSON.parse(init.body));
+    expect(remoteBodies[0]).toHaveLength(2);
+    expect(remoteBodies[1]).toHaveLength(1);
+    expect(remoteBodies[2]).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:18191/api/v1/songs?type=remote&keyword=Song&limit=20&offset=0',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('finds existing Songloft remote song ids after duplicate conflicts so playlist imports can add them', async () => {
+    const duplicateBody = '{"detail":"constraint failed: UNIQUE constraint failed: songs.plugin_entry_path, songs.dedup_key (2067)"}';
+    let remoteImportCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/songs/remote')) {
+        remoteImportCalls += 1;
+        if (remoteImportCalls <= 2) {
+          return new Response(duplicateBody, { status: 500 });
+        }
+        return responseJson({
+          songs: [{
+            id: 102,
+            type: 'remote',
+            title: 'Second Song',
+            artist: 'Singer',
+            plugin_entry_path: 'starlight',
+            dedup_key: 'kw:456',
+          }],
+          count: 1,
+        }, 201);
+      }
+      if (url === 'http://127.0.0.1:18191/api/v1/songs?type=remote&keyword=Song&limit=20&offset=0') {
+        expect(init?.method).toBe('GET');
+        return responseJson({
+          songs: [{
+            id: 101,
+            type: 'remote',
+            title: 'Song',
+            artist: 'Singer',
+            plugin_entry_path: 'starlight',
+            dedup_key: 'kw:123',
+          }],
+          total: 1,
+        });
+      }
+      if (url.includes('openapi/v1/www/lyric/getlyric') || url.includes('newh5/singles/songinfoandlrc')) {
+        return responseJson({ data: { songinfo: {}, lrclist: [] } });
+      }
+      if (url.includes('/api/v1/songs/') && url.includes('/lyrics')) {
+        return responseJson({ message: 'ok' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const { service } = createService();
+
+    const result = await service.importSongsBestEffort([song, secondSong]);
+    await flushBackgroundSync();
+
+    expect(result).toMatchObject({
+      total: 2,
+      skipped: 0,
+      songs: [
+        { id: 101, type: 'remote', title: 'Song', artist: 'Singer' },
+        { id: 102, type: 'remote', title: 'Second Song', artist: 'Singer' },
+      ],
+    });
+
+    const remoteBodies = fetchMock.mock.calls
+      .filter(([url]) => String(url).endsWith('/api/v1/songs/remote'))
+      .map(([, init]) => JSON.parse(String((init as RequestInit)?.body)));
+    expect(remoteBodies[0][0]).toMatchObject({
+      title: 'Song',
+      plugin_entry_path: 'starlight',
+      dedup_key: 'kw:123',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:18191/api/v1/songs?type=remote&keyword=Song&limit=20&offset=0',
+      expect.objectContaining({ method: 'GET' }),
+    );
   });
 
   it('returns an empty import result without fetching Songloft for an explicit empty song list', async () => {

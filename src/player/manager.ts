@@ -7,7 +7,7 @@
 import { ConfigManager } from '../config/manager';
 import { MinaService } from '../service/service';
 import { URLBuilder } from './url_builder';
-import { resolveHostBaseUrl, callHostAPI } from '../utils/http';
+import { getHostBaseUrl, setHostBaseUrl, callHostAPI } from '../utils/http';
 import type { PlayState, PlayMode, PlayerStatus } from '../types';
 import { sourceDiagnostics } from '../diagnostics/source_logs';
 
@@ -89,6 +89,101 @@ function safePlaybackUrl(url: string): string {
   } catch {
     return url.replace(/access_token=[^&\s]+/gi, 'access_token=[redacted]');
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object');
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+}
+
+function firstString(record: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = readString(record[key]);
+    if (value) return value;
+  }
+  return '';
+}
+
+function firstNumber(record: Record<string, unknown>, ...keys: string[]): number {
+  for (const key of keys) {
+    const value = readNumber(record[key]);
+    if (value > 0) return value;
+  }
+  return 0;
+}
+
+function isLocalSongRecord(record: Record<string, unknown>): boolean {
+  if (record.local === true || record.local === 1) {
+    return true;
+  }
+  const marker = readString(record.local).toLowerCase();
+  if (marker === 'true' || marker === '1' || marker === 'yes' || marker === 'local') {
+    return true;
+  }
+  const type = readString(record.type).toLowerCase().replace(/[\s_-]+/g, '');
+  return type === 'local' || type === 'localsong' || type === '本地';
+}
+
+function songListFrom(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) {
+    return value.filter(isRecord);
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+  for (const key of ['list', 'items', 'songs', 'data']) {
+    const list = value[key];
+    if (Array.isArray(list)) {
+      return list.filter(isRecord);
+    }
+  }
+  return [];
+}
+
+function normalizePlayerSongs(value: unknown): PlayerSong[] {
+  return songListFrom(value)
+    .map((record) => {
+      const id = firstNumber(record, 'id', 'song_id', 'songId');
+      const title = firstString(record, 'title', 'name', 'songName', 'song_name') || '未知歌曲';
+      const url = firstString(record, 'url', 'play_url', 'playUrl') || (id > 0 ? `/api/v1/songs/${id}/play` : '');
+      const type = isLocalSongRecord(record) ? 'local' : (firstString(record, 'type') || 'remote');
+      return {
+        id,
+        type,
+        title,
+        artist: firstString(record, 'artist', 'singer', 'author', 'singerName') || '未知歌手',
+        album: firstString(record, 'album', 'albumName'),
+        duration: firstNumber(record, 'duration'),
+        file_path: firstString(record, 'file_path', 'filePath'),
+        url,
+        cover_path: firstString(record, 'cover_path', 'coverPath'),
+        cover_url: firstString(record, 'cover_url', 'coverUrl', 'picUrl', 'img'),
+        lyric_url: firstString(record, 'lyric_url', 'lyricUrl'),
+        file_size: firstNumber(record, 'file_size', 'fileSize'),
+        format: firstString(record, 'format'),
+        bit_rate: firstNumber(record, 'bit_rate', 'bitRate'),
+        sample_rate: firstNumber(record, 'sample_rate', 'sampleRate'),
+        is_live: record.is_live === true || record.isLive === true,
+        cache_hash: firstString(record, 'cache_hash', 'cacheHash'),
+      };
+    })
+    .filter(song => Boolean(song.url));
 }
 
 // ===== PlaylistManager - 单设备播放管理器 =====
@@ -529,12 +624,12 @@ export class PlaylistManager {
 
       // 使用 songloft.playlists.getSongs 桥接调用（与 Go WASM 版本的 hostFunctions.CallRouter 等价）
       // 这样不需要 hostBaseUrl 和 pluginToken，直接通过内部桥接访问数据库
-      const songs = await songloft.playlists.getSongs(playlistId, { limit: 100000 });
-      if (!songs || !Array.isArray(songs)) {
+      const songs = normalizePlayerSongs(await songloft.playlists.getSongs(playlistId, { limit: 100000 }));
+      if (songs.length === 0) {
         songloft.log.error('[PlaylistManager] Bridge returned invalid songs data for playlist: ' + playlistId);
         return false;
       }
-      this.songs = songs as any;
+      this.songs = songs;
       return songs.length > 0;
     } catch (e) {
       songloft.log.error('[PlaylistManager] Failed to load playlist songs: ' + String(e));
@@ -588,11 +683,21 @@ export class PlaylistManager {
       }
     }
 
-    // 读取是否强制 MP3
     const config = await this.configManager.getConfig();
-    const serverHost = await resolveHostBaseUrl(config.server_host);
+    if (config.server_host) {
+      setHostBaseUrl(config.server_host);
+    }
+    const serverHost = getHostBaseUrl();
     if (!serverHost) {
-      songloft.log.error('[PlaylistManager] Songloft host URL not available');
+      const message = 'Songloft 访问地址未配置，MIoT 智能音箱无法访问歌曲播放地址。请在插件设置中填写局域网或公网可访问地址。';
+      songloft.log.error('[PlaylistManager] ' + message);
+      recordSpeakerPlaybackDiagnostic(song, 'failed', message);
+      return 'failed';
+    }
+    if (isLoopbackPlaybackUrl(serverHost)) {
+      const message = `Songloft 访问地址是本地回环地址，音箱无法访问：${safePlaybackUrl(serverHost)}`;
+      songloft.log.error('[PlaylistManager] ' + message);
+      recordSpeakerPlaybackDiagnostic(song, 'failed', message);
       return 'failed';
     }
     const forceMp3 = !!config.force_mp3;
@@ -923,10 +1028,7 @@ export class PlaylistManagerMap {
             songs = result;
           }
         } else {
-          const result = await songloft.playlists.getSongs(devCfg.playlist_id, { limit: 100000 });
-          if (result && Array.isArray(result)) {
-            songs = result as any;
-          }
+          songs = normalizePlayerSongs(await songloft.playlists.getSongs(devCfg.playlist_id, { limit: 100000 }));
         }
       } catch (e) {
         songloft.log.warn('[PlaylistManagerMap] Failed to load songs via bridge: ' + String(e));

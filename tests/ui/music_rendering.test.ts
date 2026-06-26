@@ -16,7 +16,7 @@ interface MusicRenderingModule {
 }
 
 async function loadMusicModule(): Promise<MusicRenderingModule> {
-  const modulePath = '../../static/js/music.js';
+  const modulePath = '../../static/js/music_modules/renderers.js';
   return await import(modulePath) as MusicRenderingModule;
 }
 
@@ -48,7 +48,11 @@ describe('music media rendering', () => {
     expect(html).not.toContain('>播放</button>');
     expect(html).toContain('data-action="download"');
     expect(html).toContain('>下载</button>');
-    expect(html).toContain('导入 Songloft 歌曲库');
+    expect(html).toContain('加入歌曲库');
+    expect(html).not.toContain('加入SL歌曲库');
+    expect(html).toContain('data-action="add-to-playlist"');
+    expect(html).not.toContain('data-action="add-to-songloft-playlist"');
+    expect(html).not.toContain('加入SL歌单');
     expect(html).not.toContain('>试听<');
     expect(html).not.toContain('>导入<');
     expect(html).not.toContain('228908');
@@ -99,6 +103,8 @@ describe('music media rendering', () => {
     expect(html).toContain('洛雪精选');
     expect(html).toContain('收藏');
     expect(html).toContain('data-action="favorite-songlist"');
+    expect(html).toContain('整单加入歌单');
+    expect(html).not.toContain('整单加入SL歌单');
     expect(html).not.toContain('3360244412');
   });
 

@@ -37,9 +37,14 @@ function pluginConfig(overrides: Partial<PluginConfig> = {}): PluginConfig {
     external_search_enabled: false,
     external_search_url: '',
     external_search_token: '',
+    external_search_playlist_id: '',
+    external_search_timeout: 6,
     indicator_light_enabled: true,
     interrupt_tts_hint_enabled: false,
     interrupt_tts_hint_text: '正在搜索，请稍候',
+    conversation_poll_interval: 1,
+    smart_resume_timeout: 30,
+    max_song_index: 10000,
     ai_config: {
       enabled: false,
       api_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -80,13 +85,16 @@ describe('registerConfigHandlers', () => {
     return { router, configManager, monitor, scheduler, voiceEngine };
   }
 
-  it('does not warn about loopback when Songloft host is auto-detected and no server_host is configured', async () => {
+  it('warns when the Songloft access host is empty', async () => {
     const { router, configManager } = createHarness();
 
     const response = await router.handle(request('POST', '/config', { timezone: 'Asia/Hong_Kong' }));
 
     expect(response.statusCode).toBe(200);
-    expect(parseResponseBody(response)).toEqual({ success: true });
+    expect(parseResponseBody(response)).toEqual({
+      success: true,
+      warning: 'Songloft 访问地址为空，MIoT 智能音箱将无法播放音乐。请配置局域网或公网可访问地址。',
+    });
     expect(configManager.saveConfig).toHaveBeenCalledWith(expect.objectContaining({
       server_host: '',
       timezone: 'Asia/Hong_Kong',
@@ -97,6 +105,7 @@ describe('registerConfigHandlers', () => {
     const { router, configManager, monitor, voiceEngine } = createHarness();
 
     const response = await router.handle(request('PUT', '/config', {
+      server_host: 'http://songloft.test:18191',
       timezone: 'Asia/Hong_Kong',
       conversation_monitor_enabled: true,
       voice_command_enabled: true,
@@ -105,6 +114,7 @@ describe('registerConfigHandlers', () => {
     expect(response.statusCode).toBe(200);
     expect(parseResponseBody(response)).toEqual({ success: true });
     expect(configManager.saveConfig).toHaveBeenCalledWith(expect.objectContaining({
+      server_host: 'http://songloft.test:18191',
       timezone: 'Asia/Hong_Kong',
       conversation_monitor_enabled: true,
       voice_command_enabled: true,
@@ -112,5 +122,62 @@ describe('registerConfigHandlers', () => {
     expect(monitor.stop).toHaveBeenCalledTimes(1);
     expect(monitor.start).toHaveBeenCalledTimes(1);
     expect(voiceEngine.setEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('returns runtime tuning fields in GET /config', async () => {
+    const { router } = createHarness(pluginConfig({
+      external_search_playlist_id: '12',
+      external_search_timeout: 9,
+      conversation_poll_interval: 2,
+      smart_resume_timeout: 45,
+      max_song_index: 20000,
+    }));
+
+    const response = await router.handle(request('GET', '/config'));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response).data).toEqual(expect.objectContaining({
+      external_search_playlist_id: '12',
+      external_search_timeout: 9,
+      conversation_poll_interval: 2,
+      smart_resume_timeout: 45,
+      max_song_index: 20000,
+    }));
+  });
+
+  it('saves clamped runtime tuning fields before restarting conversation monitoring', async () => {
+    const events: string[] = [];
+    const { router, configManager, monitor } = createHarness(pluginConfig({
+      conversation_monitor_enabled: true,
+    }));
+    vi.mocked(configManager.saveConfig).mockImplementation(async () => {
+      events.push('save');
+    });
+    vi.mocked(monitor.stop).mockImplementation(() => {
+      events.push('stop');
+    });
+    vi.mocked(monitor.start).mockImplementation(() => {
+      events.push('start');
+    });
+
+    const response = await router.handle(request('PUT', '/config', {
+      conversation_monitor_enabled: true,
+      conversation_poll_interval: 45,
+      smart_resume_timeout: 2,
+      max_song_index: 42,
+      external_search_playlist_id: '  12  ',
+      external_search_timeout: 99,
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(configManager.saveConfig).toHaveBeenCalledWith(expect.objectContaining({
+      conversation_monitor_enabled: true,
+      conversation_poll_interval: 30,
+      smart_resume_timeout: 5,
+      max_song_index: 1000,
+      external_search_playlist_id: '12',
+      external_search_timeout: 60,
+    }));
+    expect(events).toEqual(['save', 'stop', 'start']);
   });
 });

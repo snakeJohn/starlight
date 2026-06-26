@@ -1,9 +1,11 @@
 import type { HTTPResponse, Router } from '@songloft/plugin-sdk';
 import { apiError, apiOk } from '../system/response';
-import { StarlightError } from '../system/errors';
+import { StarlightError, toStarlightError } from '../system/errors';
 import type { PlaylistManagerMap, PlayerSong } from '../player/manager';
 import { isPlayMode } from '../player/modes';
 import type { PlayMode } from '../types';
+import { parseJsonBody, type JsonBodyRequest } from '../system/body';
+import type { PlaylistImportSong } from '../songloft/playlist_service';
 
 interface NormalizedList {
   list: unknown[];
@@ -12,13 +14,128 @@ interface NormalizedList {
 
 interface SongloftLibraryHandlerOptions {
   playlistManagerMap?: PlaylistManagerMap;
+  playlistService?: SongloftPlaylistHandlerService;
+}
+
+interface SongloftPlaylistHandlerService {
+  createPlaylist(name: string): Promise<unknown>;
+  importSongsToPlaylist(input: ImportSongsToPlaylistBody): Promise<unknown>;
+  importSourceSonglist(input: ImportSourceSonglistBody): Promise<unknown>;
+}
+
+type SongloftImportJobType = 'songs' | 'source-songlist';
+type SongloftImportJobStatus = 'running' | 'done' | 'failed';
+
+interface SongloftImportJob {
+  id: string;
+  type: SongloftImportJobType;
+  status: SongloftImportJobStatus;
+  started_at: string;
+  updated_at: string;
+  result?: unknown;
+  error?: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    details: Record<string, unknown>;
+  };
+}
+
+interface ImportSongsToPlaylistBody {
+  playlist_id?: unknown;
+  playlist_name?: string;
+  songs: PlaylistImportSong[];
+}
+
+interface ImportSourceSonglistBody {
+  source_id: string;
+  id: string;
+  quality?: string;
+  playlist_name?: string;
 }
 
 const LIST_KEYS = ['list', 'items', 'songs', 'playlists'] as const;
+const MAX_IMPORT_JOBS = 50;
 
-async function handle(fn: () => unknown | Promise<unknown>): Promise<HTTPResponse> {
+class SongloftImportJobs {
+  private readonly jobs = new Map<string, SongloftImportJob>();
+
+  start(type: SongloftImportJobType, runner: () => Promise<unknown>): SongloftImportJob {
+    const now = new Date().toISOString();
+    const job: SongloftImportJob = {
+      id: importJobId(),
+      type,
+      status: 'running',
+      started_at: now,
+      updated_at: now,
+    };
+    this.jobs.set(job.id, job);
+    this.prune();
+
+    try {
+      const pending = runner();
+      pending.then((result) => {
+        job.status = 'done';
+        job.result = result;
+        job.updated_at = new Date().toISOString();
+      }).catch((error) => {
+        this.fail(job, error);
+      });
+    } catch (error) {
+      this.fail(job, error);
+    }
+
+    return this.snapshot(job, true);
+  }
+
+  get(id: unknown): SongloftImportJob {
+    const jobId = requireId(id, 'job id');
+    const job = this.jobs.get(jobId);
+    if (!job) {
+      throw new StarlightError('BAD_REQUEST', 'Songloft import job not found');
+    }
+    return this.snapshot(job);
+  }
+
+  private fail(job: SongloftImportJob, error: unknown): void {
+    const starlightError = toStarlightError(error);
+    job.status = 'failed';
+    job.error = {
+      code: starlightError.code,
+      message: starlightError.message,
+      retryable: starlightError.retryable,
+      details: starlightError.details,
+    };
+    job.updated_at = new Date().toISOString();
+    songloft.log.warn(`[SongloftImportJobs] ${job.type} job failed: ${starlightError.message}`);
+  }
+
+  private snapshot(job: SongloftImportJob, started = false): SongloftImportJob & { started?: true; job_id?: string } {
+    return {
+      ...job,
+      ...(started ? { started: true as const, job_id: job.id } : {}),
+      ...(job.error ? { error: { ...job.error, details: { ...job.error.details } } } : {}),
+    };
+  }
+
+  private prune(): void {
+    const overflow = this.jobs.size - MAX_IMPORT_JOBS;
+    if (overflow <= 0) return;
+    for (const [id, job] of this.jobs) {
+      if (job.status === 'running') continue;
+      this.jobs.delete(id);
+      if (this.jobs.size <= MAX_IMPORT_JOBS) break;
+    }
+  }
+}
+
+function importJobId(): string {
+  return `slimp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function handle(fn: () => unknown | Promise<unknown>, successStatus = 200): Promise<HTTPResponse> {
   try {
-    return apiOk(await fn());
+    return apiOk(await fn(), successStatus);
   } catch (error) {
     const statusCode = error instanceof StarlightError && error.code === 'BAD_REQUEST' ? 400 : 500;
     return apiError(error, statusCode);
@@ -104,8 +221,90 @@ function parseBody(req: { body?: unknown }): Record<string, unknown> {
   }
 }
 
+function requirePlaylistService(options: SongloftLibraryHandlerOptions): SongloftPlaylistHandlerService {
+  if (!options.playlistService) {
+    throw new StarlightError('INTERNAL_ERROR', 'Songloft playlist service not available');
+  }
+  return options.playlistService;
+}
+
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function stringishValue(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim();
+  return '';
+}
+
+function requireStringValue(value: unknown, name: string): string {
+  const text = stringishValue(value);
+  if (!text) {
+    throw new StarlightError('BAD_REQUEST', `${name} is required`);
+  }
+  return text;
+}
+
+function optionalStringValue(value: unknown): string | undefined {
+  const text = stringishValue(value);
+  return text || undefined;
+}
+
+function requireSearchSongs(value: unknown): PlaylistImportSong[] {
+  if (!Array.isArray(value)) {
+    throw new StarlightError('BAD_REQUEST', 'songs must be an array');
+  }
+  for (const song of value) {
+    requireSearchSong(song);
+  }
+  return value as PlaylistImportSong[];
+}
+
+function requireSearchSong(value: unknown): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new StarlightError('BAD_REQUEST', 'song must be an object');
+  }
+  const song = value as Record<string, unknown>;
+  if (!stringishValue(song.title)) {
+    throw new StarlightError('BAD_REQUEST', 'song.title is required');
+  }
+  const sourceData = song.source_data;
+  if (sourceData === undefined || sourceData === null) {
+    return;
+  }
+  if (typeof sourceData !== 'object' || Array.isArray(sourceData)) {
+    throw new StarlightError('BAD_REQUEST', 'song.source_data must be an object');
+  }
+  const source = sourceData as Record<string, unknown>;
+  requireStringValue(source.platform, 'song.source_data.platform');
+  requireStringValue(source.quality, 'song.source_data.quality');
+  if (!source.songInfo || typeof source.songInfo !== 'object' || Array.isArray(source.songInfo)) {
+    throw new StarlightError('BAD_REQUEST', 'song.source_data.songInfo is required');
+  }
+}
+
+function parseImportSongsBody(req: JsonBodyRequest): ImportSongsToPlaylistBody {
+  const body = parseJsonBody<Record<string, unknown>>(req);
+  const playlistName = optionalStringValue(body.playlist_name);
+  if (body.playlist_id === undefined && !playlistName) {
+    throw new StarlightError('BAD_REQUEST', 'playlist_id or playlist_name is required');
+  }
+  return {
+    ...(body.playlist_id !== undefined ? { playlist_id: body.playlist_id } : {}),
+    ...(playlistName ? { playlist_name: playlistName } : {}),
+    songs: requireSearchSongs(body.songs),
+  };
+}
+
+function parseImportSourceSonglistBody(req: JsonBodyRequest): ImportSourceSonglistBody {
+  const body = parseJsonBody<Record<string, unknown>>(req);
+  return {
+    source_id: requireStringValue(body.source_id, 'source_id'),
+    id: requireStringValue(body.id ?? body.sourceListId ?? body.source_list_id ?? body.link ?? body.url, 'id'),
+    ...(optionalStringValue(body.quality) ? { quality: optionalStringValue(body.quality) } : {}),
+    ...(optionalStringValue(body.playlist_name) ? { playlist_name: optionalStringValue(body.playlist_name) } : {}),
+  };
 }
 
 function numberValue(value: unknown): number {
@@ -194,10 +393,42 @@ function isTruthyLocalMarker(value: unknown): boolean {
 }
 
 export function registerSongloftLibraryHandlers(router: Router, options: SongloftLibraryHandlerOptions = {}): void {
+  const importJobs = new SongloftImportJobs();
+
   router.get('/api/songloft/songs', async () => handle(async () => normalizeList(await songloft.songs.list())));
 
   router.get('/api/songloft/playlists', async () =>
     handle(async () => normalizeList(await songloft.playlists.list())));
+
+  router.post('/api/songloft/playlists', async (req) =>
+    handle(async () => {
+      const body = parseJsonBody<Record<string, unknown>>(req);
+      const service = requirePlaylistService(options);
+      return service.createPlaylist(requireStringValue(body.name, 'name'));
+    }, 201));
+
+  router.post('/api/songloft/playlists/import-songs', async (req) =>
+    handle(async () => requirePlaylistService(options).importSongsToPlaylist(parseImportSongsBody(req))));
+
+  router.post('/api/songloft/playlists/import-songs/jobs', async (req) =>
+    handle(() => {
+      const service = requirePlaylistService(options);
+      const input = parseImportSongsBody(req);
+      return importJobs.start('songs', () => service.importSongsToPlaylist(input));
+    }, 202));
+
+  router.post('/api/songloft/playlists/import-source-songlist', async (req) =>
+    handle(async () => requirePlaylistService(options).importSourceSonglist(parseImportSourceSonglistBody(req)), 201));
+
+  router.post('/api/songloft/playlists/import-source-songlist/jobs', async (req) =>
+    handle(() => {
+      const service = requirePlaylistService(options);
+      const input = parseImportSourceSonglistBody(req);
+      return importJobs.start('source-songlist', () => service.importSourceSonglist(input));
+    }, 202));
+
+  router.get('/api/songloft/playlists/import-jobs/:id', async (_req, params) =>
+    handle(() => importJobs.get(params.id)));
 
   router.get('/api/songloft/playlists/:id/songs', async (_req, params) =>
     handle(async () => normalizeList(await songloft.playlists.getSongs(requirePositiveInteger(params.id, 'playlist id')))));

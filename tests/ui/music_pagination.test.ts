@@ -11,7 +11,7 @@ interface MusicModule {
 }
 
 async function loadMusicModule(): Promise<MusicModule> {
-  const modulePath = '../../static/js/music.js';
+  const modulePath = '../../static/js/music_modules/pagination.js';
   return await import(modulePath) as MusicModule;
 }
 

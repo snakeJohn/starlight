@@ -55,6 +55,12 @@ function createHarness() {
     delete: vi.fn(async (id: string) => ({ id })),
     addSong: vi.fn(async () => ({ ...playlist, songs: [] })),
     importNetworkPlaylist: vi.fn(async () => ({ ...playlist, source: 'kw', sourceListId: '3360244412' })),
+    importSongloftPlaylistSnapshot: vi.fn(async () => ({
+      ...playlist,
+      name: 'Songloft 收藏',
+      native_playlist_id: 88,
+      songs: [{ title: '本地歌曲', artist: '歌手', stable_key: 'songloft:501' }],
+    })),
     syncToSongloftPlaylist: vi.fn(async (id: string) => ({ playlist: { ...playlist, id, native_playlist_id: 77 }, total: 1, skipped: 0, errors: [] })),
     refreshNetworkPlaylist: vi.fn(async (_id: string, loader: (source: 'kw', sourceListId: string) => Promise<unknown>) => {
       await loader('kw', '3360244412');
@@ -232,5 +238,30 @@ describe('registerCustomPlaylistHandlers', () => {
       skipped: 0,
     });
     expect(service.syncToSongloftPlaylist).toHaveBeenCalledWith('imported_1');
+  });
+
+  it('imports Songloft native playlists into custom playlist snapshots', async () => {
+    const { router, service } = createHarness();
+    (songloft.playlists as unknown as Record<string, unknown>).getSongs = vi.fn(async () => ({
+      songs: [{ id: 501, title: '本地歌曲', artist: '歌手', album: '专辑', cover_url: 'https://img.test/local.jpg' }],
+      total: 1,
+    }));
+
+    const response = await router.handle(request('POST', '/api/custom-playlists/import-songloft', {
+      playlist_id: 88,
+      name: 'Songloft 收藏',
+    }));
+
+    expect(response.statusCode).toBe(201);
+    expect(songloft.playlists.getSongs).toHaveBeenCalledWith(88);
+    expect(service.importSongloftPlaylistSnapshot).toHaveBeenCalledWith({
+      nativePlaylistId: 88,
+      name: 'Songloft 收藏',
+      songs: [{ id: 501, title: '本地歌曲', artist: '歌手', album: '专辑', cover_url: 'https://img.test/local.jpg' }],
+    });
+    expect(parseResponseBody(response).data).toMatchObject({
+      name: 'Songloft 收藏',
+      native_playlist_id: 88,
+    });
   });
 });

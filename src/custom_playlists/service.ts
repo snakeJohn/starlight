@@ -90,6 +90,31 @@ function nativeId(value: unknown): string | number | undefined {
   return undefined;
 }
 
+function toNativePlaylistSong(song: Record<string, unknown>): CustomPlaylistSong {
+  const id = nativeId(song);
+  const title = stringField(song.title) || stringField(song.name) || '未知歌曲';
+  const artist = stringField(song.artist) || stringField(song.singer) || stringField(song.author) || '未知歌手';
+  const album = stringField(song.album) || stringField(song.albumName);
+  const duration = typeof song.duration === 'number' && Number.isFinite(song.duration)
+    ? song.duration
+    : typeof song.duration === 'string' && Number.isFinite(Number(song.duration))
+      ? Number(song.duration)
+      : 0;
+  return {
+    title,
+    artist,
+    album,
+    duration,
+    cover_url: stringField(song.cover_url) || stringField(song.coverUrl) || stringField(song.picUrl),
+    ...(id !== undefined ? { native_song_id: id } : {}),
+    stable_key: id !== undefined ? `songloft:${id}` : stableSongTextKey({ title, artist }),
+  };
+}
+
+function stringField(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 export class CustomPlaylistService {
   constructor(
     private readonly store: CustomPlaylistStore,
@@ -207,6 +232,39 @@ export class CustomPlaylistService {
     };
     playlists.push(playlist);
     await this.store.saveAll(playlists);
+    return playlist;
+  }
+
+  async importSongloftPlaylistSnapshot(input: {
+    nativePlaylistId: string | number;
+    name: string;
+    songs: Array<Record<string, unknown>>;
+  }): Promise<CustomPlaylist> {
+    const normalizedName = normalizeName(input.name);
+    if (!normalizedName) {
+      throw new StarlightError('BAD_REQUEST', 'playlist name is required');
+    }
+    const nativePlaylistId = input.nativePlaylistId;
+    const playlists = await this.store.loadAll();
+    const existing = playlists.find((playlist) => String(playlist.native_playlist_id) === String(nativePlaylistId));
+    const timestamp = nowIso();
+    const songs = input.songs.map(toNativePlaylistSong);
+    const playlist: CustomPlaylist = {
+      ...(existing ?? {
+        id: createId('songloft'),
+        imported_at: timestamp,
+      }),
+      name: normalizedName,
+      cover_url: songs[0]?.cover_url || existing?.cover_url || '',
+      native_playlist_id: nativePlaylistId,
+      native_playlist_name: normalizedName,
+      updated_at: timestamp,
+      songs,
+    };
+
+    await this.store.saveAll(existing
+      ? playlists.map((item) => (item.id === existing.id ? playlist : item))
+      : [...playlists, playlist]);
     return playlist;
   }
 

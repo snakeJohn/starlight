@@ -47,18 +47,28 @@ function createRuntime(url = 'https://download.test/song.flac') {
 }
 
 function installRemoteImport(songId = 501) {
-  const fetchMock = vi.fn(async () => ({
-    ok: true,
-    status: 201,
-    json: vi.fn(async () => ({ songs: [{ id: songId, type: 'remote', title: 'Song' }], count: 1 })),
-  }) as unknown as Response);
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (isDownloadProbeRequest(input)) {
+      return audioProbeResponse();
+    }
+
+    return {
+      ok: true,
+      status: 201,
+      json: vi.fn(async () => ({ songs: [{ id: songId, type: 'remote', title: 'Song' }], count: 1 })),
+    } as unknown as Response;
+  });
   globalThis.fetch = fetchMock;
   return fetchMock;
 }
 
 function installRemoteImports(songIds: number[]) {
   let index = 0;
-  const fetchMock = vi.fn(async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (isDownloadProbeRequest(input)) {
+      return audioProbeResponse();
+    }
+
     const songId = songIds[Math.min(index, songIds.length - 1)];
     index += 1;
     return {
@@ -69,6 +79,18 @@ function installRemoteImports(songIds: number[]) {
   });
   globalThis.fetch = fetchMock;
   return fetchMock;
+}
+
+function isDownloadProbeRequest(input: RequestInfo | URL): boolean {
+  return String(input).startsWith('https://download.test/');
+}
+
+function audioProbeResponse(): Response {
+  return {
+    ok: true,
+    status: 206,
+    headers: { get: () => 'audio/flac' },
+  } as unknown as Response;
 }
 
 function createProvider(id: MusicPlatformProvider['id'], search: MusicPlatformProvider['search']): MusicPlatformProvider {
@@ -257,7 +279,8 @@ describe('DownloadService', () => {
       songmid: '123',
     }));
     expect(playbackRuntimes.getMusicUrl).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://download.test/working.flac');
     expect(downloadMock).toHaveBeenCalledTimes(1);
   });
 

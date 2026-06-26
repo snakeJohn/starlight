@@ -57,6 +57,8 @@ function createEngine(options?: {
   indexedPlaylist?: IndexedPlaylist | null;
   indexedSongLocation?: Awaited<ReturnType<IndexingManager['findSongByName']>>;
   standaloneSong?: Awaited<ReturnType<IndexingManager['findStandaloneSongByName']>>;
+  indexReady?: boolean;
+  refreshResult?: { success: boolean; songCount: number; playlistCount: number };
   externalSearchEnabled?: boolean;
   bridgeService?: {
     externalSearch: ReturnType<typeof vi.fn>;
@@ -96,8 +98,8 @@ function createEngine(options?: {
     getOrCreate: vi.fn(async () => playlistManager),
   } as unknown as PlaylistManagerMap;
   const indexingManager = {
-    isIndexReady: vi.fn(() => true),
-    refresh: vi.fn(async () => ({ success: true, songCount: 0, playlistCount: 0 })),
+    isIndexReady: vi.fn(() => options?.indexReady ?? true),
+    refresh: vi.fn(async () => options?.refreshResult ?? { success: true, songCount: 0, playlistCount: 0 }),
     searchPlaylist: vi.fn(() => []),
     findPlaylistByName: vi.fn(() => options?.indexedPlaylist ?? null),
     findSongByName: vi.fn(async () => options?.indexedSongLocation ?? null),
@@ -155,7 +157,7 @@ describe('VoiceEngine Songloft library matching', () => {
     expect(songloft.playlists.getSongs).not.toHaveBeenCalled();
   });
 
-  it('plays a matched Songloft playlist as a standalone speaker queue when no custom playlist matches', async () => {
+  it('plays a matched Songloft playlist through the playlist manager when no custom playlist matches', async () => {
     const songloft = testSongloft();
     songloft.playlists.list = vi.fn(async () => [{ id: 301, name: '雨夜' }]);
     songloft.playlists.getSongs = vi.fn(async () => [
@@ -176,17 +178,28 @@ describe('VoiceEngine Songloft library matching', () => {
 
     await engine.handleMessage(message('播放歌单 雨夜'));
 
-    expect(songloft.playlists.getSongs).toHaveBeenCalledWith(301, expect.any(Object));
-    expect(playlistManager.playStandalone).toHaveBeenCalledWith([
-      expect.objectContaining({
-        id: 44,
-        type: 'remote',
-        title: '雨一直下',
-        artist: '张宇',
-        url: 'https://audio.test/rain.mp3',
-      }),
-    ], 0, 'order');
+    expect(playlistManager.play).toHaveBeenCalledWith(301, 0, 'order');
+    expect(playlistManager.playStandalone).not.toHaveBeenCalled();
+    expect(songloft.playlists.getSongs).not.toHaveBeenCalled();
     expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌单：雨夜');
+  });
+
+  it('plays a matched Songloft playlist even when the local index refresh fails', async () => {
+    const songloft = testSongloft();
+    songloft.playlists.list = vi.fn(async () => [{ id: 1, name: '收藏' }]);
+    const { engine, playlistManager, indexingManager } = createEngine({
+      customPlaylists: [],
+      indexedPlaylist: null,
+      indexReady: false,
+      refreshResult: { success: false, songCount: 0, playlistCount: 0 },
+    });
+
+    await engine.handleMessage(message('播放歌单收藏'));
+
+    expect(songloft.playlists.list).toHaveBeenCalled();
+    expect(indexingManager.refresh).not.toHaveBeenCalled();
+    expect(playlistManager.play).toHaveBeenCalledWith(1, 0, 'order');
+    expect(playlistManager.playStandalone).not.toHaveBeenCalled();
   });
 
   it('plays a local Songloft library song before a remote match with the same title', async () => {
@@ -224,7 +237,7 @@ describe('VoiceEngine Songloft library matching', () => {
         type: 'local',
         title: '小幸运',
         artist: '本地歌手',
-        url: 'http://127.0.0.1:18191/api/v1/songs/72/play?access_token=test-plugin-token',
+        url: '/api/v1/songs/72/play',
       }),
     ], 0, 'single', { autoAdvance: false });
     expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：小幸运');

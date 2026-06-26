@@ -34,17 +34,21 @@ class FakeElement {
   innerHTML = '';
   value = '';
   style: Record<string, string> = {};
-  private listeners = new Map<string, Listener>();
+  private listeners = new Map<string, Listener[]>();
 
   addEventListener(type: string, listener: Listener): void {
-    this.listeners.set(type, listener);
+    const current = this.listeners.get(type) || [];
+    current.push(listener);
+    this.listeners.set(type, current);
   }
 
   async dispatch(type: string): Promise<void> {
     const event = { currentTarget: this as FakeElement | null, target: this };
-    const result = this.listeners.get(type)?.(event);
+    const listeners = this.listeners.get(type) || [];
+    for (const listener of listeners) {
+      await listener(event);
+    }
     event.currentTarget = null;
-    await result;
   }
 
   appendChild(): void {
@@ -256,5 +260,39 @@ describe('speaker QR login UI', () => {
 
     expect(refreshVoiceRecords.disabled).toBe(false);
     expect(voiceRecordSummary.textContent).toBe('12 小时内 0 条');
+  });
+
+  it('does not register duplicate QR listeners when speaker UI initializes twice', async () => {
+    const { qrStart } = installSpeakerDom();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/miot/accounts') || url.endsWith('/miot/auth/status') || url.endsWith('/miot/mina/devices')) {
+        return jsonResponse({ success: true, data: [] });
+      }
+      if (url.endsWith('/miot/auth/qrcode')) {
+        return jsonResponse({
+          success: true,
+          account_id: 'qr_1',
+          qrcode_url: 'https://qr.test/image.png',
+          login_url: 'https://qr.test/login',
+        });
+      }
+      if (url.endsWith('/miot/auth/qrcode/poll')) {
+        return jsonResponse({ success: true, state: 'pending', message: 'waiting', account_id: 'qr_1' });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const modulePath = '../../static/js/speaker.js';
+    const { initSpeakerUI } = await import(modulePath) as SpeakerModule;
+    await initSpeakerUI();
+    await initSpeakerUI();
+
+    fetchMock.mockClear();
+    await qrStart.dispatch('click');
+
+    const qrRequests = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/miot/auth/qrcode'));
+    expect(qrRequests).toHaveLength(1);
   });
 });

@@ -25,6 +25,12 @@ interface ImportBody {
   url?: unknown;
 }
 
+interface ImportSongloftBody {
+  playlist_id?: unknown;
+  id?: unknown;
+  name?: unknown;
+}
+
 const IMPORT_PAGE_SIZE = 100;
 const MAX_IMPORT_PAGES = 100;
 
@@ -136,6 +142,30 @@ function numericTotal(value: unknown): number {
   return Number.isFinite(total) && total > 0 ? Math.floor(total) : 0;
 }
 
+function requirePositiveInteger(value: unknown, name: string): number {
+  const numeric = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (typeof numeric !== 'number' || !Number.isInteger(numeric) || numeric <= 0) {
+    throw new StarlightError('BAD_REQUEST', `invalid ${name}`);
+  }
+  return numeric;
+}
+
+function normalizeSongloftSongs(value: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)));
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [];
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of ['songs', 'items', 'list']) {
+    if (Array.isArray(record[key])) {
+      return (record[key] as unknown[]).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)));
+    }
+  }
+  return [];
+}
+
 async function loadSongListDetail(provider: MusicPlatformProvider, id: string): Promise<SongListDetail> {
   const first = await provider.songListDetail(id, 1, IMPORT_PAGE_SIZE) as SongListDetail;
   const songs = Array.isArray(first.songs) ? [...first.songs] : [];
@@ -189,6 +219,18 @@ export function registerCustomPlaylistHandlers(
       const sourceListId = importId(body);
       const detail = await loadSongListDetail(provider, sourceListId);
       return service.importNetworkPlaylist({ source, sourceListId, detail });
+    }, 201));
+
+  router.post('/api/custom-playlists/import-songloft', async (req) =>
+    handle(async () => {
+      const body = parseJsonBody<ImportSongloftBody>(req);
+      const playlistId = requirePositiveInteger(body.playlist_id ?? body.id, 'playlist_id');
+      const songs = normalizeSongloftSongs(await songloft.playlists.getSongs(playlistId));
+      return service.importSongloftPlaylistSnapshot({
+        nativePlaylistId: playlistId,
+        name: requireString(body.name, 'name'),
+        songs,
+      });
     }, 201));
 
   router.post('/api/custom-playlists/:id/refresh', async (_req, params) =>

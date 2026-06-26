@@ -3,6 +3,7 @@ import { PlaylistManager, type PlayerSong } from '../../src/player/manager';
 import type { ConfigManager } from '../../src/config/manager';
 import type { MinaService } from '../../src/service/service';
 import { sourceDiagnostics } from '../../src/diagnostics/source_logs';
+import { setHostBaseUrl } from '../../src/utils/http';
 
 const song: PlayerSong = {
   id: 0,
@@ -27,6 +28,7 @@ const song: PlayerSong = {
 function createManager(options: {
   dynamicPlaylistLoader?: (playlistId: number) => Promise<PlayerSong[] | null>;
   dynamicSongResolver?: (song: PlayerSong) => Promise<PlayerSong | null>;
+  serverHost?: string;
 } = {}) {
   const minaService = {
     playURL: vi.fn(async () => true),
@@ -35,7 +37,7 @@ function createManager(options: {
     resumePlay: vi.fn(async () => true),
   } as unknown as MinaService;
   const configManager = {
-    getConfig: vi.fn(async () => ({ force_mp3: false, server_host: '' })),
+    getConfig: vi.fn(async () => ({ force_mp3: false, server_host: options.serverHost ?? 'http://songloft.test:18191' })),
     updateDevice: vi.fn(async () => undefined),
   } as unknown as ConfigManager;
   const manager = new PlaylistManager('acc-1', 'dev-1', minaService, configManager, options);
@@ -45,6 +47,7 @@ function createManager(options: {
 describe('PlaylistManager standalone queue', () => {
   beforeEach(() => {
     sourceDiagnostics.clear();
+    setHostBaseUrl('');
   });
 
   it('records speaker playback diagnostics when an external URL is accepted by the speaker API', async () => {
@@ -62,14 +65,14 @@ describe('PlaylistManager standalone queue', () => {
     }));
   });
 
-  it('rejects loopback Songloft playback URLs before sending them to the speaker', async () => {
+  it('requires a configured Songloft access host before sending relative playback URLs to the speaker', async () => {
     const localSong = {
       ...song,
       id: 42,
       type: 'remote',
       url: '/api/v1/songs/42/play',
     };
-    const { manager, minaService } = createManager();
+    const { manager, minaService } = createManager({ serverHost: '' });
 
     await expect(manager.playStandalone([localSong], 0, 'single')).resolves.toBe(false);
 
@@ -79,7 +82,7 @@ describe('PlaylistManager standalone queue', () => {
       status: 'failed',
       sourceName: '小爱音箱',
       title: '单曲',
-      message: expect.stringContaining('本地回环地址'),
+      message: expect.stringContaining('Songloft 访问地址未配置'),
     }));
   });
 
@@ -142,6 +145,31 @@ describe('PlaylistManager standalone queue', () => {
       playlist_id: -100000,
       current_index: 0,
       current_song: expect.objectContaining({ title: '为龙', artist: '河图' }),
+    });
+  });
+
+  it('loads Songloft playlist wrapper results and keeps native playlist controls available', async () => {
+    const songloft = (globalThis as typeof globalThis & { songloft: any }).songloft;
+    songloft.playlists.getSongs = vi.fn(async () => ({
+      list: [
+        { id: 3011, type: 'remote', title: '第一首', artist: '歌手', duration: 180, url: 'https://audio.test/first.mp3' },
+        { id: 3012, type: 'remote', title: '第二首', artist: '歌手', duration: 181, url: 'https://audio.test/second.mp3' },
+      ],
+      total: 2,
+    }));
+    const { manager, minaService } = createManager();
+
+    await expect(manager.play(301, 0, 'loop')).resolves.toBe(true);
+    await expect(manager.next()).resolves.toBe(true);
+    await expect(manager.previous()).resolves.toBe(true);
+
+    expect(songloft.playlists.getSongs).toHaveBeenCalledWith(301, { limit: 100000 });
+    expect(minaService.playURL).toHaveBeenNthCalledWith(1, 'acc-1', 'dev-1', 'https://audio.test/first.mp3');
+    expect(minaService.playURL).toHaveBeenNthCalledWith(2, 'acc-1', 'dev-1', 'https://audio.test/second.mp3');
+    expect(manager.getStatus()).toMatchObject({
+      playlist_id: 301,
+      current_index: 0,
+      current_song: expect.objectContaining({ title: '第一首' }),
     });
   });
 

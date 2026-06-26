@@ -20,6 +20,7 @@ export interface MusicUrlResolveOptions {
 }
 
 const DEFAULT_MUSIC_URL_TIMEOUT_MS = 8000;
+const DEFAULT_MUSIC_URL_PROBE_TIMEOUT_MS = 5000;
 
 export class RuntimeManager {
   private runtimes: SourceRuntime[] = [];
@@ -141,6 +142,30 @@ export class RuntimeManager {
             continue;
           }
 
+          if (options.operation) {
+            const probeFailure = await validateResolvedMusicUrl(
+              url,
+              Math.min(this.musicUrlTimeoutMs, DEFAULT_MUSIC_URL_PROBE_TIMEOUT_MS),
+            );
+            if (probeFailure) {
+              lastFailure = probeFailure;
+              sourceDiagnostics.record({
+                operation: options.operation || 'playback',
+                stage: 'resolve',
+                status: 'failed',
+                sourceId: source?.id || '',
+                sourceName: source?.name || source?.id || '',
+                platform: String(platform),
+                quality: String(quality),
+                title: options.title || normalizedSongInfo.name,
+                artist: options.artist || normalizedSongInfo.singer,
+                durationMs: Date.now() - startedAt,
+                message: lastFailure,
+              });
+              continue;
+            }
+          }
+
           sourceDiagnostics.record({
             operation: options.operation || 'playback',
             stage: 'resolve',
@@ -250,11 +275,26 @@ function errorMessage(error: unknown): string {
 }
 
 function normalizeRuntimeSongInfo(platform: MusicPlatform | string, songInfo: LxSongInfo): LxSongInfo {
-  const songmid = stringValue(songInfo.songmid || songInfo.musicId || songInfo.copyrightId || songInfo.strMediaMid);
+  const resolvedSongId = stringValue(
+    songInfo.songmid
+    || songInfo.musicId
+    || songInfo.songId
+    || songInfo.rid
+    || songInfo.id
+    || songInfo.mid
+    || songInfo.copyrightId
+    || songInfo.strMediaMid,
+  );
   return {
     ...songInfo,
+    hash: stringValue(songInfo.hash) || resolvedSongId,
     source: songInfo.source || String(platform),
-    songmid,
+    id: stringValue(songInfo.id) || resolvedSongId,
+    mid: stringValue(songInfo.mid) || resolvedSongId,
+    musicId: stringValue(songInfo.musicId) || resolvedSongId,
+    rid: stringValue(songInfo.rid) || resolvedSongId,
+    songId: stringValue(songInfo.songId) || resolvedSongId,
+    songmid: stringValue(songInfo.songmid) || resolvedSongId,
   };
 }
 
@@ -288,6 +328,68 @@ function invalidResolvedMusicUrlReason(url: string): string | null {
   }
 
   return `音源返回无效 URL：参数 ${unresolvedValueMatch.name}=${unresolvedValueMatch.value}`;
+}
+
+async function validateResolvedMusicUrl(url: string, timeoutMs: number): Promise<string | null> {
+  if (typeof globalThis.fetch !== 'function') {
+    return null;
+  }
+
+  try {
+    const response = await withTimeout(
+      globalThis.fetch(url, {
+        method: 'GET',
+        headers: {
+          Range: 'bytes=0-0',
+        },
+        redirect: 'follow',
+      }),
+      timeoutMs,
+      `音源 URL 探测超时：${timeoutMs}ms`,
+    );
+
+    if (response.status >= 400) {
+      return `音源 URL 不可用：HTTP ${response.status}`;
+    }
+
+    if (response.status < 200) {
+      return `音源 URL 不可用：HTTP ${response.status}`;
+    }
+
+    const contentType = responseHeader(response, 'content-type').toLowerCase();
+    if (contentType.includes('text/html') || contentType.includes('application/json')) {
+      return `音源 URL 不可用：响应类型 ${contentType}`;
+    }
+
+    return null;
+  } catch (error) {
+    return `音源 URL 不可用：${errorMessage(error)}`;
+  }
+}
+
+function responseHeader(response: Response, name: string): string {
+  const headers = (response as { headers?: unknown }).headers;
+  if (!headers || typeof headers !== 'object') {
+    return '';
+  }
+
+  const standardGet = (headers as { get?: unknown }).get;
+  if (typeof standardGet === 'function') {
+    const value = standardGet.call(headers, name);
+    return value === null || value === undefined ? '' : String(value);
+  }
+
+  const normalizedName = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (key.toLowerCase() === normalizedName) {
+      if (Array.isArray(value)) {
+        return value.map((item) => String(item)).join(', ');
+      }
+      return value === null || value === undefined ? '' : String(value);
+    }
+  }
+
+  return '';
 }
 
 function decodeUrlPart(value: string): string {

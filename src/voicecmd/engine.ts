@@ -795,8 +795,7 @@ export class VoiceEngine {
       || readString(record.play_url)
       || readString(record.playUrl)
       || `/api/v1/songs/${id}/play`;
-    const url = await URLBuilder.buildSongURL({ id, url: rawUrl });
-    if (!url) {
+    if (!rawUrl) {
       return null;
     }
 
@@ -811,7 +810,7 @@ export class VoiceEngine {
       album: readString(record.album),
       duration: readNumber(record.duration) ?? 0,
       file_path: readString(record.file_path),
-      url,
+      url: rawUrl,
       cover_path: readString(record.cover_path),
       cover_url: readString(record.cover_url),
       lyric_url: readString(record.lyric_url),
@@ -865,7 +864,33 @@ export class VoiceEngine {
     // 打断音箱当前播报
     await this.interruptBroadcast(accountId, deviceId);
 
-    // 检查索引是否就绪，未就绪则尝试按需刷新
+    if (playlistName) {
+      const customPlaylist = await this.findCustomPlaylistByName(playlistName);
+      if (customPlaylist) {
+        const { startIndex, playMode } = await this.getPlaybackConfig(accountId, deviceId, customPlaylist.id);
+        const ok = await pm.play(customPlaylist.id, startIndex, playMode);
+        if (ok) {
+          songloft.log.info(`[VoiceEngine] Play custom playlist success: ${customPlaylist.name} index=${startIndex} mode=${playMode}`);
+        } else {
+          songloft.log.error(`[VoiceEngine] Play custom playlist failed: ${customPlaylist.name}`);
+        }
+        return;
+      }
+
+      const songloftPlaylist = await this.findSongloftPlaylistByName(playlistName);
+      if (songloftPlaylist) {
+        const { startIndex, playMode } = await this.getPlaybackConfig(accountId, deviceId, songloftPlaylist.id);
+        const ok = await pm.play(songloftPlaylist.id, startIndex, playMode);
+        if (ok) {
+          songloft.log.info(`[VoiceEngine] Play Songloft playlist success: ${songloftPlaylist.name} index=${startIndex} mode=${playMode}`);
+        } else {
+          songloft.log.error(`[VoiceEngine] Play Songloft playlist failed: ${songloftPlaylist.name}`);
+        }
+        return;
+      }
+    }
+
+    // 检查索引是否就绪，未就绪则尝试按需刷新。直接可查的 Songloft 歌单不依赖这个索引。
     if (!this.indexingManager.isIndexReady()) {
       songloft.log.warn('[VoiceEngine] Playlist index not ready, attempting on-demand refresh');
       const result = await this.indexingManager.refresh();
@@ -886,37 +911,6 @@ export class VoiceEngine {
       }
       playlistName = playlists[0].name;
       songloft.log.info(`[VoiceEngine] No name specified, using default playlist: ${playlistName}`);
-    }
-
-    const customPlaylist = await this.findCustomPlaylistByName(playlistName);
-    if (customPlaylist) {
-      const { startIndex, playMode } = await this.getPlaybackConfig(accountId, deviceId, customPlaylist.id);
-      const ok = await pm.play(customPlaylist.id, startIndex, playMode);
-      if (ok) {
-        songloft.log.info(`[VoiceEngine] Play custom playlist success: ${customPlaylist.name} index=${startIndex} mode=${playMode}`);
-      } else {
-        songloft.log.error(`[VoiceEngine] Play custom playlist failed: ${customPlaylist.name}`);
-      }
-      return;
-    }
-
-    const songloftPlaylist = await this.findSongloftPlaylistByName(playlistName);
-    if (songloftPlaylist) {
-      const songs = await this.loadSongloftPlaylistSongs(songloftPlaylist.id);
-      if (songs.length === 0) {
-        songloft.log.warn(`[VoiceEngine] Songloft playlist is empty or unplayable: ${songloftPlaylist.name}`);
-        await this.minaService.textToSpeech(accountId, deviceId, `歌单为空：${songloftPlaylist.name}`);
-        return;
-      }
-
-      const { playMode } = await this.getPlaybackConfig(accountId, deviceId);
-      const ok = await pm.playStandalone(songs, 0, playMode);
-      if (ok) {
-        songloft.log.info(`[VoiceEngine] Play Songloft playlist success: ${songloftPlaylist.name} mode=${playMode}`);
-      } else {
-        songloft.log.error(`[VoiceEngine] Play Songloft playlist failed: ${songloftPlaylist.name}`);
-      }
-      return;
     }
 
     // 模糊匹配歌单

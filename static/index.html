@@ -58,8 +58,8 @@
                     <div class="batch-actions" data-role="search-batch-actions">
                         <button class="ghost-button" type="button" data-action="select-search-page">全选当前页</button>
                         <button class="ghost-button" type="button" data-action="clear-search-selection">取消选择</button>
-                        <button class="ghost-button" type="button" data-action="import-selected-search">批量导入 Songloft 歌曲库</button>
-                        <button class="ghost-button" type="button" data-action="add-selected-search-to-playlist">批量加入目标歌单</button>
+                        <button class="ghost-button" type="button" data-action="import-selected-search">批量加入歌曲库</button>
+                        <button class="ghost-button" type="button" data-action="add-selected-search-to-playlist">批量加入歌单</button>
                         <button class="ghost-button" type="button" data-action="download-selected-search">批量下载</button>
                         <button class="ghost-button" type="button" data-action="speaker-selected-search">批量推送音箱</button>
                     </div>
@@ -268,9 +268,9 @@
                         <button class="primary-button" type="submit">新建</button>
                     </form>
                     <label>
-                        <span>加入目标歌单</span>
+                        <span>Songloft 目标歌单</span>
                         <select data-role="custom-playlist-select"></select>
-                        <small class="field-help">搜索结果、榜单和歌单详情里的“加入歌单”会保存到这里。</small>
+                        <small class="field-help">搜索结果、榜单和歌单详情里的“加入歌单”会保存到选中的 Songloft 歌单。</small>
                     </label>
                     <div class="list-stack tight" data-role="custom-playlist-list"></div>
                     <div data-role="custom-playlist-detail"></div>
@@ -598,6 +598,35 @@
 
         </main>
         <nav class="bottom-tabs" id="bottomTabs"></nav>
+    </div>
+    <div class="songloft-target-dialog" data-role="songloft-playlist-target-dialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="songloftTargetTitle" hidden>
+        <form class="songloft-target-panel" data-role="songloft-playlist-target-form">
+            <div class="section-bar">
+                <div>
+                    <h2 id="songloftTargetTitle">Songloft 目标歌单</h2>
+                    <span data-role="songloft-target-song-count">0 首待加入</span>
+                </div>
+                <button class="ghost-button" type="button" data-action="cancel-songloft-target">取消</button>
+            </div>
+            <div class="control-grid compact songloft-target-grid">
+                <label>
+                    <span>过滤歌单</span>
+                    <input type="search" data-role="songloft-target-playlist-filter" placeholder="输入歌单名" autocomplete="off">
+                </label>
+                <label>
+                    <span>已有 Songloft 歌单</span>
+                    <select data-role="songloft-target-playlist-select"></select>
+                </label>
+                <button class="ghost-button" type="button" data-action="refresh-songloft-target-playlists">刷新</button>
+                <label class="wide-field">
+                    <span>新建歌单</span>
+                    <input data-role="songloft-target-playlist-name" placeholder="留空则加入已选歌单" autocomplete="off">
+                </label>
+            </div>
+            <div class="inline-actions songloft-target-actions">
+                <button class="primary-button" type="submit" data-action="confirm-songloft-target">确认加入</button>
+            </div>
+        </form>
     </div>
     <script type="module" src="static/js/app.js"></script>
 </body>

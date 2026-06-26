@@ -185,6 +185,38 @@ describe('CustomPlaylistService', () => {
     await expect(service.list()).resolves.toEqual([imported]);
   });
 
+  it('imports Songloft native playlists as custom playlist snapshots', async () => {
+    const { service } = createService();
+
+    const imported = await service.importSongloftPlaylistSnapshot({
+      nativePlaylistId: 88,
+      name: 'Songloft 收藏',
+      songs: [{
+        id: 501,
+        title: '本地歌曲',
+        artist: '歌手',
+        album: '专辑',
+        duration: 188,
+        cover_url: 'https://img.test/local.jpg',
+      }],
+    });
+
+    expect(imported).toMatchObject({
+      name: 'Songloft 收藏',
+      native_playlist_id: 88,
+      native_playlist_name: 'Songloft 收藏',
+      songs: [{
+        title: '本地歌曲',
+        artist: '歌手',
+        album: '专辑',
+        cover_url: 'https://img.test/local.jpg',
+        native_song_id: 501,
+        stable_key: 'songloft:501',
+      }],
+    });
+    await expect(service.list()).resolves.toEqual([imported]);
+  });
+
   it('resolves portable playlist song references when adding them into an own playlist', async () => {
     const { bridge, service } = createService();
 

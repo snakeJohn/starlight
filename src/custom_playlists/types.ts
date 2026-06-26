@@ -8,6 +8,7 @@ export interface CustomPlaylistSong {
   cover_url: string;
   source_name?: string;
   source_data?: SearchResultSong['source_data'];
+  native_song_id?: string | number;
   stable_key: string;
 }
 
@@ -19,6 +20,7 @@ export interface CustomPlaylist {
   source_name?: string;
   sourceListId?: string;
   native_playlist_id?: string | number;
+  native_playlist_name?: string;
   imported_at: string;
   updated_at: string;
   songs: CustomPlaylistSong[];

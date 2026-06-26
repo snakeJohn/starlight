@@ -39,7 +39,8 @@ import { registerCustomPlaylistHandlers } from './handlers/custom_playlists';
 import { registerHealthHandlers } from './handlers/health';
 import { registerSongloftLibraryHandlers } from './handlers/songloft_library';
 import { registerDiagnosticsHandlers } from './handlers/diagnostics';
-import { resolveHostBaseUrl } from './utils/http';
+import { setHostBaseUrl } from './utils/http';
+import { SongloftPlaylistService } from './songloft/playlist_service';
 
 const router = createRouter();
 
@@ -61,6 +62,7 @@ let platformRegistry: PlatformRegistry;
 let bridgeService: BridgeService;
 let downloadService: DownloadService;
 let customPlaylistService: CustomPlaylistService;
+let songloftPlaylistService: SongloftPlaylistService;
 
 async function onInit(): Promise<void> {
   songloft.log.info('Starlight 插件初始化...');
@@ -75,10 +77,14 @@ async function onInit(): Promise<void> {
   minaService = new MinaService(accountManager, configManager);
   playlistManagerMap = new PlaylistManagerMap(minaService, configManager);
 
-  // 自动设置宿主 API 基础 URL；旧配置存在时优先沿用。
+  // 与 MIoT 插件保持一致：播放地址必须使用用户配置的可访问 Songloft 地址。
   const pluginConfig = await configManager.getConfig();
-  const hostBaseUrl = await resolveHostBaseUrl(pluginConfig.server_host);
-  songloft.log.info('宿主 API 基础 URL 已设置: ' + hostBaseUrl);
+  if (pluginConfig.server_host) {
+    setHostBaseUrl(pluginConfig.server_host);
+    songloft.log.info('宿主 API 基础 URL 已设置: ' + pluginConfig.server_host);
+  } else {
+    songloft.log.warn('Songloft 访问地址未配置，MIoT 智能音箱无法播放相对歌曲地址');
+  }
 
   sourceManager = new SourceManager(new SourceStore());
   await sourceManager.init();
@@ -91,6 +97,7 @@ async function onInit(): Promise<void> {
   downloadRuntimeManager = new RuntimeManager(downloadSourceManager, { runtimeNamespace: 'download' });
   platformRegistry = new PlatformRegistry();
   bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService, playlistManagerMap);
+  songloftPlaylistService = new SongloftPlaylistService(bridgeService, platformRegistry);
   downloadService = new DownloadService(downloadRuntimeManager);
   customPlaylistService = new CustomPlaylistService(new CustomPlaylistStore(), bridgeService);
   playlistManagerMap.setDynamicPlaylistOptions({
@@ -138,7 +145,7 @@ async function onInit(): Promise<void> {
   registerBridgeHandlers(router, bridgeService);
   registerDownloadHandlers(router, downloadSourceManager, downloadRuntimeManager, downloadService);
   registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);
-  registerSongloftLibraryHandlers(router, { playlistManagerMap });
+  registerSongloftLibraryHandlers(router, { playlistManagerMap, playlistService: songloftPlaylistService });
   registerHealthHandlers(router, sourceManager, runtimeManager);
   registerDiagnosticsHandlers(router);
 

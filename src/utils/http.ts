@@ -297,18 +297,13 @@ export function setHostBaseUrl(url: string): void {
   _hostBaseUrl = normalizeHostBaseUrl(url);
 }
 
-/** 解析宿主 API 基础 URL：优先使用旧配置，否则使用 Songloft SDK 提供的宿主地址。 */
+/** 解析宿主 API 基础 URL：只使用显式配置或已经设置过的地址。 */
 export async function resolveHostBaseUrl(configuredUrl = ''): Promise<string> {
   const configured = configuredUrl.trim();
   if (configured) {
     setHostBaseUrl(configured);
     return _hostBaseUrl;
   }
-  if (_hostBaseUrl) {
-    return _hostBaseUrl;
-  }
-  const host = await songloft.plugin.getHostUrl();
-  setHostBaseUrl(host || '');
   return _hostBaseUrl;
 }
 

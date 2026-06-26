@@ -40,12 +40,22 @@ interface ShimLx {
     buffer: {
       bufToString(value: unknown, encoding?: string): string;
     };
+    crypto: {
+      aesEncrypt(buffer: unknown, mode: string, key: unknown, iv?: unknown): { toString(format?: string): string };
+      md5(str: string): string;
+      randomBytes(size: number): { toString(format?: string): string; length?: number };
+      rsaEncrypt(buffer: unknown, key: string): { toString(format?: string): string };
+    };
+    zlib: {
+      inflate(value: unknown): Promise<{ toString(format?: string): string }>;
+      deflate(value: unknown): Promise<{ toString(format?: string): string }>;
+    };
   };
   request(
     url: string,
     options: Record<string, unknown>,
     callback: (error: unknown, response: unknown, text: unknown) => void,
-  ): Promise<unknown>;
+  ): Promise<unknown> & { promise?: Promise<unknown> };
   on(name: string, handler: (payload: unknown) => unknown): void;
   send(name: string, data: unknown): void;
   _dispatch(id: string, event: string, payload: unknown): void;
@@ -195,6 +205,34 @@ function fakeSourceManager(
     listSources,
     getScript: vi.fn(async (id: string) => scripts[id] ?? null),
   } as unknown as SourceManager;
+}
+
+function installMusicUrlProbeMock(okUrls: string[]) {
+  const previousFetch = globalThis.fetch;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    expect(init?.headers).toEqual(expect.objectContaining({
+      Range: 'bytes=0-0',
+    }));
+
+    const url = String(input);
+    if (!okUrls.includes(url)) {
+      throw new Error(`Unexpected fetch ${url}`);
+    }
+
+    return {
+      ok: true,
+      status: 206,
+      headers: { get: () => 'audio/mpeg' },
+    } as unknown as Response;
+  });
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+  return {
+    fetchMock,
+    restore: () => {
+      globalThis.fetch = previousFetch;
+    },
+  };
 }
 
 async function flushMicrotasks(turns = 5): Promise<void> {
@@ -529,6 +567,134 @@ describe('LX_SHIM', () => {
     }
   });
 
+  test('lx.request supports LX Desktop request response body parsing in dispatch handlers', async () => {
+    const { shimGlobal, restore } = installShim();
+    const previousFetch = globalThis.fetch;
+    const emittedEvents: Array<{ name: string; data: string }> = [];
+    shimGlobal.__songloftEmitEvent = (name, data) => emittedEvents.push({ name, data });
+    globalThis.fetch = vi.fn(async () => ({
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        forEach(handler: (value: string, key: string) => void) {
+          handler('application/json', 'content-type');
+        },
+      },
+      text: async () => JSON.stringify({ url: 'https://audio.example/song.mp3' }),
+    }) as Response);
+
+    try {
+      const { EVENT_NAMES, request, on } = shimGlobal.lx as ShimLx;
+      const httpRequest = (url: string, options: Record<string, unknown>) => new Promise<Record<string, unknown>>((resolve, reject) => {
+        request(url, options, (error, response) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve((response as { body: Record<string, unknown> }).body);
+        });
+      });
+      on(EVENT_NAMES.request, (payload: unknown) => {
+        const { source, action } = payload as { source: string; action: string };
+        if (source !== 'kw' || action !== 'musicUrl') {
+          return Promise.reject(new Error('unsupported request'));
+        }
+        return httpRequest('https://example.invalid/song', {}).then((body) => body.url);
+      });
+
+      shimGlobal.lx?._dispatch('dispatch-json-body', 'request', {
+        source: 'kw',
+        action: 'musicUrl',
+        info: { type: '320k', musicInfo: { songmid: 'song-1' } },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(emittedEvents).toHaveLength(1);
+      expect(emittedEvents[0].name).toBe('dispatchResult');
+      expect(parseEmittedData(emittedEvents[0])).toStrictEqual({
+        id: 'dispatch-json-body',
+        result: 'https://audio.example/song.mp3',
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+      restore();
+    }
+  });
+
+  test('exposes LX Desktop crypto helpers through the jsenv crypto bridge', () => {
+    const previousCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    const cryptoBridge = {
+      aesEncrypt: vi.fn(() => ({ toString: (format?: string) => `aes:${format || 'utf8'}` })),
+      md5: vi.fn(() => 'e38ad214943daad1d64c102faec29de4'),
+      randomBytes: vi.fn(() => ({ length: 4, toString: (format?: string) => `random:${format || 'utf8'}` })),
+      rsaEncrypt: vi.fn(() => ({ toString: (format?: string) => `rsa:${format || 'utf8'}` })),
+    };
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: cryptoBridge,
+    });
+    const { shimGlobal, restore } = installShim();
+
+    try {
+      expect(shimGlobal.lx?.utils.crypto.md5('starlight')).toBe('e38ad214943daad1d64c102faec29de4');
+      expect(shimGlobal.lx?.utils.crypto.randomBytes(4).toString('hex')).toBe('random:hex');
+      expect(shimGlobal.lx?.utils.crypto.aesEncrypt('payload', 'aes-128-cbc', 'key', 'iv').toString('base64')).toBe('aes:base64');
+      expect(shimGlobal.lx?.utils.crypto.rsaEncrypt('payload', 'public-key').toString('hex')).toBe('rsa:hex');
+
+      expect(cryptoBridge.md5).toHaveBeenCalledWith('starlight');
+      expect(cryptoBridge.randomBytes).toHaveBeenCalledWith(4);
+      expect(cryptoBridge.aesEncrypt).toHaveBeenCalledWith('payload', 'cbc', 'key', 'iv');
+      expect(cryptoBridge.rsaEncrypt).toHaveBeenCalledWith('payload', 'public-key');
+    } finally {
+      restore();
+      if (previousCrypto) {
+        Object.defineProperty(globalThis, 'crypto', previousCrypto);
+      } else {
+        delete (globalThis as { crypto?: unknown }).crypto;
+      }
+    }
+  });
+
+  test('exposes LX Desktop zlib helpers through jsenv zlib bridge functions', async () => {
+    const previousInflate = Object.getOwnPropertyDescriptor(globalThis, '__go_zlib_inflate');
+    const previousDeflate = Object.getOwnPropertyDescriptor(globalThis, '__go_zlib_deflate');
+    Object.defineProperty(globalThis, '__go_zlib_inflate', {
+      configurable: true,
+      value: vi.fn(() => Buffer.from('inflated body').toString('hex')),
+    });
+    Object.defineProperty(globalThis, '__go_zlib_deflate', {
+      configurable: true,
+      value: vi.fn(() => Buffer.from('deflated body').toString('hex')),
+    });
+    const { shimGlobal, restore } = installShim();
+
+    try {
+      await expect(shimGlobal.lx?.utils.zlib.inflate(Buffer.from('compressed'))).resolves.toSatisfy((value: unknown) =>
+        typeof (value as { toString?: unknown })?.toString === 'function'
+        && (value as { toString(format?: string): string }).toString('utf8') === 'inflated body',
+      );
+      await expect(shimGlobal.lx?.utils.zlib.deflate(Buffer.from('plain'))).resolves.toSatisfy((value: unknown) =>
+        typeof (value as { toString?: unknown })?.toString === 'function'
+        && (value as { toString(format?: string): string }).toString('utf8') === 'deflated body',
+      );
+
+      expect(globalThis.__go_zlib_inflate).toHaveBeenCalledWith(Buffer.from('compressed').toString('hex'));
+      expect(globalThis.__go_zlib_deflate).toHaveBeenCalledWith(Buffer.from('plain').toString('hex'));
+    } finally {
+      restore();
+      if (previousInflate) {
+        Object.defineProperty(globalThis, '__go_zlib_inflate', previousInflate);
+      } else {
+        delete (globalThis as { __go_zlib_inflate?: unknown }).__go_zlib_inflate;
+      }
+      if (previousDeflate) {
+        Object.defineProperty(globalThis, '__go_zlib_deflate', previousDeflate);
+      } else {
+        delete (globalThis as { __go_zlib_deflate?: unknown }).__go_zlib_deflate;
+      }
+    }
+  });
+
   test('lx.request calls back with error, null, and null on failure', async () => {
     const { shimGlobal, restore } = installShim();
     const previousFetch = globalThis.fetch;
@@ -558,13 +724,14 @@ describe('LX_SHIM', () => {
       const requestPromise = shimGlobal.lx?.request('https://example.invalid/api', { timeout: 500 }, callback);
       await vi.advanceTimersByTimeAsync(500);
 
-      await expect(Promise.race([requestPromise, Promise.resolve('pending')])).resolves.toBeNull();
+      await expect(requestPromise?.promise ?? requestPromise).resolves.toBeNull();
       expect(callback).toHaveBeenCalledWith(expect.any(Error), null, null);
       expect(callback.mock.calls[0][0].message).toContain('timeout');
-      expect(globalThis.fetch).toHaveBeenCalledWith('https://example.invalid/api', {
+      expect(globalThis.fetch).toHaveBeenCalledWith('https://example.invalid/api', expect.objectContaining({
         method: 'GET',
         headers: {},
-      });
+        signal: expect.any(AbortSignal),
+      }));
     } finally {
       vi.useRealTimers();
       globalThis.fetch = previousFetch;
@@ -583,7 +750,7 @@ describe('LX_SHIM', () => {
     try {
       const requestPromise = shimGlobal.lx?.request('https://example.invalid/api', { timeout: 500 }, callback);
 
-      await expect(Promise.race([requestPromise, Promise.resolve('pending')])).resolves.toBeNull();
+      await expect(requestPromise?.promise ?? requestPromise).resolves.toBeNull();
       expect(callback).toHaveBeenCalledWith(expect.any(Error), null, null);
       expect(callback.mock.calls[0][0].message).toContain('timeout');
       expect(globalThis.fetch).not.toHaveBeenCalled();
@@ -924,38 +1091,173 @@ describe('RuntimeManager', () => {
     });
     const manager = new RuntimeManager(managerSource);
     await manager.loadEnabledSources();
+    const { restore } = installMusicUrlProbeMock(['https://cdn.invalid/working.flac']);
 
-    await expect(manager.getMusicUrl('kg', 'flac24bit', {
-      ...songInfo,
-      source: 'kg',
-      hash: 'kg-hash',
-    }, {
-      operation: 'playback',
-      title: 'Synthetic Song',
-      artist: 'Synthetic Artist',
-    })).resolves.toBe('https://cdn.invalid/working.flac');
+    try {
+      await expect(manager.getMusicUrl('kg', 'flac24bit', {
+        ...songInfo,
+        source: 'kg',
+        hash: 'kg-hash',
+      }, {
+        operation: 'playback',
+        title: 'Synthetic Song',
+        artist: 'Synthetic Artist',
+      })).resolves.toBe('https://cdn.invalid/working.flac');
 
-    expect(sourceDiagnostics.list()).toEqual([
-      expect.objectContaining({
-        operation: 'playback',
-        status: 'failed',
-        sourceId: 'bad-quality-source',
-        platform: 'kg',
-        quality: 'flac24bit',
-        message: expect.stringContaining('undefined'),
-      }),
-      expect.objectContaining({
-        operation: 'playback',
-        status: 'success',
-        sourceId: 'working-source',
-        platform: 'kg',
-        quality: 'flac24bit',
-      }),
-    ]);
-    expect(manager.getLastMusicUrlAttempt()).toEqual({
-      attemptedSources: 2,
-      lastFailure: expect.stringContaining('undefined'),
+      expect(sourceDiagnostics.list()).toEqual([
+        expect.objectContaining({
+          operation: 'playback',
+          status: 'failed',
+          sourceId: 'bad-quality-source',
+          platform: 'kg',
+          quality: 'flac24bit',
+          message: expect.stringContaining('undefined'),
+        }),
+        expect.objectContaining({
+          operation: 'playback',
+          status: 'success',
+          sourceId: 'working-source',
+          platform: 'kg',
+          quality: 'flac24bit',
+        }),
+      ]);
+      expect(manager.getLastMusicUrlAttempt()).toEqual({
+        attemptedSources: 2,
+        lastFailure: expect.stringContaining('undefined'),
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  test('getMusicUrl probes resolved playback URLs and continues when the stream is unavailable', async () => {
+    const previousFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.headers).toEqual(expect.objectContaining({
+        Range: 'bytes=0-0',
+      }));
+
+      const url = String(input);
+      if (url === 'https://bad.example/dead.mp3') {
+        return {
+          ok: false,
+          status: 404,
+          headers: { get: () => 'audio/mpeg' },
+        } as unknown as Response;
+      }
+
+      if (url === 'https://cdn.example/good.mp3') {
+        return {
+          ok: true,
+          status: 206,
+          headers: { get: () => 'audio/mpeg' },
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected fetch ${url}`);
     });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const manager = new RuntimeManager(fakeSourceManager(() => [], {}));
+      const deadRuntime = {
+        supportsPlatform: vi.fn(() => true),
+        getMusicUrl: vi.fn(async () => 'https://bad.example/dead.mp3'),
+        destroy: vi.fn(),
+      };
+      const workingRuntime = {
+        supportsPlatform: vi.fn(() => true),
+        getMusicUrl: vi.fn(async () => 'https://cdn.example/good.mp3'),
+        destroy: vi.fn(),
+      };
+      (manager as unknown as { runtimes: SourceRuntime[] }).runtimes = [
+        deadRuntime as unknown as SourceRuntime,
+        workingRuntime as unknown as SourceRuntime,
+      ];
+      const runtimeSources = (manager as unknown as { runtimeSources: WeakMap<SourceRuntime, MusicSourceMeta> }).runtimeSources;
+      runtimeSources.set(deadRuntime as unknown as SourceRuntime, sourceMeta('dead-source', true));
+      runtimeSources.set(workingRuntime as unknown as SourceRuntime, sourceMeta('working-source', true));
+
+      await expect(manager.getMusicUrl('kw', 'flac24bit', songInfo, {
+        operation: 'playback',
+        title: 'Best Bad Stream',
+        artist: 'Synthetic Artist',
+      })).resolves.toBe('https://cdn.example/good.mp3');
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(sourceDiagnostics.list()).toEqual([
+        expect.objectContaining({
+          operation: 'playback',
+          status: 'failed',
+          sourceId: 'dead-source',
+          platform: 'kw',
+          quality: 'flac24bit',
+          message: '音源 URL 不可用：HTTP 404',
+        }),
+        expect.objectContaining({
+          operation: 'playback',
+          status: 'success',
+          sourceId: 'working-source',
+          platform: 'kw',
+          quality: 'flac24bit',
+        }),
+      ]);
+      expect(manager.getLastMusicUrlAttempt()).toEqual({
+        attemptedSources: 2,
+        lastFailure: '音源 URL 不可用：HTTP 404',
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test('getMusicUrl accepts probe responses with plain object headers from Songloft runtime fetch', async () => {
+    const previousFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(input).toBe('https://cdn.example/song.mp3');
+      expect(init?.headers).toEqual(expect.objectContaining({
+        Range: 'bytes=0-0',
+      }));
+
+      return {
+        ok: true,
+        status: 206,
+        headers: {
+          'content-type': 'audio/mpeg',
+        },
+      } as unknown as Response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    try {
+      const manager = new RuntimeManager(fakeSourceManager(() => [], {}));
+      const runtime = {
+        supportsPlatform: vi.fn(() => true),
+        getMusicUrl: vi.fn(async () => 'https://cdn.example/song.mp3'),
+        destroy: vi.fn(),
+      };
+      (manager as unknown as { runtimes: SourceRuntime[] }).runtimes = [
+        runtime as unknown as SourceRuntime,
+      ];
+
+      await expect(manager.getMusicUrl('kw', '320k', songInfo, {
+        operation: 'playback',
+        title: 'Song',
+        artist: 'Artist',
+      })).resolves.toBe('https://cdn.example/song.mp3');
+
+      expect(sourceDiagnostics.list()).toEqual([
+        expect.objectContaining({
+          operation: 'playback',
+          status: 'success',
+          platform: 'kw',
+          quality: '320k',
+          message: '解析成功',
+        }),
+      ]);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
   });
 
   test('getMusicUrl continues to later enabled sources when one source times out', async () => {
@@ -991,7 +1293,7 @@ describe('RuntimeManager', () => {
     });
   });
 
-  test('getMusicUrl copies musicId into songmid before invoking source runtimes', async () => {
+  test('getMusicUrl copies musicId into LX-compatible song id aliases before invoking source runtimes', async () => {
     const manager = new RuntimeManager(fakeSourceManager(() => [], {}));
     const runtime = {
       supportsPlatform: vi.fn(() => true),
@@ -1003,8 +1305,46 @@ describe('RuntimeManager', () => {
     await expect(manager.getMusicUrl('kw', '320k', songInfo)).resolves.toBe('https://cdn.invalid/song.mp3');
 
     expect(runtime.getMusicUrl).toHaveBeenCalledWith('kw', '320k', expect.objectContaining({
+      source: 'kw',
       musicId: 'synthetic-id',
       songmid: 'synthetic-id',
+      songId: 'synthetic-id',
+      rid: 'synthetic-id',
+      id: 'synthetic-id',
+      mid: 'synthetic-id',
+    }));
+  });
+
+  test('getMusicUrl fills an empty hash with the resolved song id before invoking source runtimes', async () => {
+    const manager = new RuntimeManager(fakeSourceManager(() => [], {}));
+    const runtime = {
+      supportsPlatform: vi.fn(() => true),
+      getMusicUrl: vi.fn(async () => 'https://cdn.invalid/song.mp3'),
+      destroy: vi.fn(),
+    };
+    (manager as unknown as { runtimes: SourceRuntime[] }).runtimes = [runtime as unknown as SourceRuntime];
+
+    await expect(manager.getMusicUrl('mg', 'flac24bit', {
+      source: 'mg',
+      name: '圣诞星（feat. 杨瑞代）',
+      singer: '周杰伦',
+      album: '十二新作',
+      duration: 264,
+      musicId: '1140505222',
+      songmid: '1140505222',
+      hash: '',
+      copyrightId: '60054704965',
+    })).resolves.toBe('https://cdn.invalid/song.mp3');
+
+    expect(runtime.getMusicUrl).toHaveBeenCalledWith('mg', 'flac24bit', expect.objectContaining({
+      source: 'mg',
+      musicId: '1140505222',
+      songmid: '1140505222',
+      songId: '1140505222',
+      rid: '1140505222',
+      id: '1140505222',
+      mid: '1140505222',
+      hash: '1140505222',
     }));
   });
 
@@ -1059,33 +1399,38 @@ describe('RuntimeManager', () => {
     });
     const manager = new RuntimeManager(managerSource);
     await manager.loadEnabledSources();
+    const { restore } = installMusicUrlProbeMock(['https://cdn.invalid/working.mp3']);
 
-    await expect(manager.getMusicUrl('kw', '320k', songInfo, {
-      operation: 'download',
-      title: 'Synthetic Song',
-      artist: 'Synthetic Artist',
-    })).resolves.toBe('https://cdn.invalid/working.mp3');
-
-    expect(sourceDiagnostics.list()).toEqual([
-      expect.objectContaining({
+    try {
+      await expect(manager.getMusicUrl('kw', '320k', songInfo, {
         operation: 'download',
-        status: 'failed',
-        sourceId: 'broken-source',
-        sourceName: 'broken-source',
-        platform: 'kw',
-        message: 'resolver failed',
-      }),
-      expect.objectContaining({
-        operation: 'download',
-        status: 'success',
-        sourceId: 'working-source',
-        sourceName: 'working-source',
-        platform: 'kw',
-        quality: '320k',
         title: 'Synthetic Song',
         artist: 'Synthetic Artist',
-      }),
-    ]);
+      })).resolves.toBe('https://cdn.invalid/working.mp3');
+
+      expect(sourceDiagnostics.list()).toEqual([
+        expect.objectContaining({
+          operation: 'download',
+          status: 'failed',
+          sourceId: 'broken-source',
+          sourceName: 'broken-source',
+          platform: 'kw',
+          message: 'resolver failed',
+        }),
+        expect.objectContaining({
+          operation: 'download',
+          status: 'success',
+          sourceId: 'working-source',
+          sourceName: 'working-source',
+          platform: 'kw',
+          quality: '320k',
+          title: 'Synthetic Song',
+          artist: 'Synthetic Artist',
+        }),
+      ]);
+    } finally {
+      restore();
+    }
   });
 
   test('getMusicUrl returns null when no runtime matches the platform', async () => {

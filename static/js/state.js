@@ -34,6 +34,11 @@ export const state = {
     songloftPlaylists: [],
     songloftPlaylistSongs: [],
     songloftPlaylistTitle: '歌单歌曲',
+    songloftTargetPlaylistId: '',
+    songloftTargetPlaylistName: '',
+    songloftTargetPlaylists: [],
+    songloftTargetPlaylistSongs: [],
+    songloftTargetPendingSongs: [],
     rankingBoards: [],
     rankingContext: null,
     rankingSongs: [],
@@ -54,6 +59,7 @@ export const state = {
     sourceLogTotal: 0,
     accounts: [],
     deviceGroups: [],
+    initStatus: {},
     message: '就绪',
 };
 

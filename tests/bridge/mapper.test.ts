@@ -31,8 +31,13 @@ describe('toRemoteSong', () => {
 
   it.each([
     ['songmid', { songmid: 'mid-1' }],
+    ['songId', { songId: 'song-id-1' }],
+    ['rid', { rid: 'rid-1' }],
+    ['id', { id: 'id-1' }],
+    ['mid', { mid: 'mid-2' }],
     ['hash', { hash: 'hash-1' }],
     ['copyrightId', { copyrightId: 'copy-1' }],
+    ['strMediaMid', { strMediaMid: 'str-media-mid-1' }],
   ])('uses %s as a fallback dedup id', (_name, idFields) => {
     const song = {
       title: 'Song',

@@ -8,13 +8,13 @@ interface MainGlobals {
   onHTTPRequest(req: HTTPRequest): Promise<HTTPResponse>;
 }
 
-function request(method: string, path: string): HTTPRequest {
+function request(method: string, path: string, body?: unknown): HTTPRequest {
   return {
     method,
     path,
     query: '',
     headers: {},
-    body: null,
+    body: body === undefined ? null : JSON.stringify(body),
   } as HTTPRequest;
 }
 
@@ -37,6 +37,26 @@ type SongloftSongsStub = {
 type SongloftPlaylistsStub = {
   list: () => Promise<unknown>;
   getSongs: (playlistId: number) => Promise<unknown>;
+};
+
+const searchSong = {
+  title: 'Song',
+  artist: 'Singer',
+  album: 'Album',
+  duration: 200,
+  cover_url: 'https://img.test/song.jpg',
+  source_data: {
+    platform: 'kw',
+    quality: '320k',
+    songInfo: {
+      source: 'kw',
+      name: 'Song',
+      singer: 'Singer',
+      album: 'Album',
+      duration: 200,
+      musicId: '123',
+    },
+  },
 };
 
 describe('registerSongloftLibraryHandlers', () => {
@@ -96,6 +116,167 @@ describe('registerSongloftLibraryHandlers', () => {
     expect(parseResponseBody(response).data).toEqual({
       list: [{ id: 'song-2', title: 'Playlist Song' }],
       total: 11,
+    });
+  });
+
+  it('creates a Songloft playlist through the playlist service', async () => {
+    const playlistService = {
+      createPlaylist: vi.fn(async () => ({ id: 12, name: 'Road Trip' })),
+    };
+    const { router } = createHarness({ playlistService } as any);
+
+    const response = await router.handle(request('POST', '/api/songloft/playlists', { name: 'Road Trip' }));
+
+    expect(response.statusCode).toBe(201);
+    expect(playlistService.createPlaylist).toHaveBeenCalledWith('Road Trip');
+    expect(parseResponseBody(response).data).toEqual({ id: 12, name: 'Road Trip' });
+  });
+
+  it('imports search songs into an existing Songloft playlist through the playlist service', async () => {
+    const playlistService = {
+      importSongsToPlaylist: vi.fn(async () => ({
+        playlist: { id: 12, name: 'Road Trip' },
+        imported: 1,
+        added: 1,
+        skipped: 0,
+        errors: [],
+      })),
+    };
+    const { router } = createHarness({ playlistService } as any);
+
+    const response = await router.handle(request('POST', '/api/songloft/playlists/import-songs', {
+      playlist_id: 12,
+      songs: [searchSong],
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(playlistService.importSongsToPlaylist).toHaveBeenCalledWith({
+      playlist_id: 12,
+      songs: [searchSong],
+    });
+    expect(parseResponseBody(response).data).toMatchObject({
+      playlist: { id: 12, name: 'Road Trip' },
+      imported: 1,
+      added: 1,
+    });
+  });
+
+  it('creates a Songloft playlist by name before importing search songs', async () => {
+    const playlistService = {
+      importSongsToPlaylist: vi.fn(async () => ({
+        playlist: { id: 13, name: 'New Mix' },
+        imported: 1,
+        added: 1,
+        skipped: 0,
+        errors: [],
+      })),
+    };
+    const { router } = createHarness({ playlistService } as any);
+
+    const response = await router.handle(request('POST', '/api/songloft/playlists/import-songs', {
+      playlist_name: 'New Mix',
+      songs: [searchSong],
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(playlistService.importSongsToPlaylist).toHaveBeenCalledWith({
+      playlist_name: 'New Mix',
+      songs: [searchSong],
+    });
+    expect(parseResponseBody(response).data.playlist).toEqual({ id: 13, name: 'New Mix' });
+  });
+
+  it('starts a background Songloft playlist import job without waiting for slow remote imports', async () => {
+    const playlistService = {
+      importSongsToPlaylist: vi.fn(() => new Promise(() => {})),
+    };
+    const { router } = createHarness({ playlistService } as any);
+
+    const response = await Promise.race([
+      router.handle(request('POST', '/api/songloft/playlists/import-songs/jobs', {
+        playlist_id: 12,
+        songs: [searchSong],
+      })),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 25)),
+    ]);
+
+    expect(response).not.toBe('timeout');
+    expect((response as HTTPResponse).statusCode).toBe(202);
+    expect(playlistService.importSongsToPlaylist).toHaveBeenCalledWith({
+      playlist_id: 12,
+      songs: [searchSong],
+    });
+    expect(parseResponseBody(response as HTTPResponse).data).toMatchObject({
+      started: true,
+      status: 'running',
+      type: 'songs',
+    });
+    expect(parseResponseBody(response as HTTPResponse).data.job_id).toEqual(expect.any(String));
+  });
+
+  it('returns completed Songloft playlist import job results', async () => {
+    const playlistService = {
+      importSongsToPlaylist: vi.fn(async () => ({
+        playlist: { id: 12 },
+        imported: 1,
+        added: 1,
+        skipped: 0,
+        errors: [],
+      })),
+    };
+    const { router } = createHarness({ playlistService } as any);
+
+    const start = await router.handle(request('POST', '/api/songloft/playlists/import-songs/jobs', {
+      playlist_id: 12,
+      songs: [searchSong],
+    }));
+    const jobId = parseResponseBody(start).data.job_id;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const status = await router.handle(request('GET', `/api/songloft/playlists/import-jobs/${jobId}`));
+
+    expect(status.statusCode).toBe(200);
+    expect(parseResponseBody(status).data).toMatchObject({
+      id: jobId,
+      status: 'done',
+      result: {
+        playlist: { id: 12 },
+        added: 1,
+      },
+    });
+  });
+
+  it('imports a whole external songlist into a new Songloft playlist through the playlist service', async () => {
+    const playlistService = {
+      importSourceSonglist: vi.fn(async () => ({
+        playlist: { id: 14, name: 'Network Mix' },
+        source_total: 2,
+        imported: 2,
+        added: 2,
+        skipped: 0,
+        errors: [],
+      })),
+    };
+    const { router } = createHarness({ playlistService } as any);
+
+    const response = await router.handle(request('POST', '/api/songloft/playlists/import-source-songlist', {
+      source_id: 'kw',
+      id: '3360244412',
+      quality: 'flac24bit',
+      playlist_name: 'Network Mix',
+    }));
+
+    expect(response.statusCode).toBe(201);
+    expect(playlistService.importSourceSonglist).toHaveBeenCalledWith({
+      source_id: 'kw',
+      id: '3360244412',
+      quality: 'flac24bit',
+      playlist_name: 'Network Mix',
+    });
+    expect(parseResponseBody(response).data).toMatchObject({
+      playlist: { id: 14, name: 'Network Mix' },
+      source_total: 2,
+      added: 2,
     });
   });
 
@@ -233,6 +414,28 @@ describe('registerSongloftLibraryHandlers', () => {
     expect(parseResponseBody(response).data).toEqual({
       list: [{ id: 'song-main', title: 'From Main' }],
       total: 1,
+    });
+  });
+
+  it('registers Songloft playlist write routes during plugin init', async () => {
+    vi.resetModules();
+    (songloft.playlists as unknown as Record<string, unknown>).create = vi.fn(async (input) => ({
+      id: 21,
+      name: (input as { name: string }).name,
+    }));
+
+    await import('../../src/main');
+    await (globalThis as typeof globalThis & MainGlobals).onInit();
+
+    const response = await (globalThis as typeof globalThis & MainGlobals).onHTTPRequest(
+      request('POST', '/api/songloft/playlists', { name: 'Runtime Playlist' }),
+    );
+
+    expect(response.statusCode).toBe(201);
+    expect((songloft.playlists as unknown as Record<string, any>).create).toHaveBeenCalledWith({ name: 'Runtime Playlist' });
+    expect(parseResponseBody(response).data).toEqual({
+      id: 21,
+      name: 'Runtime Playlist',
     });
   });
 });

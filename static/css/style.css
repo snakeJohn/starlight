@@ -1,14 +1,24 @@
 :root {
     color-scheme: light dark;
-    --surface-glass: color-mix(in srgb, var(--sl-color-surface, #fff) 78%, transparent);
-    --surface-solid: var(--sl-color-surface, #fff);
-    --surface-muted: color-mix(in srgb, var(--sl-color-background, #f6f7f9) 86%, var(--sl-color-primary, #0a84ff) 14%);
-    --surface-line: color-mix(in srgb, var(--sl-color-border, #d0d7de) 70%, transparent);
-    --accent: var(--sl-color-primary, #0a84ff);
+    --host-surface: var(--md-sys-color-surface, var(--md-surface, var(--sl-color-surface, #fff)));
+    --host-background: var(--md-sys-color-background, var(--md-background, var(--sl-color-background, #f6f7f9)));
+    --host-primary: var(--md-sys-color-primary, var(--md-primary, var(--sl-color-primary, #0a84ff)));
+    --host-outline: var(--md-sys-color-outline-variant, var(--md-outline-variant, var(--sl-color-border, #d0d7de)));
+    --host-on-surface: var(--md-sys-color-on-surface, var(--md-on-surface, var(--sl-color-text, #111827)));
+    --host-on-surface-variant: var(--md-sys-color-on-surface-variant, var(--md-on-surface-variant, var(--sl-color-text-muted, #5f6775)));
+    --surface-elevated: color-mix(in srgb, var(--host-surface) 74%, transparent);
+    --surface-glass: var(--surface-elevated);
+    --surface-solid: var(--host-surface);
+    --surface-control: color-mix(in srgb, var(--surface-solid) 92%, transparent);
+    --surface-muted: color-mix(in srgb, var(--host-background) 86%, var(--host-primary) 14%);
+    --hairline: color-mix(in srgb, var(--host-outline) 70%, transparent);
+    --surface-line: var(--hairline);
+    --accent: var(--host-primary);
     --accent-strong: color-mix(in srgb, var(--accent) 82%, #0b1020 18%);
     --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-    --text: var(--sl-color-text, #111827);
-    --muted: var(--sl-color-text-muted, #5f6775);
+    --focus-ring: color-mix(in srgb, var(--accent) 24%, transparent);
+    --text: var(--host-on-surface);
+    --muted: var(--host-on-surface-variant);
     --success: #1b8a5a;
     --warning: #b56a00;
     --danger: #c4362e;
@@ -28,7 +38,7 @@ html {
 body {
     margin: 0;
     font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--sl-color-background, #f6f7f9);
+    background: var(--host-background);
     color: var(--text);
 }
 
@@ -59,7 +69,7 @@ textarea:disabled {
 
 .side-rail,
 .status-strip {
-    background: var(--surface-glass);
+    background: var(--surface-elevated);
     backdrop-filter: blur(18px);
     border-color: var(--surface-line);
 }
@@ -329,9 +339,9 @@ select,
 textarea {
     width: 100%;
     min-width: 0;
-    border: 1px solid var(--surface-line);
+    border: 1px solid var(--hairline);
     border-radius: var(--radius);
-    background: var(--surface-solid);
+    background: var(--surface-control);
     color: var(--text);
     outline: none;
 }
@@ -359,7 +369,7 @@ input:focus,
 select:focus,
 textarea:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
+    box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .wide-field {
@@ -451,6 +461,16 @@ textarea:focus {
     grid-template-columns: 48px minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
+}
+
+.song-row.media-row {
+    grid-template-columns: 48px minmax(0, 1fr);
+    align-items: start;
+}
+
+.song-row.media-row .row-actions {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
 }
 
 .merged-source-row {
@@ -546,11 +566,21 @@ textarea:focus {
 }
 
 .custom-playlist-song-row {
-    grid-template-columns: 28px 48px minmax(0, 1fr) auto;
+    grid-template-columns: 28px 48px minmax(0, 1fr);
+}
+
+.custom-playlist-song-row .row-actions {
+    grid-column: 3 / -1;
+    justify-content: flex-start;
 }
 
 .song-row.selectable-song-row {
-    grid-template-columns: 28px 48px minmax(0, 1fr) auto;
+    grid-template-columns: 28px 48px minmax(0, 1fr);
+}
+
+.song-row.selectable-song-row .row-actions {
+    grid-column: 3 / -1;
+    justify-content: flex-start;
 }
 
 .song-check {
@@ -656,6 +686,42 @@ textarea:focus {
     min-width: 0;
     color: var(--text);
     overflow-wrap: anywhere;
+}
+
+.songloft-target-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: clamp(16px, 4vw, 32px);
+    background: color-mix(in srgb, var(--surface-solid) 36%, transparent);
+    backdrop-filter: blur(18px);
+}
+
+.songloft-target-dialog[hidden] {
+    display: none;
+}
+
+.songloft-target-panel {
+    width: min(560px, 100%);
+    max-height: min(720px, calc(100vh - 32px));
+    overflow: auto;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    padding: 18px;
+    background: var(--surface-elevated);
+    box-shadow: var(--shadow-soft);
+}
+
+.songloft-target-grid {
+    margin-top: 12px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.songloft-target-actions {
+    justify-content: flex-end;
+    margin-top: 14px;
 }
 
 .batch-actions {
@@ -1315,10 +1381,14 @@ legend {
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --surface-solid: var(--sl-color-surface, #171c24);
-        --surface-muted: color-mix(in srgb, var(--sl-color-background, #0f131a) 78%, #274866 22%);
-        --text: var(--sl-color-text, #eef2f6);
-        --muted: var(--sl-color-text-muted, #a5adba);
+        --host-surface: var(--md-sys-color-surface, var(--md-surface, var(--sl-color-surface, #171c24)));
+        --host-background: var(--md-sys-color-background, var(--md-background, var(--sl-color-background, #0f131a)));
+        --host-on-surface: var(--md-sys-color-on-surface, var(--md-on-surface, var(--sl-color-text, #eef2f6)));
+        --host-on-surface-variant: var(--md-sys-color-on-surface-variant, var(--md-on-surface-variant, var(--sl-color-text-muted, #a5adba)));
+        --surface-solid: var(--host-surface);
+        --surface-muted: color-mix(in srgb, var(--host-background) 78%, #274866 22%);
+        --text: var(--host-on-surface);
+        --muted: var(--host-on-surface-variant);
         --shadow-soft: 0 18px 52px rgba(0, 0, 0, 0.34);
     }
 }
@@ -1381,6 +1451,33 @@ legend {
         font-size: 24px;
     }
 
+    .custom-playlist-detail-panel .section-bar {
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    .custom-playlist-detail-panel .section-bar > div,
+    .custom-playlist-detail-panel .inline-actions {
+        width: 100%;
+    }
+
+    .custom-playlist-detail-panel .inline-actions {
+        justify-content: flex-start;
+    }
+
+    .voice-record-meta {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .voice-record-meta strong,
+    .voice-record-meta span {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+    }
+
     .bottom-tabs {
         position: fixed;
         left: 0;
@@ -1388,11 +1485,12 @@ legend {
         bottom: 0;
         z-index: 40;
         display: grid;
-        grid-template-columns: repeat(8, minmax(0, 1fr));
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr);
         min-height: var(--bottom-tabs-height);
         padding: 6px max(6px, env(safe-area-inset-left)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-right));
         border-top: 1px solid var(--surface-line);
-        background: var(--surface-glass);
+        background: var(--surface-elevated);
         backdrop-filter: blur(18px);
     }
 
@@ -1468,6 +1566,12 @@ legend {
     .media-row .row-actions {
         grid-column: 1 / -1;
         justify-content: flex-start;
+    }
+
+    .song-row.media-row .row-actions,
+    .song-row.selectable-song-row .row-actions,
+    .custom-playlist-song-row .row-actions {
+        grid-column: 1 / -1;
     }
 
     .songlist-row.media-row,

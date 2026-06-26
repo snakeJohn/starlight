@@ -248,6 +248,8 @@ export class MinaHTTPClient {
    * 停止播放
    */
   async playerStop(deviceId: string): Promise<boolean> {
+    // 部分小爱音箱型号单独调用 stop 不会真正停止播放，先暂停再停止。
+    await this.playerPause(deviceId);
     const message = { action: 'stop', media: 'app_ios' };
     return (await this.ubusRequest(deviceId, 'player_play_operation', 'mediaplayer', message)) !== null;
   }

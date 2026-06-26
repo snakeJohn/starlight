@@ -21,7 +21,16 @@ export interface RemoteSongOptions {
 
 export function remoteSongDedupKey(song: SearchResultSong): string {
   const info = song.source_data.songInfo;
-  const id = info.musicId || info.songmid || info.hash || info.copyrightId || '';
+  const id = info.musicId
+    || info.songmid
+    || info.songId
+    || info.rid
+    || info.id
+    || info.mid
+    || info.hash
+    || info.copyrightId
+    || info.strMediaMid
+    || '';
   return id ? `${song.source_data.platform}:${id}` : '';
 }
 

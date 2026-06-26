@@ -58,7 +58,7 @@ export class ConversationMonitor {
 
   /** 轮询定时器 */
   private pollTimer: any = null;
-  private pollInterval: number = 10000; // 10秒
+  private pollInterval: number = 1000; // 默认1秒，从配置读取
 
   /** 设备监听状态: "accountId:deviceId" → DeviceMonitorState */
   private devices: Map<string, DeviceMonitorState> = new Map();
@@ -96,25 +96,36 @@ export class ConversationMonitor {
 
     this.enabled = true;
 
-    // 刷新设备列表（异步，不等待）
-    this.refreshDevices().then(() => {
-      // 标记所有设备为运行中，并重置时间戳防止重放旧消息
-      const now = Date.now();
-      for (const dm of this.devices.values()) {
-        dm.isRunning = true;
-        dm.lastTimestampMs = now;
-      }
-      songloft.log.info(`[ConversationMonitor] Started, devices=${this.devices.size} callbacks=${this.callbacks.size} timestampReset=${now}`);
-    }).catch(e => {
-      songloft.log.error('[ConversationMonitor] refreshDevices error: ' + String(e));
-    });
+    // 从配置读取轮询间隔，然后刷新设备列表并启动定时器。
+    this.configManager.getConfig().then(config => {
+      if (!this.enabled) return;
 
-    // 启动定时轮询
-    this.pollTimer = setInterval(() => {
-      this.pollAll().catch(e => {
-        songloft.log.error('[ConversationMonitor] pollAll error: ' + String(e));
+      const intervalSec = Math.max(1, Math.min(30, config.conversation_poll_interval ?? 1));
+      this.pollInterval = intervalSec * 1000;
+
+      return this.refreshDevices().then(() => {
+        if (!this.enabled) return;
+
+        // 标记所有设备为运行中，并重置时间戳防止重放旧消息。
+        const now = Date.now();
+        for (const dm of this.devices.values()) {
+          dm.isRunning = true;
+          dm.lastTimestampMs = now;
+        }
+        songloft.log.info(`[ConversationMonitor] Started, devices=${this.devices.size} callbacks=${this.callbacks.size} interval=${intervalSec}s timestampReset=${now}`);
+
+        if (this.pollTimer !== null) {
+          clearInterval(this.pollTimer);
+        }
+        this.pollTimer = setInterval(() => {
+          this.pollAll().catch(e => {
+            songloft.log.error('[ConversationMonitor] pollAll error: ' + String(e));
+          });
+        }, this.pollInterval);
       });
-    }, this.pollInterval);
+    }).catch(e => {
+      songloft.log.error('[ConversationMonitor] start error: ' + String(e));
+    });
   }
 
   /**

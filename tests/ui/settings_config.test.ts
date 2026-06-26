@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 interface AutomationModule {
   configFromForm(form: { elements: Record<string, { value?: string; checked?: boolean; disabled?: boolean }> }): Record<string, unknown>;
   manageAllConversationDevices(): Promise<number>;
+  setConfigState(message: string, form?: { querySelector?: (selector: string) => { textContent: string } | null } | null): void;
   updateVoiceCommandAccess(form: { elements: Record<string, { checked?: boolean; disabled?: boolean }> }, enabled: boolean): void;
 }
 
@@ -130,6 +131,48 @@ describe('settings config helpers', () => {
     updateVoiceCommandAccess(form, true);
 
     expect(form.elements.voice_command_enabled.disabled).toBe(false);
+  });
+
+  it('updates the scoped config status node inside the provided form', async () => {
+    installDom();
+    const localNode = { textContent: '' };
+    const globalNode = { textContent: '' };
+    vi.stubGlobal('document', {
+      querySelector: vi.fn(() => globalNode),
+      querySelectorAll: vi.fn(() => []),
+      createElement: vi.fn(() => ({ className: '', textContent: '', remove: vi.fn() })),
+      body: {
+        appendChild: vi.fn(),
+      },
+    });
+    const { setConfigState } = await loadAutomationModule();
+
+    setConfigState('音箱设置已保存', {
+      querySelector: vi.fn((selector: string) => selector === '[data-role="config-state"]' ? localNode : null),
+    });
+
+    expect(localNode.textContent).toBe('音箱设置已保存');
+    expect(globalNode.textContent).toBe('');
+  });
+
+  it('does not fall back to a global config-state node when the current form has no local status field', async () => {
+    installDom();
+    const globalNode = { textContent: '' };
+    vi.stubGlobal('document', {
+      querySelector: vi.fn(() => globalNode),
+      querySelectorAll: vi.fn(() => []),
+      createElement: vi.fn(() => ({ className: '', textContent: '', remove: vi.fn() })),
+      body: {
+        appendChild: vi.fn(),
+      },
+    });
+    const { setConfigState } = await loadAutomationModule();
+
+    setConfigState('不应写到别的表单', {
+      querySelector: vi.fn(() => null),
+    });
+
+    expect(globalNode.textContent).toBe('');
   });
 
   it('marks every detected speaker device as managed when enabling conversation monitoring', async () => {
