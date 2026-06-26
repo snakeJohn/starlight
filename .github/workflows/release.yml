@@ -28,6 +28,7 @@ jobs:
         run: npm ci
 
       - name: Stamp release version
+        if: github.ref == 'refs/heads/main'
         run: npm run version:stamp
 
       - name: Typecheck
@@ -44,10 +45,12 @@ jobs:
 
       - name: Sync release manifest
         id: release_manifest
+        if: github.ref == 'refs/heads/main'
         run: npm run release:manifest
 
       - name: Commit release metadata
         id: release_commit
+        if: github.ref == 'refs/heads/main'
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
@@ -63,12 +66,14 @@ jobs:
           "sha=$(git rev-parse HEAD)" >> $env:GITHUB_OUTPUT
 
       - name: Upload build artifact
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: starlight-${{ steps.release_manifest.outputs.release_version }}.zip
           path: ${{ steps.release_manifest.outputs.release_zip_path }}
 
       - name: Create GitHub release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_manifest.outputs.release_version }}
