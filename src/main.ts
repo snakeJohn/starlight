@@ -117,6 +117,7 @@ async function onInit(): Promise<void> {
     bridgeService,
     customPlaylistService,
     platformRegistry,
+    downloadService,
   );
 
   const executor = new TaskExecutor(configManager, minaService, playlistManagerMap, indexingManager, conversationMonitor);

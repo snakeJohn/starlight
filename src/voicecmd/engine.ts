@@ -18,6 +18,7 @@ import type { ConversationMessage, VoiceCommand, PlayMode, AIAnalysisResult } fr
 import type { BridgeService } from '../bridge/service';
 import type { CustomPlaylistService } from '../custom_playlists/service';
 import type { CustomPlaylist } from '../custom_playlists/types';
+import type { DownloadService } from '../download/service';
 import type { PlatformRegistry } from '../music/platforms/registry';
 import type { MusicPlatform, SearchResultSong } from '../music/types';
 
@@ -31,6 +32,8 @@ interface MatchResult {
 }
 
 type VoiceCustomPlaylistService = Pick<CustomPlaylistService, 'create' | 'addSong' | 'list'>;
+type VoiceBridgeService = Pick<BridgeService, 'resolveSearchSong' | 'externalSearch' | 'playOnSpeaker'>;
+type VoiceDownloadService = Pick<DownloadService, 'downloadSong'>;
 
 interface MatchedPlaylist {
   id: number;
@@ -38,6 +41,7 @@ interface MatchedPlaylist {
 }
 
 type SongloftRecord = Record<string, unknown>;
+type SongQueryHint = { title: string; artist: string };
 
 const LIST_KEYS = ['list', 'items', 'songs', 'playlists'] as const;
 
@@ -236,6 +240,71 @@ function findBestSongloftSongMatch(query: string, songs: SongloftRecord[]): Song
   return scored[0]?.song ?? null;
 }
 
+function buildSongSearchHints(query: string, artist = ''): SongQueryHint[] {
+  const hints: SongQueryHint[] = [];
+  const seen = new Set<string>();
+  const pushHint = (title: string, singer = '') => {
+    const normalizedTitle = title.trim();
+    const normalizedArtist = singer.trim();
+    if (!normalizedTitle) {
+      return;
+    }
+    const key = `${normalizeMatchText(normalizedTitle)}|${normalizeMatchText(normalizedArtist)}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    hints.push({ title: normalizedTitle, artist: normalizedArtist });
+  };
+
+  pushHint(query, artist);
+
+  if (!artist.trim()) {
+    const ofMatch = query.trim().match(/^(.+?)的(.+)$/);
+    if (ofMatch) {
+      pushHint(ofMatch[2], ofMatch[1]);
+    }
+  }
+
+  return hints;
+}
+
+function findBestSongloftSongMatchByHints(hints: SongQueryHint[], songs: SongloftRecord[]): SongloftRecord | null {
+  const scored = songs
+    .map((song, index) => {
+      let score = 0;
+      for (const hint of hints) {
+        const titleScore = scoreSongloftSong(hint.title, song);
+        if (titleScore <= 0) {
+          continue;
+        }
+        if (hint.artist) {
+          const artistScore = Math.max(
+            matchScore(hint.artist, getSongArtist(song)),
+            matchScore(hint.artist, [getSongArtist(song), getSongTitle(song)].filter(Boolean).join(' ')),
+          );
+          if (artistScore <= 0) {
+            continue;
+          }
+          score = Math.max(score, titleScore + artistScore);
+          continue;
+        }
+        score = Math.max(score, titleScore);
+      }
+
+      return {
+        song,
+        index,
+        score,
+        isLocal: isSongloftLocalSong(song),
+      };
+    })
+    .filter(item => item.score > 0)
+    .sort((a, b) => Number(b.isLocal) - Number(a.isLocal) || b.score - a.score || a.index - b.index);
+
+  return scored[0]?.song ?? null;
+}
+
 // ===== 默认口令配置 =====
 
 /**
@@ -275,6 +344,8 @@ export class VoiceEngine {
   private indexingManager: IndexingManager;
   private aiAnalyzer: AIAnalyzer;
   private onlineSearcher: OnlineSearcher;
+  private bridgeService?: VoiceBridgeService;
+  private downloadService?: VoiceDownloadService;
   private customPlaylistService?: VoiceCustomPlaylistService;
   private platforms?: PlatformRegistry;
   private enabled: boolean = false;
@@ -291,6 +362,7 @@ export class VoiceEngine {
     bridgeService?: BridgeService,
     customPlaylistService?: VoiceCustomPlaylistService,
     platforms?: PlatformRegistry,
+    downloadService?: VoiceDownloadService,
   ) {
     this.configManager = configManager;
     this.accountManager = accountManager;
@@ -298,6 +370,8 @@ export class VoiceEngine {
     this.playlistManagerMap = playlistManagerMap;
     this.indexingManager = indexingManager;
     this.aiAnalyzer = aiAnalyzer || new AIAnalyzer();
+    this.bridgeService = bridgeService;
+    this.downloadService = downloadService;
     this.onlineSearcher = new OnlineSearcher(configManager, bridgeService);
     this.customPlaylistService = customPlaylistService;
     this.platforms = platforms;
@@ -618,10 +692,11 @@ export class VoiceEngine {
   ): Promise<void> {
     const playlist = (parts.playlist || '').trim();
     const name = (parts.name || '').trim();
+    const artist = (parts.artist || '').trim();
     if (!playlist || !name) {
       return;
     }
-    if (!this.customPlaylistService || !this.platforms) {
+    if (!this.customPlaylistService) {
       await this.minaService.textToSpeech(accountId, deviceId, '自建歌单不可用');
       return;
     }
@@ -632,10 +707,19 @@ export class VoiceEngine {
       return;
     }
 
-    const song = await this.searchPlaylistSong(name, parts.artist || '', platform);
+    const existingSong = await this.findSongloftLibrarySong(name, artist);
+    const song = await this.resolveVoiceSearchSong(name, artist, platform);
     if (!song) {
       await this.minaService.textToSpeech(accountId, deviceId, `未找到歌曲：${name}`);
       return;
+    }
+
+    if (!existingSong) {
+      try {
+        await this.downloadResolvedSongToLibrary(song, name, artist);
+      } catch (error) {
+        songloft.log.warn(`[VoiceEngine] Auto download before custom playlist add failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     await this.customPlaylistService.addSong(playlist, song);
@@ -691,6 +775,42 @@ export class VoiceEngine {
         }
       } catch (error) {
         songloft.log.warn(`[VoiceEngine] Custom playlist song search failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    return null;
+  }
+
+  private async resolveVoiceSearchSong(name: string, artist: string, platform: MusicPlatform | null): Promise<SearchResultSong | null> {
+    const hints = buildSongSearchHints(name, artist);
+
+    if (platform) {
+      for (const hint of hints) {
+        const song = await this.searchPlaylistSong(hint.title, hint.artist, platform);
+        if (song) {
+          return song;
+        }
+      }
+      return null;
+    }
+
+    if (this.bridgeService?.resolveSearchSong) {
+      for (const hint of hints) {
+        try {
+          const song = await this.bridgeService.resolveSearchSong(hint.title, hint.artist);
+          if (song) {
+            return song;
+          }
+        } catch (error) {
+          songloft.log.warn(`[VoiceEngine] Voice search resolve failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+
+    for (const hint of hints) {
+      const song = await this.searchPlaylistSong(hint.title, hint.artist, null);
+      if (song) {
+        return song;
       }
     }
 
@@ -755,20 +875,59 @@ export class VoiceEngine {
     }
   }
 
-  private async findSongloftLibrarySong(songName: string): Promise<PlayerSong | null> {
-    if (!songName) {
+  private async findSongloftLibrarySong(songName: string, artist = ''): Promise<PlayerSong | null> {
+    const hints = buildSongSearchHints(songName, artist);
+    if (hints.length === 0) {
       return null;
     }
 
     try {
       const songs = extractList(await songloft.songs.list({ limit: 10000 }));
-      const matched = findBestSongloftSongMatch(songName, songs);
+      const matched = findBestSongloftSongMatchByHints(hints, songs);
       if (!matched) {
         return null;
       }
       return await this.songloftRecordToPlayerSong(matched);
     } catch (error) {
       songloft.log.warn(`[VoiceEngine] Songloft song lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  private async loadSongloftLibrarySongById(songId: number): Promise<PlayerSong | null> {
+    if (!Number.isFinite(songId) || songId <= 0) {
+      return null;
+    }
+
+    try {
+      const rawSong = await songloft.songs.getById(songId);
+      if (!isRecord(rawSong)) {
+        return null;
+      }
+      return await this.songloftRecordToPlayerSong(rawSong);
+    } catch (error) {
+      songloft.log.warn(`[VoiceEngine] Songloft song getById failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  private async downloadResolvedSongToLibrary(song: SearchResultSong, titleHint: string, artistHint = ''): Promise<PlayerSong | null> {
+    if (!this.downloadService) {
+      return null;
+    }
+
+    try {
+      const result = await this.downloadService.downloadSong(song);
+      const downloadedSong = await this.loadSongloftLibrarySongById(result.song_id)
+        || await this.findSongloftLibrarySong(titleHint, artistHint || song.artist);
+      try {
+        await this.indexingManager.refresh();
+      } catch (error) {
+        songloft.log.warn(`[VoiceEngine] Index refresh after auto download failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return downloadedSong;
+    } catch (error) {
+      songloft.log.warn(`[VoiceEngine] Auto download failed: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -963,47 +1122,75 @@ export class VoiceEngine {
     // 打断音箱当前播报
     await this.interruptBroadcast(accountId, deviceId);
 
-    // 检查索引是否就绪
-    if (!this.indexingManager.isIndexReady()) {
-      songloft.log.warn('[VoiceEngine] Song index not ready, skip play song');
+    const songloftSong = await this.findSongloftLibrarySong(songName);
+    if (songloftSong) {
+      const ok = await pm.playStandalone([songloftSong], 0, 'single', {
+        autoAdvance: false,
+      });
+      if (!ok) {
+        songloft.log.error('[VoiceEngine] Failed to play Songloft library song: ' + songloftSong.title + ' - ' + songloftSong.artist);
+        return;
+      }
+      songloft.log.info('[VoiceEngine] Played Songloft library song through PlaylistManager: ' + songloftSong.title + ' - ' + songloftSong.artist);
       return;
     }
 
     // 从索引中模糊匹配歌曲，获取歌单ID和歌曲索引（使用预加载缓存，纯内存操作）
     songloft.log.info(`[VoiceEngine] Searching song: "${songName}"`);
-    let loc = await this.indexingManager.findSongByName(songName);
+    let loc: Awaited<ReturnType<IndexingManager['findSongByName']>> | null = null;
+    if (this.indexingManager.isIndexReady()) {
+      loc = await this.indexingManager.findSongByName(songName);
+      if (!loc) {
+        // 尝试查找独立远程歌曲（不在任何歌单中的外部导入歌曲）
+        const standalone = await this.indexingManager.findStandaloneSongByName(songName);
+        if (standalone) {
+          const playUrl = await URLBuilder.buildSongURL(standalone);
+          if (playUrl) {
+            const ok = await pm.playStandalone([standaloneSongToPlayerSong(standalone, playUrl)], 0, 'single', {
+              autoAdvance: false,
+            });
+            if (!ok) {
+              songloft.log.error('[VoiceEngine] Failed to play standalone remote song: ' + standalone.title + ' - ' + standalone.artist);
+              return;
+            }
+            songloft.log.info('[VoiceEngine] Played standalone remote song through PlaylistManager: ' + standalone.title + ' - ' + standalone.artist);
+            return;
+          }
+        }
+      }
+    } else {
+      songloft.log.warn('[VoiceEngine] Song index not ready, continuing with library/search fallback');
+    }
+
     if (!loc) {
-      // 尝试查找独立远程歌曲（不在任何歌单中的外部导入歌曲）
-      const standalone = await this.indexingManager.findStandaloneSongByName(songName);
-      if (standalone) {
-        const playUrl = await URLBuilder.buildSongURL(standalone);
-        if (playUrl) {
-          const ok = await pm.playStandalone([standaloneSongToPlayerSong(standalone, playUrl)], 0, 'single', {
+      const resolvedSong = await this.resolveVoiceSearchSong(songName, '', null);
+      if (resolvedSong) {
+        const downloadedSong = await this.downloadResolvedSongToLibrary(resolvedSong, songName, resolvedSong.artist);
+        if (downloadedSong) {
+          const ok = await pm.playStandalone([downloadedSong], 0, 'single', {
             autoAdvance: false,
           });
           if (!ok) {
-            songloft.log.error('[VoiceEngine] Failed to play standalone remote song: ' + standalone.title + ' - ' + standalone.artist);
+            songloft.log.error('[VoiceEngine] Failed to play auto-downloaded Songloft song: ' + downloadedSong.title + ' - ' + downloadedSong.artist);
             return;
           }
-          songloft.log.info('[VoiceEngine] Played standalone remote song through PlaylistManager: ' + standalone.title + ' - ' + standalone.artist);
+          songloft.log.info('[VoiceEngine] Played auto-downloaded Songloft song through PlaylistManager: ' + downloadedSong.title + ' - ' + downloadedSong.artist);
           return;
         }
-      }
-
-      const songloftSong = await this.findSongloftLibrarySong(songName);
-      if (songloftSong) {
-        const ok = await pm.playStandalone([songloftSong], 0, 'single', {
-          autoAdvance: false,
-        });
-        if (!ok) {
-          songloft.log.error('[VoiceEngine] Failed to play Songloft library song: ' + songloftSong.title + ' - ' + songloftSong.artist);
-          return;
-        }
-        songloft.log.info('[VoiceEngine] Played Songloft library song through PlaylistManager: ' + songloftSong.title + ' - ' + songloftSong.artist);
-        return;
       }
 
       songloft.log.warn(`[VoiceEngine] Song not found locally: ${songName}, trying online search`);
+      if (resolvedSong && this.bridgeService?.playOnSpeaker) {
+        try {
+          const played = await this.bridgeService.playOnSpeaker(accountId, deviceId, resolvedSong);
+          if (played.url) {
+            songloft.log.info('[VoiceEngine] Played resolved song on speaker after local download miss: ' + resolvedSong.title + ' - ' + resolvedSong.artist);
+            return;
+          }
+        } catch (error) {
+          songloft.log.warn(`[VoiceEngine] Speaker fallback after auto download miss failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       // 本地缓存歌曲未击中，尝试在线搜索（需配置了外部搜索 API）
       if (!(await this.onlineSearcher.isExternalSearchConfigured())) {
         songloft.log.warn('[VoiceEngine] External search not configured, skip online search');
