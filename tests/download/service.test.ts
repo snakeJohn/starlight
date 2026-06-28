@@ -93,6 +93,15 @@ function audioProbeResponse(): Response {
   } as unknown as Response;
 }
 
+function responseJson(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: vi.fn(async () => body),
+    text: vi.fn(async () => JSON.stringify(body)),
+  } as unknown as Response;
+}
+
 function createProvider(id: MusicPlatformProvider['id'], search: MusicPlatformProvider['search']): MusicPlatformProvider {
   return {
     id,
@@ -165,9 +174,10 @@ describe('DownloadService', () => {
       title: 'Song',
       artist: 'Singer',
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
     const fetchCalls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
-    const payload = JSON.parse(String(fetchCalls[0][1].body));
+    const remoteImportCall = fetchCalls.find(([url]) => String(url).includes('/api/v1/songs/remote'));
+    expect(remoteImportCall).toBeTruthy();
+    const payload = JSON.parse(String(remoteImportCall?.[1].body));
     expect(payload).toEqual([
       expect.objectContaining({
         title: 'Song',
@@ -183,6 +193,53 @@ describe('DownloadService', () => {
       embed_metadata: false,
     });
     expect(provider.search).not.toHaveBeenCalled();
+  });
+
+  it('syncs lyrics into Songloft after a successful native download', async () => {
+    const runtime = createRuntime();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (isDownloadProbeRequest(input)) {
+        return audioProbeResponse();
+      }
+      if (url.includes('/api/v1/songs/remote')) {
+        return responseJson({ songs: [{ id: 502, type: 'remote', title: 'Song', artist: 'Singer' }], count: 1 }, 201);
+      }
+      if (url.includes('openapi/v1/www/lyric/getlyric') || url.includes('newh5/singles/songinfoandlrc')) {
+        return responseJson({
+          data: {
+            songinfo: { songName: 'Song', artist: 'Singer', album: 'Album' },
+            lrclist: [
+              { time: 0, lineLyric: 'Song' },
+              { time: 0, lineLyric: 'Wind rises' },
+            ],
+          },
+        });
+      }
+      if (url.includes('/api/v1/songs/502/lyrics')) {
+        expect(init?.method).toBe('PUT');
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          lyric_source: 'scraped',
+          lyric: expect.stringContaining('[00:00.00]Song'),
+          tlyric: expect.stringContaining('[00:00.00]Wind rises'),
+        });
+        return responseJson({ message: '歌词已更新', file_write_status: 'updated' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const downloadMock = vi.fn(async () => ({ path: 'downloads/Singer/Song.flac', status: 'ok' }));
+    const songsApi = songloft.songs as typeof songloft.songs & { download: typeof downloadMock };
+    songsApi.download = downloadMock;
+    const service = new DownloadService(runtime, createPlatforms([]));
+
+    await expect(service.downloadSong(song)).resolves.toEqual({
+      song_id: 502,
+      path: 'downloads/Singer/Song.flac',
+      status: 'ok',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:18191/api/v1/songs/502/lyrics', expect.any(Object));
   });
 
   it('rejects download when enabled download sources cannot resolve a URL', async () => {
@@ -279,8 +336,7 @@ describe('DownloadService', () => {
       songmid: '123',
     }));
     expect(playbackRuntimes.getMusicUrl).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://download.test/working.flac');
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === 'https://download.test/working.flac')).toHaveLength(1);
     expect(downloadMock).toHaveBeenCalledTimes(1);
   });
 

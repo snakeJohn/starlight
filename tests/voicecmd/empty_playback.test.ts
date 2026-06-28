@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { VoiceEngine } from '../../src/voicecmd/engine';
+import { VoiceEngine, getDefaultVoiceCommands } from '../../src/voicecmd/engine';
 import type { AccountManager } from '../../src/account/manager';
 import type { ConfigManager } from '../../src/config/manager';
 import type { IndexingManager } from '../../src/indexing/manager';
@@ -41,6 +41,7 @@ function createEngine(commands: VoiceCommand[]) {
     prepareForNewPlayback: vi.fn(),
     resumePlayback: vi.fn(async () => true),
     replayCurrent: vi.fn(async () => true),
+    stop: vi.fn(async () => undefined),
   };
   const playlistManagerMap = {
     get: vi.fn(() => null),
@@ -94,5 +95,14 @@ describe('VoiceEngine empty playback commands', () => {
     expect(playlistManager.prepareForNewPlayback).not.toHaveBeenCalled();
     expect(minaService.stopPlay).not.toHaveBeenCalled();
     expect(indexingManager.searchPlaylist).not.toHaveBeenCalled();
+  });
+
+  it('treats "闭嘴" as a default stop playback command', async () => {
+    const { engine, playlistManager } = createEngine(getDefaultVoiceCommands());
+
+    await engine.handleMessage(message('闭嘴'));
+
+    expect(playlistManager.stop).toHaveBeenCalledTimes(1);
+    expect(playlistManager.replayCurrent).not.toHaveBeenCalled();
   });
 });

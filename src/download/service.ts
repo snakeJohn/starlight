@@ -2,11 +2,13 @@
 
 import { toRemoteSong } from '../bridge/mapper';
 import { postRemoteSongs, type SongloftRemoteSong } from '../bridge/service';
+import { resolveMusicLyric, type MusicLyricResult } from '../music/platforms/lyrics';
 import { PlatformRegistry } from '../music/platforms/registry';
 import type { RuntimeManager } from '../music/runtime_manager';
 import type { SearchResultSong } from '../music/types';
 import { StarlightError } from '../system/errors';
 import { sourceDiagnostics } from '../diagnostics/source_logs';
+import { normalizeHostBaseUrl } from '../utils/http';
 
 const SETTINGS_KEY = 'starlight:download:settings';
 const DEFAULT_SETTINGS: DownloadSettings = {
@@ -196,6 +198,8 @@ export class DownloadService {
           });
         }
 
+        await this.syncDownloadedSongLyrics(song, songId);
+
         sourceDiagnostics.record({
           operation: 'download',
           stage: 'native-download',
@@ -294,6 +298,17 @@ export class DownloadService {
     return first;
   }
 
+  private async syncDownloadedSongLyrics(song: SearchResultSong, songId: number): Promise<void> {
+    try {
+      const token = await songloft.plugin.getToken();
+      const host = await songloft.plugin.getHostUrl();
+      const lyric = await resolveMusicLyric(song.source_data.platform, song.source_data.songInfo);
+      await updateDownloadedSongLyrics(host, token, songId, lyric);
+    } catch (error) {
+      songloft.log.warn(`[DownloadService] Sync lyrics failed for "${song.title}": ${errorMessage(error)}`);
+    }
+  }
+
   private async runBatch(task: BatchTask, songs: SearchResultSong[]): Promise<void> {
     const settings = await this.getSettings();
     for (let index = 0; index < songs.length; index += 1) {
@@ -347,6 +362,32 @@ function safeJson(value: string): unknown {
 function numericSongId(song: SongloftRemoteSong): number {
   const id = Number(song.id);
   return Number.isFinite(id) && id > 0 ? id : 0;
+}
+
+async function updateDownloadedSongLyrics(host: string, token: string, songId: number, lyric: MusicLyricResult): Promise<void> {
+  const baseHost = normalizeHostBaseUrl(host);
+  const response = await fetch(`${baseHost}/api/v1/songs/${songId}/lyrics`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      lyric_source: 'scraped',
+      lyric: lyric.lyric,
+      tlyric: lyric.tlyric || '',
+      rlyric: lyric.rlyric || '',
+      lxlyric: lyric.lxlyric || '',
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${await safeResponseText(response)}`);
+  }
+}
+
+async function safeResponseText(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
 }
 
 function errorMessage(error: unknown): string {

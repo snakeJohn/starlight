@@ -341,7 +341,9 @@ describe('VoiceEngine Songloft library matching', () => {
     await engine.handleMessage(message('播放歌曲 宿敌'));
 
     expect(bridgeService.resolveSearchSong).toHaveBeenCalledWith('宿敌', '');
-    expect(downloadService.downloadSong).toHaveBeenCalledWith(resolvedSong);
+    expect(downloadService.downloadSong).toHaveBeenCalledWith(expect.objectContaining({
+      source_data: expect.objectContaining({ quality: 'flac' }),
+    }));
     expect(playlistManager.playStandalone).toHaveBeenCalledWith([
       expect.objectContaining({
         id: 901,
@@ -353,6 +355,108 @@ describe('VoiceEngine Songloft library matching', () => {
     ], 0, 'single', { autoAdvance: false });
     expect(indexingManager.refresh).toHaveBeenCalled();
     expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：宿敌');
+  });
+
+  it('uses flac24bit for voice auto-download when the searched song exposes that quality', async () => {
+    const songloft = testSongloft();
+    const resolvedSong = createSearchResultSong({
+      source_data: {
+        platform: 'tx',
+        quality: '320k',
+        songInfo: {
+          source: 'tx',
+          name: '宿敌',
+          singer: '许嵩',
+          album: '寻雾启示',
+          duration: 260,
+          songmid: 'song-mid-1',
+          types: [{ type: '320k' }, { type: 'flac' }, { type: 'flac24bit' }],
+        },
+      },
+    });
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => resolvedSong),
+    };
+    const downloadService = {
+      downloadSong: vi.fn(async () => ({ song_id: 905, status: 'ok', path: 'downloads/xs/sudi.flac' })),
+    };
+    songloft.songs.list = vi.fn(async () => []);
+    songloft.songs.getById = vi.fn(async () => ({
+      id: 905,
+      type: 'local',
+      title: '宿敌',
+      artist: '许嵩',
+      album: '寻雾启示',
+      duration: 260,
+      url: '',
+    }));
+    const { engine } = createEngine({
+      indexedSongLocation: null,
+      standaloneSong: null,
+      indexReady: false,
+      bridgeService,
+      downloadService,
+    });
+
+    await engine.handleMessage(message('播放歌曲 宿敌'));
+
+    expect(downloadService.downloadSong).toHaveBeenCalledWith(expect.objectContaining({
+      source_data: expect.objectContaining({
+        quality: 'flac24bit',
+      }),
+    }));
+    expect(resolvedSong.source_data.quality).toBe('320k');
+  });
+
+  it('falls back to flac for voice auto-download when flac24bit is not exposed', async () => {
+    const songloft = testSongloft();
+    const resolvedSong = createSearchResultSong({
+      source_data: {
+        platform: 'tx',
+        quality: '320k',
+        songInfo: {
+          source: 'tx',
+          name: '宿敌',
+          singer: '许嵩',
+          album: '寻雾启示',
+          duration: 260,
+          songmid: 'song-mid-1',
+          types: [{ type: '128k' }, { type: '320k' }, { type: 'flac' }],
+        },
+      },
+    });
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => resolvedSong),
+    };
+    const downloadService = {
+      downloadSong: vi.fn(async () => ({ song_id: 906, status: 'ok', path: 'downloads/xs/sudi.flac' })),
+    };
+    songloft.songs.list = vi.fn(async () => []);
+    songloft.songs.getById = vi.fn(async () => ({
+      id: 906,
+      type: 'local',
+      title: '宿敌',
+      artist: '许嵩',
+      album: '寻雾启示',
+      duration: 260,
+      url: '',
+    }));
+    const { engine } = createEngine({
+      indexedSongLocation: null,
+      standaloneSong: null,
+      indexReady: false,
+      bridgeService,
+      downloadService,
+    });
+
+    await engine.handleMessage(message('播放歌曲 宿敌'));
+
+    expect(downloadService.downloadSong).toHaveBeenCalledWith(expect.objectContaining({
+      source_data: expect.objectContaining({
+        quality: 'flac',
+      }),
+    }));
+    expect(resolvedSong.source_data.quality).toBe('320k');
   });
 
   it('treats "播放歌手的歌曲" as a play-song command and searches with artist/title hints', async () => {
@@ -388,7 +492,9 @@ describe('VoiceEngine Songloft library matching', () => {
 
     expect(bridgeService.resolveSearchSong).toHaveBeenNthCalledWith(1, '许嵩的宿敌', '');
     expect(bridgeService.resolveSearchSong).toHaveBeenNthCalledWith(2, '宿敌', '许嵩');
-    expect(downloadService.downloadSong).toHaveBeenCalledWith(resolvedSong);
+    expect(downloadService.downloadSong).toHaveBeenCalledWith(expect.objectContaining({
+      source_data: expect.objectContaining({ quality: 'flac' }),
+    }));
     expect(playlistManager.playStandalone).toHaveBeenCalledWith([
       expect.objectContaining({
         id: 903,
@@ -447,7 +553,9 @@ describe('VoiceEngine Songloft library matching', () => {
     await engine.handleMessage(message('播放驾鹤西去'));
 
     expect(bridgeService.resolveSearchSong).toHaveBeenCalledWith('驾鹤西去', '');
-    expect(downloadService.downloadSong).toHaveBeenCalledWith(resolvedSong);
+    expect(downloadService.downloadSong).toHaveBeenCalledWith(expect.objectContaining({
+      source_data: expect.objectContaining({ quality: 'flac' }),
+    }));
     expect(playlistManager.playStandalone).toHaveBeenCalledWith([
       expect.objectContaining({
         id: 904,
@@ -521,7 +629,9 @@ describe('VoiceEngine Songloft library matching', () => {
     await engine.handleMessage(message('加入歌单 宿敌 加到歌单 收藏'));
 
     expect(bridgeService.resolveSearchSong).toHaveBeenCalledWith('宿敌', '');
-    expect(downloadService.downloadSong).toHaveBeenCalledWith(resolvedSong);
+    expect(downloadService.downloadSong).toHaveBeenCalledWith(expect.objectContaining({
+      source_data: expect.objectContaining({ quality: 'flac' }),
+    }));
     expect(customPlaylistService.addSong).toHaveBeenCalledWith('收藏', resolvedSong);
     expect(indexingManager.refresh).toHaveBeenCalled();
     expect(minaService.textToSpeech).toHaveBeenCalledWith('acc-1', 'speaker-1', '已加入歌单：收藏');

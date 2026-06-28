@@ -20,7 +20,7 @@ import type { CustomPlaylistService } from '../custom_playlists/service';
 import type { CustomPlaylist } from '../custom_playlists/types';
 import type { DownloadService } from '../download/service';
 import type { PlatformRegistry } from '../music/platforms/registry';
-import type { MusicPlatform, SearchResultSong } from '../music/types';
+import type { MusicPlatform, MusicQuality, SearchResultSong } from '../music/types';
 
 // ===== 类型定义 =====
 
@@ -341,6 +341,36 @@ function inferImplicitPlaySong(query: string, command: VoiceCommand): MatchResul
   return null;
 }
 
+function withPreferredVoiceDownloadQuality(song: SearchResultSong): SearchResultSong {
+  const quality = preferredVoiceDownloadQuality(song);
+  if (quality === song.source_data.quality) {
+    return song;
+  }
+
+  return {
+    ...song,
+    source_data: {
+      ...song.source_data,
+      quality,
+      songInfo: {
+        ...song.source_data.songInfo,
+      },
+    },
+  };
+}
+
+function preferredVoiceDownloadQuality(song: SearchResultSong): MusicQuality {
+  const types = Array.isArray(song.source_data.songInfo.types) ? song.source_data.songInfo.types : [];
+  const available = new Set(types.map((item) => String(item?.type || '').trim().toLowerCase()).filter(Boolean));
+  if (available.has('flac24bit')) {
+    return 'flac24bit';
+  }
+  if (song.source_data.quality === 'flac24bit') {
+    return 'flac24bit';
+  }
+  return 'flac';
+}
+
 // ===== 默认口令配置 =====
 
 /**
@@ -362,7 +392,7 @@ export function getDefaultVoiceCommands(): VoiceCommand[] {
     { type: 'set_volume', keywords: ['小声一点', '声音小一点', '音量小一点'], param: 'down', enabled: true },
     { type: 'next', keywords: ['下一首', '切歌', '换一首', '下一曲'], enabled: true },
     { type: 'previous', keywords: ['上一首', '上一曲'], enabled: true },
-    { type: 'stop', keywords: ['停止播放', '停止', '别播了', '关掉音乐', '关机'], enabled: true },
+    { type: 'stop', keywords: ['停止播放', '停止', '别播了', '关掉音乐', '关机', '闭嘴'], enabled: true },
   ];
 }
 
@@ -967,7 +997,7 @@ export class VoiceEngine {
     }
 
     try {
-      const result = await this.downloadService.downloadSong(song);
+      const result = await this.downloadService.downloadSong(withPreferredVoiceDownloadQuality(song));
       const downloadedSong = await this.loadSongloftLibrarySongById(result.song_id)
         || await this.findSongloftLibrarySong(titleHint, artistHint || song.artist);
       try {
