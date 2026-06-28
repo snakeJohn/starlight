@@ -95,6 +95,7 @@ function createEngine(options?: {
     downloadSong: ReturnType<typeof vi.fn>;
   };
   platforms?: PlatformRegistry;
+  commands?: VoiceCommand[];
 }) {
   const configManager = {
     getAIConfig: vi.fn(async () => ({ enabled: false, api_url: '', api_key: '', model: '', timeout: 6 })),
@@ -107,7 +108,7 @@ function createEngine(options?: {
       server_host: '',
       force_mp3: false,
     })),
-    getVoiceCommands: vi.fn(async () => commands),
+    getVoiceCommands: vi.fn(async () => options?.commands ?? commands),
     getDevices: vi.fn(async () => [{ device_id: 'speaker-1', play_mode: 'order' }]),
     updateDevice: vi.fn(async () => undefined),
   } as unknown as ConfigManager;
@@ -124,6 +125,7 @@ function createEngine(options?: {
     prepareForNewPlayback: vi.fn(),
     play: vi.fn(async () => true),
     playStandalone: vi.fn(async () => true),
+    setPlayMode: vi.fn(async () => undefined),
   };
   const playlistManagerMap = {
     get: vi.fn(() => null),
@@ -351,6 +353,154 @@ describe('VoiceEngine Songloft library matching', () => {
     ], 0, 'single', { autoAdvance: false });
     expect(indexingManager.refresh).toHaveBeenCalled();
     expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：宿敌');
+  });
+
+  it('treats "播放歌手的歌曲" as a play-song command and searches with artist/title hints', async () => {
+    const songloft = testSongloft();
+    const resolvedSong = createSearchResultSong();
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async (title: string, artist: string) => {
+        return title === '宿敌' && artist === '许嵩' ? resolvedSong : null;
+      }),
+    };
+    const downloadService = {
+      downloadSong: vi.fn(async () => ({ song_id: 903, status: 'ok', path: 'downloads/xs/sudi.mp3' })),
+    };
+    songloft.songs.list = vi.fn(async () => []);
+    songloft.songs.getById = vi.fn(async () => ({
+      id: 903,
+      type: 'local',
+      title: '宿敌',
+      artist: '许嵩',
+      album: '寻雾启示',
+      duration: 260,
+      url: '',
+    }));
+    const { engine, playlistManager, minaService } = createEngine({
+      indexedSongLocation: null,
+      standaloneSong: null,
+      indexReady: false,
+      bridgeService,
+      downloadService,
+    });
+
+    await engine.handleMessage(message('播放许嵩的宿敌'));
+
+    expect(bridgeService.resolveSearchSong).toHaveBeenNthCalledWith(1, '许嵩的宿敌', '');
+    expect(bridgeService.resolveSearchSong).toHaveBeenNthCalledWith(2, '宿敌', '许嵩');
+    expect(downloadService.downloadSong).toHaveBeenCalledWith(resolvedSong);
+    expect(playlistManager.playStandalone).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 903,
+        type: 'local',
+        title: '宿敌',
+        artist: '许嵩',
+        url: '/api/v1/songs/903/play',
+      }),
+    ], 0, 'single', { autoAdvance: false });
+    expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：播放许嵩的宿敌');
+  });
+
+  it('treats "播放歌曲名" as a play-song command when the explicit keyword is omitted', async () => {
+    const songloft = testSongloft();
+    const resolvedSong = createSearchResultSong({
+      title: '驾鹤西去',
+      artist: '许嵩',
+      album: '',
+      source_data: {
+        platform: 'tx',
+        quality: '320k',
+        songInfo: {
+          source: 'tx',
+          name: '驾鹤西去',
+          singer: '许嵩',
+          album: '',
+          duration: 260,
+          songmid: 'song-mid-jhxq',
+        },
+      },
+    });
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => resolvedSong),
+    };
+    const downloadService = {
+      downloadSong: vi.fn(async () => ({ song_id: 904, status: 'ok', path: 'downloads/xs/jhxq.mp3' })),
+    };
+    songloft.songs.list = vi.fn(async () => []);
+    songloft.songs.getById = vi.fn(async () => ({
+      id: 904,
+      type: 'local',
+      title: '驾鹤西去',
+      artist: '许嵩',
+      album: '',
+      duration: 260,
+      url: '',
+    }));
+    const { engine, playlistManager, minaService } = createEngine({
+      indexedSongLocation: null,
+      standaloneSong: null,
+      indexReady: false,
+      bridgeService,
+      downloadService,
+    });
+
+    await engine.handleMessage(message('播放驾鹤西去'));
+
+    expect(bridgeService.resolveSearchSong).toHaveBeenCalledWith('驾鹤西去', '');
+    expect(downloadService.downloadSong).toHaveBeenCalledWith(resolvedSong);
+    expect(playlistManager.playStandalone).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 904,
+        type: 'local',
+        title: '驾鹤西去',
+        artist: '许嵩',
+        url: '/api/v1/songs/904/play',
+      }),
+    ], 0, 'single', { autoAdvance: false });
+    expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：驾鹤西去');
+  });
+
+  it('does not let a generic "播放" song keyword steal playlist commands', async () => {
+    const songloft = testSongloft();
+    songloft.playlists.list = vi.fn(async () => [{ id: 1, name: '收藏' }]);
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => null),
+    };
+    const { engine, playlistManager, minaService } = createEngine({
+      bridgeService,
+      indexedPlaylist: null,
+      commands: [
+        { type: 'play_song', keywords: ['播放'], enabled: true },
+        { type: 'play_playlist', keywords: ['播放歌单'], enabled: true },
+      ],
+    });
+
+    await engine.handleMessage(message('播放歌单收藏'));
+
+    expect(bridgeService.resolveSearchSong).not.toHaveBeenCalled();
+    expect(playlistManager.play).toHaveBeenCalledWith(1, 0, 'order');
+    expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：歌单收藏');
+  });
+
+  it('does not let a generic "播放" song keyword steal playback mode commands', async () => {
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => null),
+    };
+    const { engine, playlistManager, playlistManagerMap, minaService } = createEngine({
+      bridgeService,
+      commands: [
+        { type: 'play_song', keywords: ['播放'], enabled: true },
+        { type: 'set_play_mode', keywords: ['随机播放'], param: 'random', enabled: true },
+      ],
+    });
+
+    vi.mocked(playlistManagerMap.get).mockReturnValue(playlistManager as never);
+
+    await engine.handleMessage(message('随机播放'));
+
+    expect(bridgeService.resolveSearchSong).not.toHaveBeenCalled();
+    expect(playlistManager.setPlayMode).toHaveBeenCalledWith('random');
+    expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：随机');
   });
 
   it('downloads a searched song before adding it to a custom playlist when the library misses', async () => {

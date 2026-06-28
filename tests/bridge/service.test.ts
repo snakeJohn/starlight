@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BridgeService } from '../../src/bridge/service';
 import { registerBridgeHandlers } from '../../src/handlers/bridge';
 import { OnlineSearcher } from '../../src/voicecmd/online_searcher';
+import { setHostBaseUrl } from '../../src/utils/http';
 import type { ConfigManager } from '../../src/config/manager';
 import type { PlatformRegistry } from '../../src/music/platforms/registry';
 import type { MusicPlatformProvider } from '../../src/music/platforms/types';
@@ -95,13 +96,15 @@ function createService(options: {
     get: vi.fn((id: string) => providers.find((provider) => provider.id === id) ?? null),
   } as unknown as PlatformRegistry;
 
+  const service = new BridgeService(
+    platforms,
+    runtimes,
+    minaService,
+    options.usePlaylistManager ? playlistManagerMap : undefined,
+  );
+
   return {
-    service: new BridgeService(
-      platforms,
-      runtimes,
-      minaService,
-      options.usePlaylistManager ? playlistManagerMap : undefined,
-    ),
+    service,
     runtimes,
     minaService,
     playlistManager,
@@ -586,6 +589,116 @@ describe('BridgeService', () => {
       }),
     ], 0, 'single', { autoAdvance: false });
     expect(minaService.playURL).not.toHaveBeenCalled();
+  });
+
+  it('plays search result songs through Songloft playback URLs after importing them', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/songs/remote')) {
+        expect(JSON.parse(String(init?.body))).toEqual([
+          expect.objectContaining({
+            title: 'Song',
+            artist: 'Singer',
+            url: 'https://audio.test/song.mp3',
+          }),
+        ]);
+        return responseJson({
+          songs: [{ id: 777, type: 'remote', title: 'Song', artist: 'Singer', url: 'https://audio.test/song.mp3' }],
+          count: 1,
+        }, 201);
+      }
+      if (url.includes('openapi/v1/www/lyric/getlyric') || url.includes('newh5/singles/songinfoandlrc')) {
+        return responseJson({ data: { songinfo: {}, lrclist: [] } });
+      }
+      if (url.includes('/api/v1/songs/777/lyrics')) {
+        return responseJson({ message: 'ok' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const { service, minaService, playlistManager, playlistManagerMap, runtimes } = createService({ usePlaylistManager: true });
+
+    await expect(service.playOnSpeaker('acc-1', 'dev-1', song)).resolves.toEqual({
+      url: '/api/v1/songs/777/play',
+    });
+    await flushBackgroundSync();
+
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo, {
+      operation: 'playback',
+      title: 'Song',
+      artist: 'Singer',
+    });
+    expect(playlistManagerMap.getOrCreate).toHaveBeenCalledWith('acc-1', 'dev-1');
+    expect(playlistManager.playStandalone).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 777,
+        type: 'remote',
+        title: 'Song',
+        artist: 'Singer',
+        url: '/api/v1/songs/777/play',
+      }),
+    ], 0, 'single', { autoAdvance: false });
+    expect(minaService.playURL).not.toHaveBeenCalled();
+  });
+
+  it('builds a full Songloft playback URL when no playlist manager is available', async () => {
+    setHostBaseUrl('http://songloft.test:18191');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/songs/remote')) {
+        return responseJson({
+          songs: [{ id: 778, type: 'remote', title: 'Song', artist: 'Singer', url: 'https://audio.test/song.mp3' }],
+          count: 1,
+        }, 201);
+      }
+      if (url.includes('openapi/v1/www/lyric/getlyric') || url.includes('newh5/singles/songinfoandlrc')) {
+        return responseJson({ data: { songinfo: {}, lrclist: [] } });
+      }
+      if (url.includes('/api/v1/songs/778/lyrics')) {
+        return responseJson({ message: 'ok' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const { service, minaService } = createService();
+
+    try {
+      await expect(service.playOnSpeaker('acc-1', 'dev-1', song)).resolves.toEqual({
+        url: '/api/v1/songs/778/play',
+      });
+      await flushBackgroundSync();
+
+      expect(minaService.playURL).toHaveBeenCalledWith(
+        'acc-1',
+        'dev-1',
+        'http://songloft.test:18191/api/v1/songs/778/play?access_token=test-plugin-token',
+      );
+    } finally {
+      setHostBaseUrl('');
+    }
+  });
+
+  it('falls back to direct speaker playback when Songloft playback import fails', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/songs/remote')) {
+        return new Response('remote import down', { status: 503 });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    const { service, playlistManager, runtimes } = createService({ usePlaylistManager: true });
+
+    await expect(service.playOnSpeaker('acc-1', 'dev-1', song)).resolves.toEqual({
+      url: 'https://audio.test/song.mp3',
+    });
+
+    expect(runtimes.getMusicUrl).toHaveBeenCalledTimes(2);
+    expect(playlistManager.playStandalone).toHaveBeenCalledWith([
+      expect.objectContaining({
+        title: 'Song',
+        url: 'https://audio.test/song.mp3',
+      }),
+    ], 0, 'single', { autoAdvance: false });
   });
 
   it('loads speaker songlists into a temporary multi-song playlist when a playlist manager is available', async () => {

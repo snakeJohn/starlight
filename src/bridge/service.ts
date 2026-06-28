@@ -8,6 +8,7 @@ import { resolveMusicLyric, type MusicLyricResult } from '../music/platforms/lyr
 import { toRemoteSong, type RemoteSongPayload } from './mapper';
 import { MinaService } from '../service/service';
 import type { PlayerSong, PlaylistManagerMap } from '../player/manager';
+import { URLBuilder } from '../player/url_builder';
 import { normalizeHostBaseUrl } from '../utils/http';
 
 const STARLIGHT_PLUGIN_ENTRY_PATH = 'starlight';
@@ -179,6 +180,11 @@ export class BridgeService {
   async playOnSpeaker(accountId: string, deviceId: string, song: SearchResultSong): Promise<{ url: string }> {
     const attemptedSources = new Set<string>();
     const failures: string[] = [];
+    const songloftUrl = await this.tryPlayImportedSongOnSpeaker(accountId, deviceId, song, failures);
+    if (songloftUrl) {
+      return { url: songloftUrl };
+    }
+
     const directUrl = await this.tryPlaySearchSongOnSpeaker(accountId, deviceId, song, attemptedSources, failures);
     if (directUrl) {
       return { url: directUrl };
@@ -317,6 +323,42 @@ export class BridgeService {
     }
   }
 
+  private async tryPlayImportedSongOnSpeaker(
+    accountId: string,
+    deviceId: string,
+    song: SearchResultSong,
+    failures: string[],
+  ): Promise<string | null> {
+    try {
+      const imported = await this.importSongs([song]);
+      const playerSong = toImportedPlayerSong(song, imported.songs[0]);
+      if (!playerSong) {
+        failures.push('Songloft 导入未返回可播放歌曲 ID');
+        return null;
+      }
+
+      const played = this.playlistManagerMap
+        ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone(
+          [playerSong],
+          0,
+          'single',
+          { autoAdvance: false },
+        )
+        : await this.minaService.playURL(accountId, deviceId, await URLBuilder.buildSongURL(playerSong));
+      if (!played) {
+        failures.push('音箱播放 Songloft 歌曲失败');
+        return null;
+      }
+
+      return playerSong.url;
+    } catch (error) {
+      const message = sanitizeProviderError(error);
+      failures.push(`Songloft 播放导入失败：${message}`);
+      songloft.log.warn(`[BridgeService] Import before speaker playback failed "${song.title}": ${message}`);
+      return null;
+    }
+  }
+
   private async *iterPlayableSearchCandidates(
     title: string,
     artist: string,
@@ -379,6 +421,39 @@ function toPlayerSong(song: SearchResultSong, url: string): PlayerSong {
     is_live: false,
     cache_hash: '',
   };
+}
+
+function toImportedPlayerSong(sourceSong: SearchResultSong, importedSong: SongloftRemoteSong | undefined): PlayerSong | null {
+  const songId = numericRemoteSongId(importedSong);
+  if (!songId || !importedSong) {
+    return null;
+  }
+  const native = importedSong;
+
+  return {
+    id: songId,
+    type: remoteSongField(native, 'type') || 'remote',
+    title: remoteSongField(native, 'title', 'name', 'songName') || sourceSong.title,
+    artist: remoteSongField(native, 'artist', 'singer', 'author', 'singerName') || sourceSong.artist,
+    album: remoteSongField(native, 'album', 'albumName') || sourceSong.album,
+    duration: remoteSongNumberField(native, 'duration') || sourceSong.duration,
+    file_path: remoteSongField(native, 'file_path', 'filePath'),
+    url: `/api/v1/songs/${songId}/play`,
+    cover_path: remoteSongField(native, 'cover_path', 'coverPath'),
+    cover_url: remoteSongField(native, 'cover_url', 'coverUrl') || sourceSong.cover_url,
+    lyric_url: remoteSongField(native, 'lyric_url', 'lyricUrl'),
+    file_size: remoteSongNumberField(native, 'file_size', 'fileSize'),
+    format: remoteSongField(native, 'format') || sourceSong.source_data.quality,
+    bit_rate: remoteSongNumberField(native, 'bit_rate', 'bitRate'),
+    sample_rate: remoteSongNumberField(native, 'sample_rate', 'sampleRate'),
+    is_live: Boolean((native as Record<string, unknown>).is_live || (native as Record<string, unknown>).isLive),
+    cache_hash: remoteSongField(native, 'cache_hash', 'cacheHash'),
+  };
+}
+
+function numericRemoteSongId(song: SongloftRemoteSong | undefined): number {
+  const id = Number((song as { id?: unknown } | undefined)?.id);
+  return Number.isInteger(id) && id > 0 ? id : 0;
 }
 
 function toImportRemoteSong(song: SearchResultSong, url: string): RemoteSongPayload {
@@ -526,6 +601,19 @@ function remoteSongField(song: SongloftRemoteSong, ...keys: string[]): string {
     if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim();
   }
   return '';
+}
+
+function remoteSongNumberField(song: SongloftRemoteSong, ...keys: string[]): number {
+  const record = song as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return 0;
 }
 
 function stableJsonText(value: string): string {

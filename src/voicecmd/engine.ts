@@ -305,6 +305,42 @@ function findBestSongloftSongMatchByHints(hints: SongQueryHint[], songs: Songlof
   return scored[0]?.song ?? null;
 }
 
+function trimVoiceArgument(value: string): string {
+  return value.trim().replace(/[，。,.！!？?]+$/g, '').trim();
+}
+
+function isPlaylistLikePlayArgument(argument: string): boolean {
+  return /^(歌单|列表|播放列表)/.test(trimVoiceArgument(argument));
+}
+
+function isGenericPlaySongKeyword(keyword: string): boolean {
+  return ['播放一下', '放一下', '播放', '放'].includes(keyword.trim());
+}
+
+function inferImplicitPlaySong(query: string, command: VoiceCommand): MatchResult | null {
+  const text = query.trim();
+  const prefixes = ['播放一下', '放一下', '播放', '放'];
+
+  for (const prefix of prefixes) {
+    if (!text.startsWith(prefix)) {
+      continue;
+    }
+
+    const argument = trimVoiceArgument(text.slice(prefix.length).replace(/^歌曲/, ''));
+    if (!argument || isPlaylistLikePlayArgument(argument)) {
+      return null;
+    }
+
+    return {
+      command,
+      keyword: prefix,
+      argument,
+    };
+  }
+
+  return null;
+}
+
 // ===== 默认口令配置 =====
 
 /**
@@ -513,7 +549,16 @@ export class VoiceEngine {
           const kwLen = Array.from(keyword).length;
           if (kwLen > bestKeywordLen) {
             bestKeywordLen = kwLen;
-            const argument = query.slice(idx + keyword.length).trim();
+            let argument = query.slice(idx + keyword.length).trim();
+            if (item.cmd.type === 'play_song' && isGenericPlaySongKeyword(keyword)) {
+              if (idx !== 0) {
+                continue;
+              }
+              argument = trimVoiceArgument(argument.replace(/^歌曲\s*/, ''));
+              if (!argument || isPlaylistLikePlayArgument(argument)) {
+                continue;
+              }
+            }
             bestMatch = {
               command: item.cmd,
               keyword,
@@ -524,7 +569,12 @@ export class VoiceEngine {
       }
     }
 
-    return bestMatch;
+    if (bestMatch) {
+      return bestMatch;
+    }
+
+    const playSongCommand = enabledCommands.find(item => item.cmd.type === 'play_song')?.cmd;
+    return playSongCommand ? inferImplicitPlaySong(query, playSongCommand) : null;
   }
 
   // ===== 私有方法 - 口令执行 =====
