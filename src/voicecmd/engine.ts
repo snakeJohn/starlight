@@ -471,8 +471,8 @@ export class VoiceEngine {
       return;
     }
 
-    // 找到设备对应的 accountId
-    const accountId = await this.findAccountForDevice(msg.device_id);
+    // ConversationMonitor 已经知道消息来源账号；优先使用它，避免多账号或旧设备缓存反查到错误账号。
+    const accountId = readString(msg.account_id) || await this.findAccountForDevice(msg.device_id);
     if (!accountId) {
       songloft.log.warn(`[VoiceEngine] No account found for device: ${msg.device_id}`);
       return;
