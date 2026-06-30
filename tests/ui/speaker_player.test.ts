@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 interface SpeakerPlayerModule {
-  runPlayerAction(action: string): Promise<unknown>;
+  renderPlayerStatus(status: Record<string, unknown>): void;
+  runPlayerAction(action: string, options?: Record<string, unknown>): Promise<unknown>;
 }
 
 interface SpeakerModule {
@@ -12,9 +13,36 @@ type Listener = (event: { currentTarget: FakeElement | null; target?: FakeElemen
 
 class FakeElement {
   dataset: Record<string, string> = {};
+  style: Record<string, string> = {};
   disabled = false;
+  hidden = false;
+  innerHTML = '';
+  src = '';
   textContent = '';
+  title = '';
   value = '';
+  className = '';
+  attributes: Record<string, string> = {};
+  classList = {
+    add: (...tokens: string[]) => {
+      const classes = new Set(this.className.split(/\s+/).filter(Boolean));
+      tokens.forEach(token => classes.add(token));
+      this.className = Array.from(classes).join(' ');
+    },
+    remove: (...tokens: string[]) => {
+      const removeSet = new Set(tokens);
+      this.className = this.className.split(/\s+/).filter(token => token && !removeSet.has(token)).join(' ');
+    },
+    toggle: (token: string, force?: boolean) => {
+      const classes = new Set(this.className.split(/\s+/).filter(Boolean));
+      const shouldAdd = force ?? !classes.has(token);
+      if (shouldAdd) classes.add(token);
+      else classes.delete(token);
+      this.className = Array.from(classes).join(' ');
+      return shouldAdd;
+    },
+    contains: (token: string) => this.className.split(/\s+/).includes(token),
+  };
   private listeners = new Map<string, Listener[]>();
 
   addEventListener(type: string, listener: Listener): void {
@@ -23,8 +51,8 @@ class FakeElement {
     this.listeners.set(type, current);
   }
 
-  async dispatch(type: string): Promise<void> {
-    const event = { currentTarget: this as FakeElement | null, target: this };
+  async dispatch(type: string, target: FakeElement = this): Promise<void> {
+    const event = { currentTarget: this as FakeElement | null, target };
     const listeners = this.listeners.get(type) || [];
     for (const listener of listeners) {
       await listener(event);
@@ -34,9 +62,10 @@ class FakeElement {
 
   appendChild(): void {}
   remove(): void {}
-  querySelector(): FakeElement | null { return null; }
-  closest(): FakeElement | null { return null; }
-  setAttribute(): void {}
+  querySelector(_selector: string): FakeElement | null { return null; }
+  closest(_selector: string): FakeElement | null { return null; }
+  setAttribute(name: string, value: string): void { this.attributes[name] = value; }
+  removeAttribute(): void {}
 }
 
 function okResponse(data: unknown) {
@@ -75,6 +104,82 @@ function installDom() {
     },
   });
   vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
+}
+
+function installPlayerRenderDom() {
+  const selectors = [
+    '[data-role="speaker-player-state"]',
+    '[data-role="speaker-player-title"]',
+    '[data-role="speaker-player-meta"]',
+    '[data-role="speaker-player-mode"]',
+    '[data-role="speaker-player-cover"]',
+    '[data-role="speaker-player-lyric"]',
+    '[data-role="speaker-player-current-time"]',
+    '[data-role="speaker-player-total-time"]',
+    '[data-role="speaker-player-progress"]',
+    '[data-role="speaker-player-progress-thumb"]',
+    '[data-role="speaker-player-play-icon"]',
+    '[data-role="speaker-player-mode-icon"]',
+    '[data-role="global-player-state"]',
+    '[data-role="global-player-title"]',
+    '[data-role="global-player-artist"]',
+    '[data-role="global-player-lyric"]',
+    '[data-role="global-player-current-time"]',
+    '[data-role="global-player-total-time"]',
+    '[data-role="global-player-progress"]',
+    '[data-role="global-player-progress-thumb"]',
+    '[data-role="global-player-play-icon"]',
+    '[data-role="global-player-mode-icon"]',
+    '[data-role="global-player-cover"]',
+    '[data-role="fullscreen-player-title"]',
+    '[data-role="fullscreen-player-artist"]',
+    '[data-role="fullscreen-player-current-time"]',
+    '[data-role="fullscreen-player-total-time"]',
+    '[data-role="fullscreen-player-progress"]',
+    '[data-role="fullscreen-player-progress-thumb"]',
+    '[data-role="fullscreen-player-play-icon"]',
+    '[data-role="fullscreen-player-mode-icon"]',
+    '[data-role="fullscreen-player-cover"]',
+    '[data-role="fullscreen-player-bg"]',
+  ];
+  const elements = new Map<string, FakeElement>(selectors.map(selector => [selector, new FakeElement()]));
+  const toggleButton = new FakeElement();
+  const globalToggleButton = new FakeElement();
+  toggleButton.querySelector = vi.fn((selector: string) => {
+    if (selector.includes('speaker-player-play-icon')) return elements.get('[data-role="speaker-player-play-icon"]') ?? null;
+    return null;
+  });
+  globalToggleButton.querySelector = vi.fn((selector: string) => {
+    if (selector.includes('global-player-play-icon')) return elements.get('[data-role="global-player-play-icon"]') ?? null;
+    return null;
+  });
+
+  vi.stubGlobal('document', {
+    querySelector: vi.fn((selector: string) => elements.get(selector) ?? null),
+    querySelectorAll: vi.fn((selector: string) => {
+      if (selector === '[data-action="speaker-player-toggle"]') return [toggleButton, globalToggleButton];
+      return [];
+    }),
+    createElement: vi.fn(() => new FakeElement()),
+    body: new FakeElement(),
+  });
+  vi.stubGlobal('window', {
+    setTimeout: vi.fn(),
+    dispatchEvent: vi.fn(),
+    SongloftPlugin: {
+      getAuthToken: () => 'ui-token',
+    },
+  });
+  vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
+  vi.stubGlobal('performance', { now: () => 1000 });
+
+  return { elements, toggleButton, globalToggleButton };
+}
+
+async function flushPromises() {
+  for (let index = 0; index < 6; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 function installInteractiveDom() {
@@ -192,5 +297,347 @@ describe('speaker player module', () => {
 
     await expect(nextButton.dispatch('click')).resolves.toBeUndefined();
     expect(speakerPlayerState.textContent).toBe('控制命令已发送');
+  });
+
+  it('renders the persistent bottom player and speaker panel from player status', async () => {
+    const { elements, toggleButton, globalToggleButton } = installPlayerRenderDom();
+
+    const modulePath = '../../static/js/speaker_modules/player.js';
+    const { renderPlayerStatus } = await import(modulePath) as SpeakerPlayerModule;
+
+    renderPlayerStatus({
+      state: 'playing',
+      is_playing: true,
+      play_mode: 'loop',
+      position: 65,
+      duration: 245,
+      current_song: {
+        title: '夜曲',
+        artist: '周杰伦',
+      },
+    });
+
+    expect(elements.get('[data-role="global-player-title"]')?.textContent).toBe('夜曲');
+    expect(elements.get('[data-role="global-player-artist"]')?.textContent).toBe('周杰伦');
+    expect(elements.get('[data-role="global-player-current-time"]')?.textContent).toBe('1:05');
+    expect(elements.get('[data-role="global-player-total-time"]')?.textContent).toBe('4:05');
+    expect(elements.get('[data-role="global-player-progress"]')?.style.width).toBe('26.5%');
+    expect(elements.get('[data-role="global-player-play-icon"]')?.className).toContain('fa-pause');
+    expect(elements.get('[data-role="global-player-mode-icon"]')?.className).toContain('fa-redo');
+    expect(elements.get('[data-role="speaker-player-title"]')?.textContent).toBe('夜曲 - 周杰伦');
+    expect(elements.get('[data-role="speaker-player-current-time"]')?.textContent).toBe('1:05');
+    expect(elements.get('[data-role="speaker-player-play-icon"]')?.className).toContain('fa-pause');
+    expect(elements.get('[data-role="fullscreen-player-title"]')?.textContent).toBe('夜曲');
+    expect(elements.get('[data-role="fullscreen-player-play-icon"]')?.className).toContain('fa-pause');
+    expect(toggleButton.textContent).toBe('');
+    expect(globalToggleButton.textContent).toBe('');
+  });
+
+  it('sets the selected play mode instead of cycling modes implicitly', async () => {
+    const { elements } = installPlayerRenderDom();
+    elements.get('[data-role="speaker-player-mode"]')!.value = 'loop';
+    const fetchMock = vi.fn(async () => okResponse({ play_mode: 'random' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'acc-1';
+    state.deviceId = 'speaker-1';
+
+    const modulePath = '../../static/js/speaker_modules/player.js';
+    const { runPlayerAction } = await import(modulePath) as SpeakerPlayerModule;
+
+    await runPlayerAction('speaker-player-mode', { playMode: 'random' });
+
+    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/mode', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        account_id: 'acc-1',
+        device_id: 'speaker-1',
+        play_mode: 'random',
+      }),
+    }));
+    expect(elements.get('[data-role="speaker-player-mode"]')?.value).toBe('random');
+  });
+
+  it('loads authenticated cover and lyric assets for the current song', async () => {
+    const { elements } = installPlayerRenderDom();
+    const lyricBlob = { text: async () => JSON.stringify({ lyric: '[00:10.00]到这里都是你\n[00:20.00]下一句' }) };
+    const coverBlob = { text: async () => '' };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      return {
+        ok: true,
+        status: 200,
+        blob: async () => url.endsWith('/lyric') ? lyricBlob : coverBlob,
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:cover-url'),
+      revokeObjectURL: vi.fn(),
+    });
+
+    const modulePath = '../../static/js/speaker_modules/player.js';
+    const { renderPlayerStatus } = await import(modulePath) as SpeakerPlayerModule;
+
+    renderPlayerStatus({
+      state: 'playing',
+      is_playing: true,
+      position: 11,
+      duration: 180,
+      current_song: {
+        title: '星晴',
+        artist: '周杰伦',
+        cover_url: '/api/v1/songs/1/cover',
+        lyric_url: '/api/v1/songs/1/lyric',
+      },
+    });
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/songs/1/cover', expect.objectContaining({
+      headers: { Authorization: 'Bearer ui-token' },
+    }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/songs/1/lyric', expect.objectContaining({
+      headers: { Authorization: 'Bearer ui-token' },
+    }));
+    expect(elements.get('[data-role="global-player-cover"]')?.src).toBe('blob:cover-url');
+    expect(elements.get('[data-role="speaker-player-cover"]')?.src).toBe('blob:cover-url');
+    expect(elements.get('[data-role="global-player-lyric"]')?.textContent).toBe('到这里都是你');
+    expect(elements.get('[data-role="speaker-player-lyric"]')?.textContent).toBe('到这里都是你');
+  });
+});
+
+describe('speaker lrc parser', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  it('parses timed lyric lines and returns the active line for a position', async () => {
+    const modulePath = '../../static/js/speaker_modules/lrc_parser.js';
+    const { parseLrc, getCurrentLyricIndex } = await import(modulePath) as {
+      parseLrc(text: string): Array<{ time: number; text: string }>;
+      getCurrentLyricIndex(lines: Array<{ time: number; text: string }>, position: number): number;
+    };
+
+    const lyrics = parseLrc('[00:01.00]第一句\n[00:05.50]第二句\n[00:05.50][00:08.00]重复行');
+
+    expect(lyrics).toEqual([
+      { time: 1, text: '第一句' },
+      { time: 5.5, text: '第二句' },
+      { time: 5.5, text: '重复行' },
+      { time: 8, text: '重复行' },
+    ]);
+    expect(getCurrentLyricIndex(lyrics, 6)).toBe(2);
+  });
+});
+
+describe('speaker playlist browser', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  it('clears stale songs when the refreshed Songloft playlist list is empty', async () => {
+    const playlistSelect = new FakeElement();
+    const playlistList = new FakeElement();
+    const playlistSongs = new FakeElement();
+    const playlistSummary = new FakeElement();
+    playlistSongs.innerHTML = '<div>旧歌曲</div>';
+
+    const elements = new Map<string, FakeElement>([
+      ['[data-role="speaker-playlist-select"]', playlistSelect],
+      ['[data-role="speaker-playlist-list"]', playlistList],
+      ['[data-role="speaker-playlist-songs"]', playlistSongs],
+      ['[data-role="speaker-playlist-summary"]', playlistSummary],
+    ]);
+
+    vi.stubGlobal('document', {
+      querySelector: vi.fn((selector: string) => elements.get(selector) ?? null),
+      querySelectorAll: vi.fn(() => []),
+      createElement: vi.fn(() => new FakeElement()),
+      body: new FakeElement(),
+    });
+    vi.stubGlobal('window', {
+      setTimeout: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+    vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse([])));
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: { speakerPlaylistId: string; speakerPlaylistSongs: unknown[] };
+    };
+    state.speakerPlaylistId = '12';
+    state.speakerPlaylistSongs = [{ title: '旧歌曲' }];
+
+    const { loadSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
+      loadSpeakerPlaylists(): Promise<unknown[]>;
+    };
+
+    await loadSpeakerPlaylists();
+
+    expect(state.speakerPlaylistId).toBe('');
+    expect(state.speakerPlaylistSongs).toEqual([]);
+    expect(playlistSongs.innerHTML).toContain('请选择歌单');
+  });
+
+  it('plays a clicked Songloft playlist song through the MIoT playlist endpoint', async () => {
+    const playlistSongs = new FakeElement();
+    const speakerPlayerMode = new FakeElement();
+    speakerPlayerMode.value = 'random';
+    const elements = new Map<string, FakeElement>([
+      ['[data-role="speaker-playlist-songs"]', playlistSongs],
+      ['[data-role="speaker-player-mode"]', speakerPlayerMode],
+    ]);
+
+    vi.stubGlobal('document', {
+      querySelector: vi.fn((selector: string) => elements.get(selector) ?? null),
+      querySelectorAll: vi.fn(() => []),
+      createElement: vi.fn(() => new FakeElement()),
+      body: new FakeElement(),
+    });
+    vi.stubGlobal('window', {
+      setTimeout: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+    vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
+    const fetchMock = vi.fn(async () => okResponse({ message: 'playlist started' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: {
+        accountId: string;
+        deviceId: string;
+        speakerPlaylists: Array<{ id: number; name: string }>;
+        speakerPlaylistId: string;
+        speakerPlaylistSongs: Array<{ title: string }>;
+      };
+    };
+    state.accountId = 'acc-1';
+    state.deviceId = 'speaker-1';
+    state.speakerPlaylists = [{ id: 12, name: '测试歌单' }];
+    state.speakerPlaylistId = '12';
+    state.speakerPlaylistSongs = [{ title: '第一首' }, { title: '第二首' }];
+
+    const { bindSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
+      bindSpeakerPlaylists(options?: { refreshPlayerStatus?: () => Promise<unknown> }): void;
+    };
+    const refreshPlayerStatus = vi.fn(async () => null);
+    bindSpeakerPlaylists({ refreshPlayerStatus });
+
+    const songButton = new FakeElement();
+    songButton.dataset.index = '1';
+    songButton.closest = vi.fn((selector: string) => (
+      selector === '[data-action="speaker-playlist-song"]' ? songButton : null
+    ));
+
+    await playlistSongs.dispatch('click', songButton);
+
+    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/play', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        account_id: 'acc-1',
+        device_id: 'speaker-1',
+        playlist_id: 12,
+        start_index: 1,
+        play_mode: 'random',
+      }),
+    }));
+    expect(refreshPlayerStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a player song list dialog and plays a selected song', async () => {
+    const songListButton = new FakeElement();
+    const songListDialog = new FakeElement();
+    const songList = new FakeElement();
+    const songListTitle = new FakeElement();
+    const songListSummary = new FakeElement();
+    const speakerPlayerMode = new FakeElement();
+    speakerPlayerMode.value = 'loop';
+    songListDialog.hidden = true;
+    const elements = new Map<string, FakeElement>([
+      ['[data-role="speaker-song-list-dialog"]', songListDialog],
+      ['[data-role="speaker-song-list"]', songList],
+      ['[data-role="speaker-song-list-title"]', songListTitle],
+      ['[data-role="speaker-song-list-summary"]', songListSummary],
+      ['[data-role="speaker-player-mode"]', speakerPlayerMode],
+    ]);
+
+    vi.stubGlobal('document', {
+      querySelector: vi.fn((selector: string) => elements.get(selector) ?? null),
+      querySelectorAll: vi.fn((selector: string) => {
+        if (selector === '[data-action="speaker-player-song-list"]') return [songListButton];
+        if (selector === '[data-action="close-speaker-song-list"]') return [];
+        return [];
+      }),
+      createElement: vi.fn(() => new FakeElement()),
+      body: new FakeElement(),
+    });
+    vi.stubGlobal('window', {
+      setTimeout: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+    vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
+    const fetchMock = vi.fn(async () => okResponse({ message: 'started from list' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: {
+        accountId: string;
+        deviceId: string;
+        speakerPlaylists: Array<{ id: number; name: string }>;
+        speakerPlaylistId: string;
+        speakerPlaylistSongs: Array<{ title: string; artist: string; duration: number }>;
+      };
+    };
+    state.accountId = 'acc-1';
+    state.deviceId = 'speaker-1';
+    state.speakerPlaylists = [{ id: 12, name: '测试歌单' }];
+    state.speakerPlaylistId = '12';
+    state.speakerPlaylistSongs = [
+      { title: '第一首', artist: '歌手A', duration: 180 },
+      { title: '第二首', artist: '歌手B', duration: 220 },
+    ];
+
+    const { bindSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
+      bindSpeakerPlaylists(options?: { refreshPlayerStatus?: () => Promise<unknown> }): void;
+    };
+    const refreshPlayerStatus = vi.fn(async () => null);
+    bindSpeakerPlaylists({ refreshPlayerStatus });
+
+    await songListButton.dispatch('click');
+
+    expect(songListDialog.hidden).toBe(false);
+    expect(songListDialog.attributes['aria-hidden']).toBe('false');
+    expect(songListTitle.textContent).toBe('测试歌单');
+    expect(songListSummary.textContent).toBe('2 首');
+    expect(songList.innerHTML).toContain('第一首');
+    expect(songList.innerHTML).toContain('第二首');
+
+    const songButton = new FakeElement();
+    songButton.dataset.index = '1';
+    songButton.closest = vi.fn((selector: string) => (
+      selector === '[data-action="speaker-song-list-song"]' ? songButton : null
+    ));
+
+    await songList.dispatch('click', songButton);
+
+    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/play', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        account_id: 'acc-1',
+        device_id: 'speaker-1',
+        playlist_id: 12,
+        start_index: 1,
+        play_mode: 'loop',
+      }),
+    }));
+    expect(refreshPlayerStatus).toHaveBeenCalledTimes(1);
+    expect(songListDialog.hidden).toBe(true);
   });
 });

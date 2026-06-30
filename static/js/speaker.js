@@ -12,10 +12,20 @@ import {
     restoreSavedDeviceSelection,
     selectAndPersistDevice,
 } from './speaker_modules/devices.js';
-import { refreshPlayerStatus, renderPlayerStatus, runPlayerAction, setSpeakerMessage, updatePlayerToggleButton } from './speaker_modules/player.js';
+import {
+    closeFullscreenPlayer,
+    openFullscreenPlayer,
+    refreshPlayerStatus,
+    renderPlayerStatus,
+    runPlayerAction,
+    setSpeakerMessage,
+    startPlayerStatusPolling,
+    updatePlayerToggleButton,
+} from './speaker_modules/player.js';
+import { bindSpeakerPlaylists, loadSpeakerPlaylists } from './speaker_modules/playlists.js';
 import { bindQrLogin } from './speaker_modules/qrcode.js';
 import { recentVoiceRecords, renderVoiceRecordList } from './speaker_modules/voice_records.js';
-import { $, toast } from './state.js';
+import { $, $$, toast } from './state.js';
 
 export {
     clearSelectedDevice,
@@ -27,6 +37,7 @@ export {
     selectAndPersistDevice,
 } from './speaker_modules/devices.js';
 export { renderPlayerStatus, runPlayerAction } from './speaker_modules/player.js';
+export { loadSpeakerPlaylistSongs, loadSpeakerPlaylists } from './speaker_modules/playlists.js';
 export { renderVoiceRecordList } from './speaker_modules/voice_records.js';
 
 let voiceRecordPollTimer = null;
@@ -76,8 +87,10 @@ function startVoiceRecordPolling() {
 }
 
 function bindSpeakerPlayer() {
-    for (const action of ['speaker-player-previous', 'speaker-player-toggle', 'speaker-player-stop', 'speaker-player-next', 'speaker-player-mode', 'speaker-player-refresh']) {
-        $(`[data-action="${action}"]`)?.addEventListener('click', async event => {
+    for (const action of ['speaker-player-previous', 'speaker-player-toggle', 'speaker-player-stop', 'speaker-player-next', 'speaker-player-refresh']) {
+        const buttons = $$(`[data-action="${action}"]`);
+        const fallback = buttons.length ? buttons : [$(`[data-action="${action}"]`)].filter(Boolean);
+        fallback.forEach(buttonNode => buttonNode.addEventListener('click', async event => {
             const button = event.currentTarget;
             if (button) button.disabled = true;
             try {
@@ -89,8 +102,53 @@ function bindSpeakerPlayer() {
             } finally {
                 if (button) button.disabled = false;
             }
-        });
+        }));
     }
+    $$('[data-action="speaker-player-mode-menu"]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.stopPropagation?.();
+            const control = event.currentTarget.closest?.('.lx-play-mode-control');
+            const menu = control?.querySelector?.('.lx-play-mode-menu');
+            const expanded = menu ? menu.hidden : false;
+            $$('.lx-play-mode-menu').forEach(node => {
+                node.hidden = true;
+                node.closest?.('.lx-play-mode-control')?.querySelector?.('[data-action="speaker-player-mode-menu"]')?.setAttribute?.('aria-expanded', 'false');
+            });
+            if (menu) {
+                menu.hidden = !expanded;
+                event.currentTarget.setAttribute?.('aria-expanded', String(expanded));
+            }
+        });
+    });
+    $$('[data-action="speaker-player-mode-option"]').forEach(button => {
+        button.addEventListener('click', async event => {
+            event.stopPropagation?.();
+            const buttonNode = event.currentTarget;
+            const mode = buttonNode.dataset.mode || 'loop';
+            buttonNode.disabled = true;
+            try {
+                await runPlayerAction('speaker-player-mode', { playMode: mode });
+                setSpeakerMessage('播放模式已更新');
+                toast('播放模式已更新');
+                $$('.lx-play-mode-menu').forEach(node => { node.hidden = true; });
+                $$('[data-action="speaker-player-mode-menu"]').forEach(node => node.setAttribute?.('aria-expanded', 'false'));
+            } catch (error) {
+                toast(error.message, 'error');
+            } finally {
+                buttonNode.disabled = false;
+            }
+        });
+    });
+    document.addEventListener?.('click', () => {
+        $$('.lx-play-mode-menu').forEach(node => { node.hidden = true; });
+        $$('[data-action="speaker-player-mode-menu"]').forEach(node => node.setAttribute?.('aria-expanded', 'false'));
+    });
+    $$('[data-action="open-fullscreen-player"]').forEach(button => {
+        button.addEventListener('click', openFullscreenPlayer);
+    });
+    $$('[data-action="close-fullscreen-player"]').forEach(button => {
+        button.addEventListener('click', closeFullscreenPlayer);
+    });
 }
 
 function bindRefresh() {
@@ -131,11 +189,14 @@ export async function initSpeakerUI() {
         bindQrLogin({ refreshSpeaker });
         bindDeviceSelection();
         bindSpeakerPlayer();
+        bindSpeakerPlaylists({ refreshPlayerStatus });
         bindRefresh();
         speakerBindingsBound = true;
     }
     updatePlayerToggleButton();
     await refreshSpeaker();
+    await loadSpeakerPlaylists().catch(() => null);
     await refreshPlayerStatus().catch(() => null);
+    startPlayerStatusPolling();
     startVoiceRecordPolling();
 }

@@ -194,26 +194,86 @@
                             <span>控制设备</span>
                             <select data-role="speaker-player-device" aria-label="音箱播放控制设备"></select>
                         </label>
-                        <div class="player-status-card">
-                            <strong data-role="speaker-player-title">暂无播放信息</strong>
-                            <span data-role="speaker-player-meta">选择音箱后可管理当前播放。</span>
+                        <div class="player-status-card speaker-player-card">
+                            <button class="speaker-player-cover-button" type="button" data-action="open-fullscreen-player" title="打开全屏播放器" aria-label="打开全屏播放器">
+                                <img data-role="speaker-player-cover" alt="歌曲封面">
+                                <span class="material-symbols-outlined player-cover-placeholder">music_note</span>
+                            </button>
+                            <div class="speaker-player-copy">
+                                <strong data-role="speaker-player-title">暂无播放信息</strong>
+                                <span data-role="speaker-player-meta">选择音箱后可管理当前播放。</span>
+                                <span class="speaker-player-lyric" data-role="speaker-player-lyric">暂无歌词</span>
+                                <div class="player-progress-row">
+                                    <span data-role="speaker-player-current-time">--:--</span>
+                                    <div class="player-progress-track" aria-hidden="true">
+                                        <div class="player-progress-fill" data-role="speaker-player-progress"></div>
+                                        <div class="player-progress-thumb" data-role="speaker-player-progress-thumb"></div>
+                                    </div>
+                                    <span data-role="speaker-player-total-time">--:--</span>
+                                </div>
+                            </div>
                         </div>
-                        <div class="player-actions speaker-player-actions">
-                            <button class="icon-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">上一首</button>
-                            <button class="icon-button" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">暂停播放</button>
-                            <button class="icon-button" type="button" data-action="speaker-player-stop" title="停止" aria-label="停止">停止</button>
-                            <button class="icon-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">下一首</button>
+                        <div class="player-actions speaker-player-actions playback-controls">
+                            <div class="lx-play-mode-control">
+                                <button class="lx-player-button" type="button" data-action="speaker-player-mode-menu" title="播放模式" aria-label="播放模式" aria-expanded="false">
+                                    <i class="fas fa-redo" data-role="speaker-player-mode-icon" aria-hidden="true"></i>
+                                </button>
+                                <div class="lx-play-mode-menu" data-role="speaker-player-mode-menu" hidden>
+                                    <button type="button" data-action="speaker-player-mode-option" data-mode="loop"><i class="fas fa-redo" aria-hidden="true"></i><span>列表循环</span></button>
+                                    <button type="button" data-action="speaker-player-mode-option" data-mode="single"><i class="fas fa-redo-alt" aria-hidden="true"></i><span>单曲循环</span></button>
+                                    <button type="button" data-action="speaker-player-mode-option" data-mode="random"><i class="fas fa-random" aria-hidden="true"></i><span>随机播放</span></button>
+                                    <button type="button" data-action="speaker-player-mode-option" data-mode="order"><i class="fas fa-play" aria-hidden="true"></i><span>顺序播放</span></button>
+                                </div>
+                            </div>
+                            <button class="lx-player-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">
+                                <i class="fas fa-step-backward" aria-hidden="true"></i>
+                            </button>
+                            <button class="lx-player-button lx-player-main-button speaker-player-toggle" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">
+                                <i class="fas fa-play" data-role="speaker-player-play-icon" aria-hidden="true"></i>
+                            </button>
+                            <button class="lx-player-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">
+                                <i class="fas fa-step-forward" aria-hidden="true"></i>
+                            </button>
+                            <button class="lx-player-button" type="button" data-action="speaker-player-stop" title="停止" aria-label="停止">
+                                <i class="fas fa-stop" aria-hidden="true"></i>
+                            </button>
+                            <button class="lx-player-button" type="button" data-action="speaker-player-song-list" title="歌曲列表" aria-label="歌曲列表">
+                                <i class="fas fa-list-ul" aria-hidden="true"></i>
+                            </button>
                         </div>
                         <div class="inline-actions">
-                            <select data-role="speaker-player-mode" aria-label="播放模式">
-                                <option value="order">顺序</option>
-                                <option value="loop">列表循环</option>
-                                <option value="random">随机</option>
-                                <option value="single">单曲循环</option>
-                            </select>
-                            <button class="ghost-button" type="button" data-action="speaker-player-mode">应用模式</button>
-                            <button class="ghost-button" type="button" data-action="speaker-player-refresh">刷新状态</button>
+                            <input type="hidden" data-role="speaker-player-mode" value="loop">
+                            <button class="lx-player-button" type="button" data-action="speaker-player-refresh" title="刷新状态" aria-label="刷新状态">
+                                <i class="fas fa-sync-alt" aria-hidden="true"></i>
+                            </button>
                         </div>
+                        <section class="speaker-playlist-panel">
+                            <div class="section-bar compact-bar">
+                                <div>
+                                    <h2>歌单列表</h2>
+                                    <span class="section-caption">选择 Songloft 歌单后可直接推送到当前音箱。</span>
+                                </div>
+                                <span data-role="speaker-playlist-summary">未加载</span>
+                            </div>
+                            <div class="speaker-playlist-toolbar">
+                                <label>
+                                    <span>Songloft 歌单</span>
+                                    <select data-role="speaker-playlist-select" aria-label="Songloft 歌单"></select>
+                                </label>
+                                <button class="lx-player-button" type="button" data-action="speaker-playlist-refresh" title="刷新歌单" aria-label="刷新歌单">
+                                    <i class="fas fa-sync-alt" aria-hidden="true"></i>
+                                </button>
+                                <button class="lx-player-button lx-player-main-button" type="button" data-action="speaker-playlist-play" title="播放歌单" aria-label="播放歌单">
+                                    <i class="fas fa-play" aria-hidden="true"></i>
+                                </button>
+                            </div>
+                            <div class="speaker-playlist-list" data-role="speaker-playlist-list">
+                                <div class="empty-state">暂无歌单。</div>
+                            </div>
+                            <div class="speaker-playlist-songs" data-role="speaker-playlist-songs">
+                                <div class="empty-state">请选择歌单。</div>
+                            </div>
+                        </section>
                     </section>
                     <div class="speaker-side-stack">
                         <section class="surface-section">
@@ -598,6 +658,149 @@
 
         </main>
         <nav class="bottom-tabs" id="bottomTabs"></nav>
+    </div>
+    <div class="global-player-bar" role="region" aria-label="当前播放">
+        <button class="global-player-main" type="button" data-action="open-fullscreen-player" title="打开全屏播放器" aria-label="打开全屏播放器">
+            <span class="global-player-cover">
+                <img data-role="global-player-cover" alt="歌曲封面">
+                <span class="material-symbols-outlined player-cover-placeholder">music_note</span>
+            </span>
+            <span class="global-player-copy">
+                <span class="global-player-title-line">
+                    <strong data-role="global-player-title">暂无播放</strong>
+                    <span data-role="global-player-artist">-</span>
+                </span>
+                <span data-role="global-player-lyric">暂无歌词</span>
+            </span>
+        </button>
+        <div class="global-player-progress">
+            <span data-role="global-player-current-time">--:--</span>
+            <div class="player-progress-track" aria-hidden="true">
+                <div class="player-progress-fill" data-role="global-player-progress"></div>
+                <div class="player-progress-thumb" data-role="global-player-progress-thumb"></div>
+            </div>
+            <span data-role="global-player-total-time">--:--</span>
+        </div>
+        <div class="global-player-controls">
+            <span class="global-player-state" data-role="global-player-state">未选择设备</span>
+            <div class="lx-play-mode-control">
+                <button class="lx-player-button" type="button" data-action="speaker-player-mode-menu" title="播放模式" aria-label="播放模式" aria-expanded="false">
+                    <i class="fas fa-redo" data-role="global-player-mode-icon" aria-hidden="true"></i>
+                </button>
+                <div class="lx-play-mode-menu" data-role="global-player-mode-menu" hidden>
+                    <button type="button" data-action="speaker-player-mode-option" data-mode="loop"><i class="fas fa-redo" aria-hidden="true"></i><span>列表循环</span></button>
+                    <button type="button" data-action="speaker-player-mode-option" data-mode="single"><i class="fas fa-redo-alt" aria-hidden="true"></i><span>单曲循环</span></button>
+                    <button type="button" data-action="speaker-player-mode-option" data-mode="random"><i class="fas fa-random" aria-hidden="true"></i><span>随机播放</span></button>
+                    <button type="button" data-action="speaker-player-mode-option" data-mode="order"><i class="fas fa-play" aria-hidden="true"></i><span>顺序播放</span></button>
+                </div>
+            </div>
+            <button class="lx-player-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">
+                <i class="fas fa-step-backward" aria-hidden="true"></i>
+            </button>
+            <button class="lx-player-button lx-player-main-button global-player-toggle" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">
+                <i class="fas fa-play" data-role="global-player-play-icon" aria-hidden="true"></i>
+            </button>
+            <button class="lx-player-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">
+                <i class="fas fa-step-forward" aria-hidden="true"></i>
+            </button>
+            <button class="lx-player-button" type="button" data-action="speaker-player-stop" title="停止" aria-label="停止">
+                <i class="fas fa-stop" aria-hidden="true"></i>
+            </button>
+            <button class="lx-player-button" type="button" data-action="speaker-player-song-list" title="歌曲列表" aria-label="歌曲列表">
+                <i class="fas fa-list-ul" aria-hidden="true"></i>
+            </button>
+            <button class="lx-player-button" type="button" data-action="speaker-player-refresh" title="刷新状态" aria-label="刷新状态">
+                <i class="fas fa-sync-alt" aria-hidden="true"></i>
+            </button>
+        </div>
+    </div>
+    <div class="fullscreen-player" data-role="fullscreen-player" role="dialog" aria-modal="true" aria-hidden="true">
+        <div class="fullscreen-player-bg" data-role="fullscreen-player-bg"></div>
+        <div class="fullscreen-player-overlay"></div>
+        <div class="fullscreen-player-content">
+            <div class="fullscreen-player-topbar">
+                <button class="fullscreen-player-icon-button lx-player-button" type="button" data-action="close-fullscreen-player" title="收起播放器" aria-label="收起播放器">
+                    <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                </button>
+                <span>正在播放</span>
+                <span class="fullscreen-player-spacer"></span>
+            </div>
+            <div class="fullscreen-player-main">
+                <section class="fullscreen-player-cover-page">
+                    <div class="fullscreen-player-cover-wrap">
+                        <img data-role="fullscreen-player-cover" alt="歌曲封面">
+                        <span class="material-symbols-outlined fullscreen-player-cover-placeholder">music_note</span>
+                    </div>
+                </section>
+                <section class="fullscreen-player-lyrics-page">
+                    <div class="fullscreen-player-lyrics" data-role="fullscreen-player-lyrics">
+                        <div class="fullscreen-player-lyric-empty">暂无歌词</div>
+                    </div>
+                </section>
+            </div>
+            <div class="fullscreen-player-song">
+                <strong data-role="fullscreen-player-title">暂无播放</strong>
+                <span data-role="fullscreen-player-artist">-</span>
+            </div>
+            <div class="fullscreen-player-progress">
+                <span data-role="fullscreen-player-current-time">--:--</span>
+                <div class="player-progress-track" aria-hidden="true">
+                    <div class="player-progress-fill" data-role="fullscreen-player-progress"></div>
+                    <div class="player-progress-thumb" data-role="fullscreen-player-progress-thumb"></div>
+                </div>
+                <span data-role="fullscreen-player-total-time">--:--</span>
+            </div>
+            <div class="fullscreen-player-controls">
+                <div class="lx-play-mode-control">
+                    <button class="lx-player-button" type="button" data-action="speaker-player-mode-menu" title="播放模式" aria-label="播放模式" aria-expanded="false">
+                        <i class="fas fa-redo" data-role="fullscreen-player-mode-icon" aria-hidden="true"></i>
+                    </button>
+                    <div class="lx-play-mode-menu" data-role="fullscreen-player-mode-menu" hidden>
+                        <button type="button" data-action="speaker-player-mode-option" data-mode="loop"><i class="fas fa-redo" aria-hidden="true"></i><span>列表循环</span></button>
+                        <button type="button" data-action="speaker-player-mode-option" data-mode="single"><i class="fas fa-redo-alt" aria-hidden="true"></i><span>单曲循环</span></button>
+                        <button type="button" data-action="speaker-player-mode-option" data-mode="random"><i class="fas fa-random" aria-hidden="true"></i><span>随机播放</span></button>
+                        <button type="button" data-action="speaker-player-mode-option" data-mode="order"><i class="fas fa-play" aria-hidden="true"></i><span>顺序播放</span></button>
+                    </div>
+                </div>
+                <button class="lx-player-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">
+                    <i class="fas fa-step-backward" aria-hidden="true"></i>
+                </button>
+                <button class="lx-player-button lx-player-main-button fullscreen-player-toggle" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">
+                    <i class="fas fa-play" data-role="fullscreen-player-play-icon" aria-hidden="true"></i>
+                </button>
+                <button class="lx-player-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">
+                    <i class="fas fa-step-forward" aria-hidden="true"></i>
+                </button>
+                <button class="lx-player-button" type="button" data-action="speaker-player-stop" title="停止" aria-label="停止">
+                    <i class="fas fa-stop" aria-hidden="true"></i>
+                </button>
+                <button class="lx-player-button" type="button" data-action="speaker-player-song-list" title="歌曲列表" aria-label="歌曲列表">
+                    <i class="fas fa-list-ul" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="speaker-song-list-dialog" data-role="speaker-song-list-dialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="speakerSongListTitle" hidden>
+        <div class="speaker-song-list-backdrop" data-action="close-speaker-song-list"></div>
+        <section class="speaker-song-list-panel">
+            <div class="section-bar">
+                <div>
+                    <h2 id="speakerSongListTitle" data-role="speaker-song-list-title">歌曲列表</h2>
+                    <span data-role="speaker-song-list-summary">请选择歌单</span>
+                </div>
+                <div class="inline-actions">
+                    <button class="lx-player-button" type="button" data-action="speaker-song-list-refresh" title="刷新歌曲列表" aria-label="刷新歌曲列表">
+                        <i class="fas fa-sync-alt" aria-hidden="true"></i>
+                    </button>
+                    <button class="lx-player-button" type="button" data-action="close-speaker-song-list" title="关闭歌曲列表" aria-label="关闭歌曲列表">
+                        <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="speaker-song-list" data-role="speaker-song-list">
+                <div class="empty-state">请选择歌单。</div>
+            </div>
+        </section>
     </div>
     <div class="songloft-target-dialog" data-role="songloft-playlist-target-dialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="songloftTargetTitle" hidden>
         <form class="songloft-target-panel" data-role="songloft-playlist-target-form">

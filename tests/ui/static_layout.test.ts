@@ -83,15 +83,16 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-action="speaker-player-toggle"');
     expect(html).toContain('data-action="speaker-player-stop"');
     expect(html).toContain('data-action="speaker-player-next"');
-    expect(html).toContain('data-action="speaker-player-mode"');
+    expect(html).toContain('data-action="speaker-player-mode-menu"');
+    expect(html).toContain('data-action="speaker-player-mode-option"');
     expect(html).toContain('data-action="speaker-player-refresh"');
     expect(html).not.toContain('>Prev</button>');
     expect(html).not.toContain('>Stop</button>');
     expect(html).not.toContain('>Next</button>');
-    expect(html).toContain('>上一首</button>');
-    expect(html).toContain('>暂停播放</button>');
-    expect(html).toContain('>停止</button>');
-    expect(html).toContain('>下一首</button>');
+    expect(html).toContain('aria-label="上一首"');
+    expect(html).toContain('aria-label="暂停播放"');
+    expect(html).toContain('aria-label="停止"');
+    expect(html).toContain('aria-label="下一首"');
     expect(speaker).toContain('speaker-player');
     expect(stylesheet).toContain('.speaker-player');
     expect(stylesheet).toContain('.player-status-card');
@@ -422,17 +423,78 @@ describe('static UI layout copy', () => {
     expect(html).not.toContain('name="ai_api_key"');
   });
 
-  it('does not render local or status-strip player controls', () => {
+  it('mounts the persistent speaker player outside the status strip without legacy local player controls', () => {
+    const html = indexHtml();
     const js = appJs();
+    const speaker = speakerJs();
     const stylesheet = css();
 
     expect(js).not.toContain('plugin_player');
     expect(js).not.toContain('renderPluginPlayer');
     expect(js).not.toContain('bindPluginPlayerControls');
-    expect(js).not.toContain('data-role="global-player"');
-    expect(js).not.toContain('data-action="global-player-toggle"');
     expect(stylesheet).not.toContain('.plugin-player');
-    expect(stylesheet).not.toContain('.global-player');
+    expect(html).toContain('class="global-player-bar"');
+    expect(html).toContain('data-role="global-player-title"');
+    expect(html).toContain('data-role="global-player-cover"');
+    expect(html).toContain('data-role="fullscreen-player"');
+    expect(html).toContain('data-role="fullscreen-player-lyrics"');
+    expect(speaker).toContain('startPlayerStatusPolling');
+    expect(stylesheet).toContain('.global-player-bar');
+    expect(stylesheet).toContain('bottom: var(--global-player-height);');
+  });
+
+  it('uses LX music-style icon buttons and a selectable play mode menu for speaker playback controls', () => {
+    const html = indexHtml();
+    const stylesheet = css();
+
+    expect(html).toMatch(/<button class="lx-player-button"[^>]*data-action="speaker-player-previous"[\s\S]*?<i class="fas fa-step-backward"/);
+    expect(html).toMatch(/<button class="lx-player-button lx-player-main-button speaker-player-toggle"[^>]*data-action="speaker-player-toggle"[\s\S]*?<i class="fas fa-play"[^>]*data-role="speaker-player-play-icon"/);
+    expect(html).toMatch(/<button class="lx-player-button"[^>]*data-action="speaker-player-next"[\s\S]*?<i class="fas fa-step-forward"/);
+    expect(html).toMatch(/<button class="lx-player-button"[^>]*data-action="speaker-player-stop"[\s\S]*?<i class="fas fa-stop"/);
+    expect(html).toMatch(/<button class="lx-player-button"[^>]*data-action="speaker-player-song-list"[\s\S]*?<i class="fas fa-list-ul"/);
+    expect(html).toMatch(/<button class="lx-player-button"[^>]*data-action="speaker-player-refresh"[\s\S]*?<i class="fas fa-sync-alt"/);
+    expect(html).toContain('data-action="speaker-player-mode-menu"');
+    expect(html).toContain('data-action="speaker-player-mode-option" data-mode="loop"');
+    expect(html).toContain('data-action="speaker-player-mode-option" data-mode="single"');
+    expect(html).toContain('data-action="speaker-player-mode-option" data-mode="random"');
+    expect(html).toContain('data-action="speaker-player-mode-option" data-mode="order"');
+    expect(html).toContain('<input type="hidden" data-role="speaker-player-mode" value="loop">');
+    expect(html).not.toContain('<select data-role="speaker-player-mode"');
+    expect(html).not.toContain('data-action="speaker-player-previous" title="上一首" aria-label="上一首">上一首</button>');
+    expect(html).not.toContain('data-action="speaker-player-stop" title="停止" aria-label="停止">停止</button>');
+    expect(html).not.toContain('data-action="speaker-player-next" title="下一首" aria-label="下一首">下一首</button>');
+    expect(html).not.toContain('data-action="speaker-player-refresh" title="刷新状态" aria-label="刷新状态">刷新</button>');
+    expect(stylesheet).toContain('.lx-player-button');
+    expect(stylesheet).toContain('.lx-player-main-button');
+    expect(stylesheet).toContain('.lx-play-mode-menu');
+  });
+
+  it('mounts a player song list button and dialog for every player surface', () => {
+    const html = indexHtml();
+    const stylesheet = css();
+    const songListButtons = html.match(/data-action="speaker-player-song-list"/g) || [];
+
+    expect(songListButtons).toHaveLength(3);
+    expect(html).toContain('data-role="speaker-song-list-dialog"');
+    expect(html).toContain('data-role="speaker-song-list"');
+    expect(html).toContain('data-action="close-speaker-song-list"');
+    expect(html).toContain('aria-label="歌曲列表"');
+    expect(stylesheet).toContain('.speaker-song-list-dialog');
+    expect(stylesheet).toContain('.speaker-song-list-panel');
+  });
+
+  it('mounts a playable Songloft playlist browser in the speaker page', () => {
+    const html = indexHtml();
+    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
+    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
+    const speakerHtml = html.slice(speakerStart, songlistsStart);
+
+    expect(speakerHtml).toContain('speaker-playlist-panel');
+    expect(speakerHtml).toContain('data-role="speaker-playlist-select"');
+    expect(speakerHtml).toContain('data-role="speaker-playlist-list"');
+    expect(speakerHtml).toContain('data-role="speaker-playlist-songs"');
+    expect(speakerHtml).toContain('data-action="speaker-playlist-play"');
+    expect(speakerHtml).toContain('data-action="speaker-playlist-refresh"');
   });
 
   it('does not retain dead handlers for hidden speaker and automation controls', () => {
@@ -473,7 +535,7 @@ describe('static UI layout copy', () => {
       .map((match) => match[1].replace(/<[^>]+>/g, '').trim())
       .filter(Boolean);
 
-    expect(staticButtonLabels).toContain('暂停播放');
+    expect(html).toContain('aria-label="暂停播放"');
     expect(staticButtonLabels).not.toContain('播放');
     expect(music).not.toContain('>播放</button>');
   });
@@ -579,7 +641,7 @@ describe('static UI layout copy', () => {
     const stylesheet = css();
 
     expect(stylesheet).toContain('--bottom-tabs-height');
-    expect(stylesheet).toContain('padding-bottom: var(--bottom-tabs-height)');
+    expect(stylesheet).toContain('padding-bottom: calc(var(--global-player-height) + var(--bottom-tabs-height))');
     expect(stylesheet).toContain('minmax(min(100%, 280px), 1fr)');
     expect(stylesheet).toContain('grid-auto-flow: column;');
     expect(stylesheet).toContain('grid-auto-columns: minmax(0, 1fr);');
