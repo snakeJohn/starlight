@@ -780,27 +780,31 @@
             </div>
         </div>
     </div>
-    <div class="speaker-song-list-dialog" data-role="speaker-song-list-dialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="speakerSongListTitle" hidden>
+    <div class="speaker-song-list-drawer" data-role="speaker-song-list-drawer" aria-labelledby="speakerSongListDrawerTitle">
         <div class="speaker-song-list-backdrop" data-action="close-speaker-song-list"></div>
-        <section class="speaker-song-list-panel">
-            <div class="section-bar">
-                <div>
-                    <h2 id="speakerSongListTitle" data-role="speaker-song-list-title">歌曲列表</h2>
+        <div class="speaker-song-list-panel">
+            <div class="speaker-song-list-header">
+                <div class="speaker-song-list-header-left">
+                    <h3 id="speakerSongListDrawerTitle" data-role="speaker-song-list-title">歌曲列表</h3>
                     <span data-role="speaker-song-list-summary">请选择歌单</span>
                 </div>
-                <div class="inline-actions">
-                    <button class="lx-player-button" type="button" data-action="speaker-song-list-refresh" title="刷新歌曲列表" aria-label="刷新歌曲列表">
+                <div class="speaker-song-list-header-actions">
+                    <button class="lx-player-button" type="button" data-action="speaker-song-list-refresh" title="刷新" aria-label="刷新">
                         <i class="fas fa-sync-alt" aria-hidden="true"></i>
                     </button>
-                    <button class="lx-player-button" type="button" data-action="close-speaker-song-list" title="关闭歌曲列表" aria-label="关闭歌曲列表">
-                        <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                    <button class="lx-player-button" type="button" data-action="close-speaker-song-list" title="关闭" aria-label="关闭">
+                        <i class="fas fa-times" aria-hidden="true"></i>
                     </button>
                 </div>
             </div>
-            <div class="speaker-song-list" data-role="speaker-song-list">
+            <div class="speaker-song-list-section" data-role="speaker-song-list-playlists">
+                <div class="empty-state">加载歌单中...</div>
+            </div>
+            <div class="speaker-song-list-divider"></div>
+            <div class="speaker-song-list-section" data-role="speaker-song-list-songs">
                 <div class="empty-state">请选择歌单。</div>
             </div>
-        </section>
+        </div>
     </div>
     <div class="songloft-target-dialog" data-role="songloft-playlist-target-dialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="songloftTargetTitle" hidden>
         <form class="songloft-target-panel" data-role="songloft-playlist-target-form">

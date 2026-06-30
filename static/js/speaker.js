@@ -22,7 +22,7 @@ import {
     startPlayerStatusPolling,
     updatePlayerToggleButton,
 } from './speaker_modules/player.js';
-import { bindSpeakerPlaylists, loadSpeakerPlaylists } from './speaker_modules/playlists.js';
+import { bindSpeakerPlaylists, loadSpeakerPlaylists, openSpeakerSongListDrawer } from './speaker_modules/playlists.js';
 import { bindQrLogin } from './speaker_modules/qrcode.js';
 import { recentVoiceRecords, renderVoiceRecordList } from './speaker_modules/voice_records.js';
 import { $, $$, toast } from './state.js';
@@ -37,7 +37,7 @@ export {
     selectAndPersistDevice,
 } from './speaker_modules/devices.js';
 export { renderPlayerStatus, runPlayerAction } from './speaker_modules/player.js';
-export { loadSpeakerPlaylistSongs, loadSpeakerPlaylists } from './speaker_modules/playlists.js';
+export { loadSpeakerPlaylistSongs, loadSpeakerPlaylists, openSpeakerSongListDrawer } from './speaker_modules/playlists.js';
 export { renderVoiceRecordList } from './speaker_modules/voice_records.js';
 
 let voiceRecordPollTimer = null;

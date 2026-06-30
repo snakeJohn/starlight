@@ -469,18 +469,21 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('.lx-play-mode-menu');
   });
 
-  it('mounts a player song list button and dialog for every player surface', () => {
+  it('opens a right-sliding drawer with playlist selector for every player surface', () => {
     const html = indexHtml();
     const stylesheet = css();
     const songListButtons = html.match(/data-action="speaker-player-song-list"/g) || [];
 
     expect(songListButtons).toHaveLength(3);
-    expect(html).toContain('data-role="speaker-song-list-dialog"');
-    expect(html).toContain('data-role="speaker-song-list"');
+    expect(html).toContain('data-role="speaker-song-list-drawer"');
+    expect(html).toContain('data-role="speaker-song-list-playlists"');
+    expect(html).toContain('data-role="speaker-song-list-songs"');
+    expect(html).toContain('data-action="speaker-song-list-refresh"');
     expect(html).toContain('data-action="close-speaker-song-list"');
     expect(html).toContain('aria-label="歌曲列表"');
-    expect(stylesheet).toContain('.speaker-song-list-dialog');
-    expect(stylesheet).toContain('.speaker-song-list-panel');
+    expect(stylesheet).toContain('speaker-song-list-drawer');
+    expect(stylesheet).toContain('speaker-song-list-panel');
+    expect(stylesheet).toContain('speaker-song-list-current-marker');
   });
 
   it('mounts a playable Songloft playlist browser in the speaker page', () => {

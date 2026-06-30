@@ -340,10 +340,11 @@ describe('speaker player module', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const { state } = await import('../../static/js/state.js') as {
-      state: { accountId: string; deviceId: string };
+      state: { accountId: string; deviceId: string; speakerPlayerPlaylistId: string; };
     };
     state.accountId = 'acc-1';
     state.deviceId = 'speaker-1';
+    state.speakerPlayerPlaylistId = '12';
 
     const modulePath = '../../static/js/speaker_modules/player.js';
     const { runPlayerAction } = await import(modulePath) as SpeakerPlayerModule;
@@ -442,7 +443,7 @@ describe('speaker playlist browser', () => {
     vi.unstubAllGlobals();
   });
 
-  it('clears stale songs when the refreshed Songloft playlist list is empty', async () => {
+  it('clears stale songs when the refreshed Songloft playlist list has no normal playlists', async () => {
     const playlistSelect = new FakeElement();
     const playlistList = new FakeElement();
     const playlistSongs = new FakeElement();
@@ -467,7 +468,9 @@ describe('speaker playlist browser', () => {
       dispatchEvent: vi.fn(),
     });
     vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
-    vi.stubGlobal('fetch', vi.fn(async () => okResponse([])));
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse([
+      { id: 98, name: '电台收藏', type: 'radio', song_count: 0 },
+    ])));
 
     const { state } = await import('../../static/js/state.js') as {
       state: { speakerPlaylistId: string; speakerPlaylistSongs: unknown[] };
@@ -483,7 +486,76 @@ describe('speaker playlist browser', () => {
 
     expect(state.speakerPlaylistId).toBe('');
     expect(state.speakerPlaylistSongs).toEqual([]);
+    expect(playlistSelect.innerHTML).not.toContain('电台收藏');
+    expect(playlistList.innerHTML).toContain('暂无 Songloft 普通歌单');
     expect(playlistSongs.innerHTML).toContain('请选择歌单');
+  });
+
+  it('shows only normal Songloft playlists in the speaker browser and selects the first playable playlist', async () => {
+    const playlistSelect = new FakeElement();
+    const playlistList = new FakeElement();
+    const playlistSongs = new FakeElement();
+    const playlistSummary = new FakeElement();
+
+    const elements = new Map<string, FakeElement>([
+      ['[data-role="speaker-playlist-select"]', playlistSelect],
+      ['[data-role="speaker-playlist-list"]', playlistList],
+      ['[data-role="speaker-playlist-songs"]', playlistSongs],
+      ['[data-role="speaker-playlist-summary"]', playlistSummary],
+    ]);
+
+    vi.stubGlobal('document', {
+      querySelector: vi.fn((selector: string) => elements.get(selector) ?? null),
+      querySelectorAll: vi.fn(() => []),
+      createElement: vi.fn(() => new FakeElement()),
+      body: new FakeElement(),
+    });
+    vi.stubGlobal('window', {
+      setTimeout: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+    vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'api/songloft/playlists') {
+        return okResponse([
+          { id: 41, name: '电台收藏', type: 'radio', song_count: 0 },
+          { id: 12, name: '收藏', type: 'normal', song_count: 6, cover_url: 'https://img.test/cover.jpg' },
+          { id: 15, name: '网络音乐', type: 'normal', song_count: 0 },
+        ]);
+      }
+      if (url === 'api/songloft/playlists/12/songs') {
+        return okResponse([{ title: '稻香', artist: '周杰伦', duration: 210 }]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: {
+        speakerPlaylistId: string;
+        speakerPlaylists: Array<{ id: number; name: string; type: string }>;
+        speakerPlaylistSongs: Array<{ title: string }>;
+      };
+    };
+
+    const { loadSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
+      loadSpeakerPlaylists(): Promise<Array<{ id: number; name: string; type: string }>>;
+    };
+
+    const playlists = await loadSpeakerPlaylists();
+
+    expect(playlists.map(playlist => playlist.name)).toEqual(['收藏', '网络音乐']);
+    expect(state.speakerPlaylists.map(playlist => playlist.name)).toEqual(['收藏', '网络音乐']);
+    expect(state.speakerPlaylistId).toBe('12');
+    expect(state.speakerPlaylistSongs).toEqual([{ title: '稻香', artist: '周杰伦', duration: 210 }]);
+    expect(playlistSelect.innerHTML).toContain('收藏');
+    expect(playlistSelect.innerHTML).not.toContain('电台收藏');
+    expect(playlistList.innerHTML).toContain('speaker-playlist-count');
+    expect(playlistList.innerHTML).toContain('普通歌单');
+    expect(playlistList.innerHTML).not.toContain('电台收藏');
+    expect(playlistSummary.textContent).toBe('1 首');
+    expect(fetchMock).toHaveBeenCalledWith('api/songloft/playlists/12/songs', expect.any(Object));
   });
 
   it('plays a clicked Songloft playlist song through the MIoT playlist endpoint', async () => {
@@ -551,27 +623,24 @@ describe('speaker playlist browser', () => {
     expect(refreshPlayerStatus).toHaveBeenCalledTimes(1);
   });
 
-  it('opens a player song list dialog and plays a selected song', async () => {
-    const songListButton = new FakeElement();
-    const songListDialog = new FakeElement();
-    const songList = new FakeElement();
-    const songListTitle = new FakeElement();
-    const songListSummary = new FakeElement();
+  it('opens a right-sliding drawer with playlist and song list, then plays a selected song', async () => {
+    const drawer = new FakeElement();
+    const playlistsContainer = new FakeElement();
+    const songsContainer = new FakeElement();
     const speakerPlayerMode = new FakeElement();
     speakerPlayerMode.value = 'loop';
-    songListDialog.hidden = true;
+    drawer.className = 'speaker-song-list-drawer';
     const elements = new Map<string, FakeElement>([
-      ['[data-role="speaker-song-list-dialog"]', songListDialog],
-      ['[data-role="speaker-song-list"]', songList],
-      ['[data-role="speaker-song-list-title"]', songListTitle],
-      ['[data-role="speaker-song-list-summary"]', songListSummary],
+      ['[data-role="speaker-song-list-drawer"]', drawer],
+      ['[data-role="speaker-song-list-playlists"]', playlistsContainer],
+      ['[data-role="speaker-song-list-songs"]', songsContainer],
       ['[data-role="speaker-player-mode"]', speakerPlayerMode],
     ]);
 
     vi.stubGlobal('document', {
       querySelector: vi.fn((selector: string) => elements.get(selector) ?? null),
       querySelectorAll: vi.fn((selector: string) => {
-        if (selector === '[data-action="speaker-player-song-list"]') return [songListButton];
+        if (selector === '[data-action="speaker-player-song-list"]') return [new FakeElement()];
         if (selector === '[data-action="close-speaker-song-list"]') return [];
         return [];
       }),
@@ -581,63 +650,39 @@ describe('speaker playlist browser', () => {
     vi.stubGlobal('window', {
       setTimeout: vi.fn(),
       dispatchEvent: vi.fn(),
+      SongloftPlugin: { getAuthToken: () => '' },
     });
     vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
-    const fetchMock = vi.fn(async () => okResponse({ message: 'started from list' }));
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/songloft/playlists/')) return okResponse([{ title: '第一首', artist: '歌手A', duration: 180 }, { title: '第二首', artist: '歌手B', duration: 220 }]);
+      if (url.includes('/songloft/playlists')) return okResponse([{ id: 12, name: '测试歌单', song_count: 2 }]);
+      return okResponse({ message: 'started' });
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const { state } = await import('../../static/js/state.js') as {
-      state: {
-        accountId: string;
-        deviceId: string;
-        speakerPlaylists: Array<{ id: number; name: string }>;
-        speakerPlaylistId: string;
-        speakerPlaylistSongs: Array<{ title: string; artist: string; duration: number }>;
-      };
+      state: { accountId: string; deviceId: string; speakerPlayerPlaylistId: string; };
     };
     state.accountId = 'acc-1';
     state.deviceId = 'speaker-1';
-    state.speakerPlaylists = [{ id: 12, name: '测试歌单' }];
-    state.speakerPlaylistId = '12';
-    state.speakerPlaylistSongs = [
-      { title: '第一首', artist: '歌手A', duration: 180 },
-      { title: '第二首', artist: '歌手B', duration: 220 },
-    ];
+    state.speakerPlayerPlaylistId = '12';
 
-    const { bindSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
+    const { openSpeakerSongListDrawer, bindSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
+      openSpeakerSongListDrawer(): Promise<void>;
       bindSpeakerPlaylists(options?: { refreshPlayerStatus?: () => Promise<unknown> }): void;
+      loadSpeakerPlaylists(): Promise<unknown>;
     };
+
     const refreshPlayerStatus = vi.fn(async () => null);
     bindSpeakerPlaylists({ refreshPlayerStatus });
 
-    await songListButton.dispatch('click');
+    await openSpeakerSongListDrawer();
 
-    expect(songListDialog.hidden).toBe(false);
-    expect(songListDialog.attributes['aria-hidden']).toBe('false');
-    expect(songListTitle.textContent).toBe('测试歌单');
-    expect(songListSummary.textContent).toBe('2 首');
-    expect(songList.innerHTML).toContain('第一首');
-    expect(songList.innerHTML).toContain('第二首');
-
-    const songButton = new FakeElement();
-    songButton.dataset.index = '1';
-    songButton.closest = vi.fn((selector: string) => (
-      selector === '[data-action="speaker-song-list-song"]' ? songButton : null
-    ));
-
-    await songList.dispatch('click', songButton);
-
-    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/play', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({
-        account_id: 'acc-1',
-        device_id: 'speaker-1',
-        playlist_id: 12,
-        start_index: 1,
-        play_mode: 'loop',
-      }),
-    }));
-    expect(refreshPlayerStatus).toHaveBeenCalledTimes(1);
-    expect(songListDialog.hidden).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/songloft/playlists'), expect.anything());
+    expect(drawer.className).toContain('open');
+    expect(playlistsContainer.innerHTML).toContain('测试歌单');
+    expect(songsContainer.innerHTML).toContain('第一首');
+    expect(songsContainer.innerHTML).toContain('第二首');
   });
 });
