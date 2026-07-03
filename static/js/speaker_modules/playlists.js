@@ -31,34 +31,40 @@ function setSummary(text) {
     if (node) node.textContent = text;
 }
 
-function drawerOpen() {
+function isSpeakerDrawerOpen() {
     const drawer = $('[data-role="speaker-song-list-drawer"]');
-    return drawer && !drawer.classList.contains('open');
+    return !!drawer && drawer.classList.contains('open');
 }
 
-// 渲染歌单行
-function renderPlaylistRow(playlist, active) {
+// 渲染歌单行（抽屉与音箱页共用同一视觉结构）
+function renderPlaylistRow(playlist, active, { action = 'speaker-song-list-playlist-select', index, showCountBadge = false } = {}) {
     const activeClass = active ? ' active' : '';
-    return `<button class="speaker-playlist-row songlist-row media-row speaker-song-list-playlist-row${activeClass}" type="button" data-action="speaker-song-list-playlist-select" data-id="${escapeHtml(playlistId(playlist))}">
+    const indexAttr = index === undefined ? '' : ` data-index="${index}"`;
+    const countBadge = showCountBadge
+        ? `<span class="speaker-playlist-count">${escapeHtml(playlistCount(playlist))} 首</span>`
+        : '';
+    return `<button class="speaker-playlist-row songlist-row media-row speaker-song-list-playlist-row${activeClass}" type="button" data-action="${action}" data-id="${escapeHtml(playlistId(playlist))}"${indexAttr}>
         ${renderArtwork(playlist, songloftPlaylistTitle(playlist))}
         <span class="row-main">
             <strong>${escapeHtml(songloftPlaylistTitle(playlist))}</strong>
             <span>${escapeHtml(speakerPlaylistSummary(playlist))}</span>
         </span>
+        ${countBadge}
     </button>`;
 }
 
-// 渲染歌曲行
-function renderSongRow(song, index, isCurrent) {
+// 渲染歌曲行（抽屉与音箱页共用同一紧凑单行结构）
+function renderSongRow(song, index, isCurrent, { action = 'speaker-song-list-song' } = {}) {
     const activeClass = isCurrent ? ' active' : '';
-    return `<button class="speaker-playlist-song-row speaker-song-list-song-row song-row media-row${activeClass}" type="button" data-action="speaker-song-list-song" data-index="${index}">
-        ${isCurrent ? '<span class="speaker-song-list-current-marker" aria-hidden="true"></span>' : '<span class="speaker-song-list-index">${index + 1}</span>'}
+    const marker = isCurrent
+        ? '<span class="speaker-song-list-current-marker" aria-hidden="true"></span>'
+        : `<span class="speaker-song-list-index">${index + 1}</span>`;
+    return `<button class="speaker-playlist-song-row speaker-song-list-song-row${activeClass}" type="button" data-action="${action}" data-index="${index}">
+        ${marker}
         ${renderArtwork(song, songTitle(song))}
-        <span class="row-main">
-            <strong>${escapeHtml(songTitle(song))}</strong>
-            <span>${escapeHtml(songArtist(song))}</span>
-            <span class="row-meta">${escapeHtml(durationLabel(song?.duration))}</span>
-        </span>
+        <span class="speaker-song-list-song-title">${escapeHtml(songTitle(song))}</span>
+        <span class="speaker-song-list-song-artist">${escapeHtml(songArtist(song))}</span>
+        <span class="speaker-song-list-song-duration">${escapeHtml(durationLabel(song?.duration))}</span>
         <span class="material-symbols-outlined speaker-playlist-playmark" aria-hidden="true">play_arrow</span>
     </button>`;
 }
@@ -77,7 +83,9 @@ async function loadDrawerPlaylists() {
             : '<div class="empty-state">暂无普通歌单。</div>';
         return playlists;
     } catch (e) {
-        container.innerHTML = '<div class="empty-state">歌单加载失败</div>';
+        console.error('[Starlight] 歌单加载失败:', e.message || e);
+        const message = String(e.message || e || '加载失败');
+        container.innerHTML = `<div class="empty-state">歌单加载失败<br><small style="font-size:11px;margin-top:4px;display:block;">${escapeHtml(message)}</small></div>`;
         throw e;
     }
 }
@@ -110,7 +118,9 @@ async function loadDrawerSongs(plId) {
             : '<div class="empty-state">这个歌单没有歌曲。</div>';
         return songs;
     } catch (e) {
-        container.innerHTML = '<div class="empty-state">歌曲加载失败</div>';
+        console.error('[Starlight] 歌曲加载失败:', plId, e.message || e);
+        const message = String(e.message || e || '加载失败');
+        container.innerHTML = `<div class="empty-state">歌曲加载失败<br><small style="font-size:11px;margin-top:4px;display:block;">${escapeHtml(message)}</small></div>`;
         throw e;
     }
 }
@@ -150,6 +160,11 @@ export function bindSpeakerSongListDrawer({ refreshPlayerStatus } = {}) {
         btn.addEventListener('click', async event => {
             event.stopPropagation?.();
             const node = event.currentTarget;
+            // 再次点击收起抽屉（toggle）
+            if (isSpeakerDrawerOpen()) {
+                closeSpeakerSongListDrawer();
+                return;
+            }
             if (node) node.disabled = true;
             try {
                 await openSpeakerSongListDrawer();
@@ -245,15 +260,8 @@ function renderPlaylistList(playlists) {
     list.innerHTML = playlists.length
         ? `<div class="list-scroll speaker-playlist-scroll"><div class="list-stack tight">${playlists.map((p, i) => {
             const id = playlistId(p);
-            const active = id && id === state.speakerPlaylistId ? ' active' : '';
-            return `<button class="speaker-playlist-row songlist-row media-row${active}" type="button" data-action="speaker-playlist-select" data-index="${i}">
-                ${renderArtwork(p, songloftPlaylistTitle(p))}
-                <span class="row-main">
-                    <strong>${escapeHtml(songloftPlaylistTitle(p))}</strong>
-                    <span>${escapeHtml(speakerPlaylistSummary(p))}</span>
-                </span>
-                <span class="speaker-playlist-count" aria-hidden="true">${escapeHtml(playlistCount(p))} 首</span>
-            </button>`;
+            const active = !!id && id === state.speakerPlaylistId;
+            return renderPlaylistRow(p, active, { action: 'speaker-playlist-select', index: i, showCountBadge: true });
         }).join('')}</div></div>`
         : '<div class="empty-state">暂无 Songloft 普通歌单。</div>';
 }
@@ -261,19 +269,13 @@ function renderPlaylistList(playlists) {
 function renderSongList(songs) {
     const list = $('[data-role="speaker-playlist-songs"]');
     if (!list) return;
+    const currentIndex = String(state.speakerPlayerPlaylistId || '') === String(state.speakerPlaylistId || '')
+        ? Number(state.speakerPlayerCurrentIndex)
+        : -1;
     list.innerHTML = songs.length
-        ? `<div class="list-scroll speaker-playlist-song-scroll"><div class="list-stack tight">${songs.map((song, index) => {
-            return `<button class="speaker-playlist-song-row song-row media-row" type="button" data-action="speaker-playlist-song" data-index="${index}">
-                <span class="speaker-song-list-index">${index + 1}</span>
-                ${renderArtwork(song, songTitle(song))}
-                <span class="row-main">
-                    <strong>${escapeHtml(songTitle(song))}</strong>
-                    <span>${escapeHtml(songArtist(song))}</span>
-                    <span class="row-meta">${escapeHtml(durationLabel(song?.duration))}</span>
-                </span>
-                <span class="material-symbols-outlined speaker-playlist-playmark" aria-hidden="true">play_arrow</span>
-            </button>`;
-        }).join('')}</div></div>`
+        ? `<div class="list-scroll speaker-playlist-song-scroll"><div class="list-stack tight">${songs.map((song, index) => (
+            renderSongRow(song, index, index === currentIndex, { action: 'speaker-playlist-song' })
+        )).join('')}</div></div>`
         : '<div class="empty-state">这个歌单没有歌曲。</div>';
 }
 

@@ -326,6 +326,52 @@ export function registerPlaylistHandlers(
     }
   });
 
+  // POST /player/seek - 跳转播放进度
+  router.post('/player/seek', async (req: HTTPRequest) => {
+    try {
+      const body = parseBody(req);
+      const query = parseQuery(req.query);
+      const account_id = body.account_id || query.account_id;
+      const device_id = body.device_id || query.device_id;
+      const position = body.position !== undefined ? body.position : query.position;
+
+      if (!account_id || !device_id) {
+        return jsonResponse({ success: false, error: 'account_id and device_id are required' });
+      }
+
+      const targetSeconds = Number(position);
+      if (!Number.isFinite(targetSeconds) || targetSeconds < 0) {
+        return jsonResponse({ success: false, error: 'position must be a non-negative number' });
+      }
+
+      const manager = playlistManagerMap.get(account_id, device_id);
+      if (!manager) {
+        return jsonResponse({ success: false, error: 'no active playlist for this device' });
+      }
+
+      const ok = await manager.seekToPosition(targetSeconds);
+      if (!ok) {
+        return jsonResponse({ success: false, error: 'seek is not supported by the current speaker playback transport' });
+      }
+
+      updateDeviceStatusCache(account_id, device_id, {
+        state: 'playing',
+        position: targetSeconds,
+      });
+
+      return jsonResponse({
+        success: true,
+        data: {
+          message: 'position seeked',
+          position: targetSeconds,
+          current_song: manager.getCurrentSong(),
+        },
+      });
+    } catch (e: any) {
+      return jsonResponse({ success: false, error: e.message || String(e) });
+    }
+  });
+
   // GET /player/status - 获取播放状态（设备真实数据优先，带缓存避免重复查询）
   router.get('/player/status', async (req: HTTPRequest) => {
     try {

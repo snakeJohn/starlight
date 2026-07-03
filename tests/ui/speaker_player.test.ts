@@ -3,17 +3,26 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 interface SpeakerPlayerModule {
   renderPlayerStatus(status: Record<string, unknown>): void;
   runPlayerAction(action: string, options?: Record<string, unknown>): Promise<unknown>;
+  bindProgressInteraction(): void;
 }
 
 interface SpeakerModule {
   initSpeakerUI(): Promise<void>;
 }
 
-type Listener = (event: { currentTarget: FakeElement | null; target?: FakeElement }) => unknown;
+type FakeEvent = {
+  currentTarget: FakeElement | null;
+  target?: FakeElement;
+  clientX?: number;
+  preventDefault?: () => void;
+  stopPropagation?: () => void;
+};
+type Listener = (event: FakeEvent) => unknown;
 
 class FakeElement {
   dataset: Record<string, string> = {};
   style: Record<string, string> = {};
+  parentElement: FakeElement | null = null;
   disabled = false;
   hidden = false;
   innerHTML = '';
@@ -51,8 +60,19 @@ class FakeElement {
     this.listeners.set(type, current);
   }
 
-  async dispatch(type: string, target: FakeElement = this): Promise<void> {
-    const event = { currentTarget: this as FakeElement | null, target };
+  removeEventListener(type: string, listener: Listener): void {
+    const current = this.listeners.get(type) || [];
+    this.listeners.set(type, current.filter(item => item !== listener));
+  }
+
+  async dispatch(type: string, target: FakeElement = this, extra: Partial<FakeEvent> = {}): Promise<void> {
+    const event: FakeEvent = {
+      currentTarget: this as FakeElement | null,
+      target,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      ...extra,
+    };
     const listeners = this.listeners.get(type) || [];
     for (const listener of listeners) {
       await listener(event);
@@ -64,8 +84,9 @@ class FakeElement {
   remove(): void {}
   querySelector(_selector: string): FakeElement | null { return null; }
   closest(_selector: string): FakeElement | null { return null; }
+  getBoundingClientRect(): { left: number; width: number } { return { left: 0, width: 200 }; }
   setAttribute(name: string, value: string): void { this.attributes[name] = value; }
-  removeAttribute(): void {}
+  removeAttribute(name: string): void { delete this.attributes[name]; }
 }
 
 function okResponse(data: unknown) {
@@ -143,6 +164,13 @@ function installPlayerRenderDom() {
     '[data-role="fullscreen-player-bg"]',
   ];
   const elements = new Map<string, FakeElement>(selectors.map(selector => [selector, new FakeElement()]));
+  const progressTracks = new Map<string, FakeElement>();
+  for (const scope of ['speaker-player', 'global-player', 'fullscreen-player']) {
+    const track = new FakeElement();
+    elements.get(`[data-role="${scope}-progress"]`)!.parentElement = track;
+    progressTracks.set(scope, track);
+  }
+  const documentNode = new FakeElement();
   const toggleButton = new FakeElement();
   const globalToggleButton = new FakeElement();
   toggleButton.querySelector = vi.fn((selector: string) => {
@@ -154,7 +182,7 @@ function installPlayerRenderDom() {
     return null;
   });
 
-  vi.stubGlobal('document', {
+  vi.stubGlobal('document', Object.assign(documentNode, {
     querySelector: vi.fn((selector: string) => elements.get(selector) ?? null),
     querySelectorAll: vi.fn((selector: string) => {
       if (selector === '[data-action="speaker-player-toggle"]') return [toggleButton, globalToggleButton];
@@ -162,7 +190,7 @@ function installPlayerRenderDom() {
     }),
     createElement: vi.fn(() => new FakeElement()),
     body: new FakeElement(),
-  });
+  }));
   vi.stubGlobal('window', {
     setTimeout: vi.fn(),
     dispatchEvent: vi.fn(),
@@ -173,7 +201,7 @@ function installPlayerRenderDom() {
   vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
   vi.stubGlobal('performance', { now: () => 1000 });
 
-  return { elements, toggleButton, globalToggleButton };
+  return { elements, toggleButton, globalToggleButton, progressTracks, documentNode };
 }
 
 async function flushPromises() {
@@ -407,6 +435,75 @@ describe('speaker player module', () => {
     expect(elements.get('[data-role="speaker-player-cover"]')?.src).toBe('blob:cover-url');
     expect(elements.get('[data-role="global-player-lyric"]')?.textContent).toBe('到这里都是你');
     expect(elements.get('[data-role="speaker-player-lyric"]')?.textContent).toBe('到这里都是你');
+  });
+
+  it('does not send a seek request when the speaker transport is not seekable', async () => {
+    const { progressTracks } = installPlayerRenderDom();
+    const fetchMock = vi.fn(async () => okResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'acc-1';
+    state.deviceId = 'speaker-1';
+
+    const modulePath = '../../static/js/speaker_modules/player.js';
+    const { renderPlayerStatus, bindProgressInteraction } = await import(modulePath) as SpeakerPlayerModule;
+
+    renderPlayerStatus({
+      state: 'playing',
+      is_playing: true,
+      position: 12,
+      duration: 120,
+      can_seek: false,
+      current_song: { title: '夜曲', artist: '周杰伦' },
+    });
+    bindProgressInteraction();
+
+    await progressTracks.get('global-player')!.dispatch('mousedown', progressTracks.get('global-player')!, { clientX: 100 });
+
+    expect(fetchMock).not.toHaveBeenCalledWith('api/miot/player/seek', expect.anything());
+    expect(progressTracks.get('global-player')?.attributes['aria-disabled']).toBe('true');
+  });
+
+  it('sends one seek request for a complete drag when future seek support is enabled', async () => {
+    const { progressTracks, documentNode } = installPlayerRenderDom();
+    const fetchMock = vi.fn(async () => okResponse({ position: 60 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'acc-1';
+    state.deviceId = 'speaker-1';
+
+    const modulePath = '../../static/js/speaker_modules/player.js';
+    const { renderPlayerStatus, bindProgressInteraction } = await import(modulePath) as SpeakerPlayerModule;
+
+    renderPlayerStatus({
+      state: 'playing',
+      is_playing: true,
+      position: 12,
+      duration: 120,
+      can_seek: true,
+      current_song: { title: '夜曲', artist: '周杰伦' },
+    });
+    bindProgressInteraction();
+
+    const track = progressTracks.get('global-player')!;
+    await track.dispatch('mousedown', track, { clientX: 100 });
+    await documentNode.dispatch('mouseup', documentNode, { clientX: 100 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/seek', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        account_id: 'acc-1',
+        device_id: 'speaker-1',
+        position: 60,
+      }),
+    }));
   });
 });
 

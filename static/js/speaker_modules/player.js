@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { $, $$, durationLabel, selectedDevicePayload, setState, state } from '../state.js';
+import { $, $$, durationLabel, selectedDevicePayload, setState, state, toast } from '../state.js';
 import { getCurrentLyricIndex, parseLrc } from './lrc_parser.js';
 
 const PLAYER_POLL_MS = 5000;
@@ -14,6 +14,7 @@ let lastUpdateTime = 0;
 let progressAnimationFrame = null;
 let playerPollTimer = null;
 let isCurrentlyPlaying = false;
+let currentCanSeek = false;
 
 function selectedPayload(extra = {}) {
     const payload = { ...selectedDevicePayload(), ...extra };
@@ -132,6 +133,25 @@ function renderProgress(position = currentPosition, duration = currentDuration) 
         setText(`[data-role="${scope}-total-time"]`, totalTime);
         setProgress(`[data-role="${scope}-progress"]`, position, duration);
         setProgressThumb(`[data-role="${scope}-progress-thumb"]`, position, duration);
+    }
+}
+
+function getProgressTrack(scope) {
+    return $(`[data-role="${scope}-progress"]`)?.parentElement || null;
+}
+
+function updateProgressSeekState() {
+    for (const scope of ['global-player', 'speaker-player', 'fullscreen-player']) {
+        const track = getProgressTrack(scope);
+        if (!track) continue;
+        track.setAttribute?.('aria-disabled', String(!currentCanSeek));
+        track.classList?.toggle?.('seek-enabled', currentCanSeek);
+        track.classList?.toggle?.('seek-disabled', !currentCanSeek);
+        if (currentCanSeek) {
+            track.removeAttribute?.('title');
+        } else {
+            track.setAttribute?.('title', '当前音箱播放暂不支持拖动跳转');
+        }
     }
 }
 
@@ -336,8 +356,10 @@ export function renderPlayerStatus(status = {}) {
     currentDuration = Number(status.duration) || 0;
     lastUpdateTime = nowMs();
     isCurrentlyPlaying = status.is_playing === true || nextState === 'playing';
+    currentCanSeek = status.can_seek === true;
 
     renderProgress(currentPosition, currentDuration);
+    updateProgressSeekState();
     loadCover(song.cover_url || '');
     loadLyrics(song.lyric_url || '');
     setPlayIcon('[data-role="speaker-player-play-icon"]', isCurrentlyPlaying);
@@ -444,4 +466,106 @@ export async function runPlayerAction(action, options = {}) {
         await refreshPlayerStatus().catch(() => null);
     }
     return result || {};
+}
+
+// ===== 进度条交互 =====
+
+const progressInteractionHandlers = [];
+
+function getPositionFromEvent(event, track, duration) {
+    const rect = track.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const percent = Math.max(0, Math.min(1, x / rect.width));
+    return percent * duration;
+}
+
+async function seekToPosition(seconds) {
+    if (!state.accountId || !state.deviceId) {
+        throw new Error('请先选择账号和设备');
+    }
+    if (!currentCanSeek) {
+        throw new Error('当前音箱播放暂不支持拖动跳转');
+    }
+
+    const result = await api.post('/miot/player/seek', {
+        account_id: state.accountId,
+        device_id: state.deviceId,
+        position: seconds,
+    });
+
+    currentPosition = seconds;
+    lastUpdateTime = nowMs();
+    renderProgress(seconds, currentDuration);
+    renderActiveLyric(seconds);
+    if (isCurrentlyPlaying) {
+        startProgressAnimation();
+    }
+
+    return result || {};
+}
+
+function addProgressHandler(target, type, handler) {
+    target.addEventListener(type, handler);
+    progressInteractionHandlers.push({ target, type, handler });
+}
+
+function cleanupProgressHandlers() {
+    for (const { target, type, handler } of progressInteractionHandlers.splice(0)) {
+        target.removeEventListener?.(type, handler);
+    }
+}
+
+export function bindProgressInteraction() {
+    cleanupProgressHandlers();
+    updateProgressSeekState();
+
+    const scopes = ['speaker-player', 'global-player', 'fullscreen-player'];
+
+    for (const scope of scopes) {
+        const track = getProgressTrack(scope);
+        if (!track) continue;
+
+        let isDragging = false;
+        let dragPosition = 0;
+
+        addProgressHandler(track, 'mousedown', (event) => {
+            if (currentDuration <= 0) return;
+            if (!currentCanSeek) {
+                toast('当前音箱播放暂不支持拖动跳转', 'error');
+                return;
+            }
+            isDragging = true;
+            dragPosition = getPositionFromEvent(event, track, currentDuration);
+
+            stopProgressAnimation();
+            renderProgress(dragPosition, currentDuration);
+
+            event.preventDefault?.();
+        });
+
+        const handleMouseMove = (event) => {
+            if (!isDragging) return;
+            dragPosition = getPositionFromEvent(event, track, currentDuration);
+            renderProgress(dragPosition, currentDuration);
+        };
+
+        const handleMouseUp = async (event) => {
+            if (!isDragging) return;
+            isDragging = false;
+
+            dragPosition = getPositionFromEvent(event, track, currentDuration);
+            try {
+                await seekToPosition(dragPosition);
+            } catch (e) {
+                console.error('Seek failed:', e);
+                toast(e.message || '跳转失败', 'error');
+                if (isCurrentlyPlaying) {
+                    startProgressAnimation();
+                }
+            }
+        };
+
+        addProgressHandler(document, 'mousemove', handleMouseMove);
+        addProgressHandler(document, 'mouseup', handleMouseUp);
+    }
 }
