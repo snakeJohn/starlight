@@ -261,4 +261,6 @@ export interface PlayerStatus {
   position: number;
   duration: number;
   is_playing: boolean;
+  can_seek: boolean;
+  seek_strategy: 'unsupported' | 'device';
 }

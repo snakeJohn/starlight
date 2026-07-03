@@ -129,4 +129,29 @@ describe('playlist host auto-detection', () => {
     expect(manager.replayCurrent).toHaveBeenCalledTimes(1);
     expect(manager.play).not.toHaveBeenCalled();
   });
+
+  it('reports unsupported seek without updating device position cache', async () => {
+    const router = createRouter();
+    const manager = {
+      seekToPosition: vi.fn(async () => false),
+      getCurrentSong: vi.fn(() => ({ title: 'Song' })),
+    };
+    const managerMap = {
+      get: vi.fn(() => manager),
+    } as unknown as PlaylistManagerMap;
+    registerPlaylistHandlers(router, managerMap, {} as MinaService);
+
+    const response = await router.handle(request('POST', '/player/seek', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+      position: 60,
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response)).toMatchObject({
+      success: false,
+      error: expect.stringContaining('seek is not supported'),
+    });
+    expect(manager.seekToPosition).toHaveBeenCalledWith(60);
+  });
 });

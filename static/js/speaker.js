@@ -21,6 +21,7 @@ import {
     setSpeakerMessage,
     startPlayerStatusPolling,
     updatePlayerToggleButton,
+    bindProgressInteraction,
 } from './speaker_modules/player.js';
 import { bindSpeakerPlaylists, loadSpeakerPlaylists, openSpeakerSongListDrawer } from './speaker_modules/playlists.js';
 import { bindQrLogin } from './speaker_modules/qrcode.js';
@@ -149,6 +150,7 @@ function bindSpeakerPlayer() {
     $$('[data-action="close-fullscreen-player"]').forEach(button => {
         button.addEventListener('click', closeFullscreenPlayer);
     });
+    bindProgressInteraction();
 }
 
 function bindRefresh() {

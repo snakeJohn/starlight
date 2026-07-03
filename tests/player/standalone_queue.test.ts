@@ -101,7 +101,28 @@ describe('PlaylistManager standalone queue', () => {
       play_mode: 'single',
       playlist_id: 0,
       current_index: 0,
+      can_seek: false,
+      seek_strategy: 'unsupported',
     });
+  });
+
+  it('does not simulate seek by replaying the current URL and shifting local position', async () => {
+    const seekableSong = { ...song, duration: 180 };
+    const { manager, minaService } = createManager();
+
+    await expect(manager.playStandalone([seekableSong], 0, 'single')).resolves.toBe(true);
+
+    expect(minaService.playURL).toHaveBeenCalledTimes(1);
+
+    await expect(manager.seekToPosition(60)).resolves.toBe(false);
+
+    expect(minaService.playURL).toHaveBeenCalledTimes(1);
+    expect(manager.getStatus()).toMatchObject({
+      state: 'playing',
+      can_seek: false,
+      seek_strategy: 'unsupported',
+    });
+    expect(manager.getStatus().position).toBeLessThan(5);
   });
 
   it('does not automatically replay one-off standalone songs when auto advance is disabled', async () => {

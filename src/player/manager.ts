@@ -436,6 +436,8 @@ export class PlaylistManager {
       position: this.getPosition(),
       duration: duration,
       is_playing: this.state === 'playing',
+      can_seek: false,
+      seek_strategy: 'unsupported',
     };
   }
 
@@ -590,6 +592,15 @@ export class PlaylistManager {
    */
   async replayCurrent(): Promise<boolean> {
     return this.playCurrent();
+  }
+
+  /**
+   * 当前 MIoT URL 播放通道没有确认可用的设备级 seek。
+   * 不通过重播同一 URL 和改写本地时间来伪造成功，避免 UI 与音箱真实播放错位。
+   */
+  async seekToPosition(_targetSeconds: number): Promise<boolean> {
+    songloft.log.warn('[PlaylistManager] seekToPosition: unsupported by current MIoT URL playback transport');
+    return false;
   }
 
   /**
