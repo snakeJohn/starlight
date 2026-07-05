@@ -410,6 +410,9 @@ describe('static UI layout copy', () => {
     expect(speakerHtml).not.toContain('name="scheduled_tasks_enabled"');
     expect(automationHtml).toContain('data-role="schedule-config-form"');
     expect(automationHtml).toContain('name="scheduled_tasks_enabled" type="checkbox"');
+    expect(automationHtml).toContain('<option value="once">单曲播放</option>');
+    expect(automationHtml).toContain('<option value="loop">列表循环</option>');
+    expect(automationHtml).not.toContain('<option value="repeat">循环</option>');
     expect(html).not.toContain('name="timezone"');
     expect(html).not.toContain('name="extra_music_api_models"');
     expect(html).not.toContain('额外型号');
@@ -455,6 +458,7 @@ describe('static UI layout copy', () => {
     expect(html).toMatch(/<button class="lx-player-button"[^>]*data-action="speaker-player-refresh"[\s\S]*?<i class="fas fa-sync-alt"/);
     expect(html).toContain('data-action="speaker-player-mode-menu"');
     expect(html).toContain('data-action="speaker-player-mode-option" data-mode="loop"');
+    expect(html).toContain('data-action="speaker-player-mode-option" data-mode="once"');
     expect(html).toContain('data-action="speaker-player-mode-option" data-mode="single"');
     expect(html).toContain('data-action="speaker-player-mode-option" data-mode="random"');
     expect(html).toContain('data-action="speaker-player-mode-option" data-mode="order"');

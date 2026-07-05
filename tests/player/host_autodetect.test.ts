@@ -154,4 +154,41 @@ describe('playlist host auto-detection', () => {
     });
     expect(manager.seekToPosition).toHaveBeenCalledWith(60);
   });
+
+  it('accepts once play mode for playlist playback and mode changes', async () => {
+    const router = createRouter();
+    const manager = {
+      play: vi.fn(async () => true),
+      getCurrentSong: vi.fn(() => ({ title: 'Song' })),
+      setPlayMode: vi.fn(async () => {}),
+    };
+    const managerMap = {
+      getOrCreate: vi.fn(async () => manager),
+      get: vi.fn(() => manager),
+    } as unknown as PlaylistManagerMap;
+    registerPlaylistHandlers(router, managerMap, {} as MinaService);
+
+    const playResponse = await router.handle(request('POST', '/player/play', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+      playlist_id: 7,
+      play_mode: 'once',
+    }));
+    const modeResponse = await router.handle(request('POST', '/player/mode', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+      play_mode: 'once',
+    }));
+
+    expect(parseResponseBody(playResponse)).toMatchObject({
+      success: true,
+      data: { play_mode: 'once' },
+    });
+    expect(parseResponseBody(modeResponse)).toMatchObject({
+      success: true,
+      data: { play_mode: 'once' },
+    });
+    expect(manager.play).toHaveBeenCalledWith(7, 0, 'once');
+    expect(manager.setPlayMode).toHaveBeenCalledWith('once');
+  });
 });

@@ -374,7 +374,7 @@ function preferredVoiceDownloadQuality(song: SearchResultSong): MusicQuality {
 // ===== 默认口令配置 =====
 
 /**
- * 获取默认语音口令配置（14 条）
+ * 获取默认语音口令配置（15 条）
  * 翻译自 Go 源码: plugins/songloft-plugin-xiaomi/config/manager.go GetDefaultVoiceCommands()
  */
 export function getDefaultVoiceCommands(): VoiceCommand[] {
@@ -384,6 +384,7 @@ export function getDefaultVoiceCommands(): VoiceCommand[] {
     { type: 'play_playlist', keywords: ['播放歌单', '放歌单', '播放列表'], enabled: true },
     { type: 'play_song', keywords: ['播放歌曲', '放歌曲', '我想听'], enabled: true },
     { type: 'set_play_mode', keywords: ['随机播放', '随机模式'], param: 'random', enabled: true },
+    { type: 'set_play_mode', keywords: ['单曲播放', '播放一次', '只播一首'], param: 'once', enabled: true },
     { type: 'set_play_mode', keywords: ['单曲循环', '循环播放这首'], param: 'single', enabled: true },
     { type: 'set_play_mode', keywords: ['列表循环', '循环播放'], param: 'loop', enabled: true },
     { type: 'set_play_mode', keywords: ['顺序播放'], param: 'order', enabled: true },
@@ -1326,12 +1327,16 @@ export class VoiceEngine {
       '顺序播放': 'order',
       '随机': 'random',
       '随机播放': 'random',
+      '单曲播放': 'once',
+      '播放一次': 'once',
+      '只播一首': 'once',
       '单曲循环': 'single',
       '单曲': 'single',
       '列表循环': 'loop',
       '循环': 'loop',
       'order': 'order',
       'random': 'random',
+      'once': 'once',
       'single': 'single',
       'loop': 'loop',
     };

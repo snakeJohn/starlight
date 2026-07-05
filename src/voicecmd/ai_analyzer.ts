@@ -40,7 +40,7 @@ const AI_SYSTEM_PROMPT = `你是一个智能音箱语音指令分析专家，擅
 - **play_playlist**: {"playlist": "歌单名称"}
 - **create_playlist**: {"playlist": "歌单名称"}
 - **add_song_to_playlist**: {"playlist": "歌单名称", "name": "歌曲名", "artist": "歌手名（如有）", "source": "酷我|酷狗|QQ音乐|咪咕|网易云（如有）"}
-- **set_play_mode**: {"mode": "order|random|single|loop"}
+- **set_play_mode**: {"mode": "order|random|once|single|loop"}，其中 once=单曲播放一次，single=单曲循环
 - **set_volume**: {"volume": 数字, "direction": "up|down|absolute（方向，up/down 时 volume 可忽略）"}
 - **next/previous/stop**: {}
 
@@ -77,6 +77,9 @@ const AI_SYSTEM_PROMPT = `你是一个智能音箱语音指令分析专家，擅
 
 输入：随机播放
 输出：{"action": "set_play_mode", "params": {"mode": "random"}, "confidence": "high", "rawText": "随机播放"}
+
+输入：单曲播放
+输出：{"action": "set_play_mode", "params": {"mode": "once"}, "confidence": "high", "rawText": "单曲播放"}
 
 输入：把为龙 河图 酷狗 加到古风
 输出：{"action": "add_song_to_playlist", "params": {"playlist": "古风", "name": "为龙", "artist": "河图", "source": "酷狗"}, "confidence": "high", "rawText": "为龙 河图 酷狗 古风"}

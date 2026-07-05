@@ -58,6 +58,7 @@ function playModeLabel(mode) {
     return {
         order: '顺序',
         random: '随机',
+        once: '单曲播放',
         single: '单曲循环',
         loop: '列表循环',
         repeat: '列表循环',
@@ -66,7 +67,7 @@ function playModeLabel(mode) {
 
 function normalizePlayMode(mode) {
     if (mode === 'repeat') return 'loop';
-    return ['loop', 'single', 'random', 'order'].includes(mode) ? mode : 'order';
+    return ['loop', 'once', 'single', 'random', 'order'].includes(mode) ? mode : 'order';
 }
 
 function playModeIcon(mode) {
@@ -74,6 +75,7 @@ function playModeIcon(mode) {
     return {
         order: 'fa-play',
         random: 'fa-random',
+        once: 'fa-dot-circle',
         single: 'fa-redo-alt',
         loop: 'fa-redo',
     }[normalized] || 'fa-redo';
@@ -93,7 +95,7 @@ function setText(selector, text) {
 function setIcon(selector, iconName) {
     const node = $(selector);
     if (!node) return;
-    node.classList?.remove?.('fa-play', 'fa-pause', 'fa-redo', 'fa-redo-alt', 'fa-random');
+    node.classList?.remove?.('fa-play', 'fa-pause', 'fa-redo', 'fa-redo-alt', 'fa-random', 'fa-dot-circle');
     node.classList?.add?.(iconName);
 }
 

@@ -611,6 +611,20 @@ describe('VoiceEngine Songloft library matching', () => {
     expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：随机');
   });
 
+  it('sets once mode from an explicit single-play voice command', async () => {
+    const { engine, playlistManager, playlistManagerMap } = createEngine({
+      commands: [
+        { type: 'set_play_mode', keywords: ['单曲播放'], param: 'once', enabled: true },
+      ],
+    });
+
+    vi.mocked(playlistManagerMap.get).mockReturnValue(playlistManager as never);
+
+    await engine.handleMessage(message('单曲播放'));
+
+    expect(playlistManager.setPlayMode).toHaveBeenCalledWith('once');
+  });
+
   it('downloads a searched song before adding it to a custom playlist when the library misses', async () => {
     const songloft = testSongloft();
     const resolvedSong = createSearchResultSong();

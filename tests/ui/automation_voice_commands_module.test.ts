@@ -24,6 +24,20 @@ describe('automation voice command module', () => {
     expect(html).not.toContain('<textarea');
   });
 
+  it('offers once mode in playback mode voice command parameters', async () => {
+    const modulePath = '../../static/js/automation_modules/voice_commands.js';
+    const { renderVoiceCommandRow } = await import(modulePath) as AutomationVoiceCommandsModule;
+
+    const html = renderVoiceCommandRow({
+      type: 'set_play_mode',
+      param: 'once',
+      keywords: ['单曲播放'],
+      enabled: true,
+    }, 0);
+
+    expect(html).toContain('<option value="once" selected>单曲播放</option>');
+  });
+
   it('serializes editor fields back to the command payload from the extracted module', async () => {
     const modulePath = '../../static/js/automation_modules/voice_commands.js';
     const { voiceCommandFromEditorData } = await import(modulePath) as AutomationVoiceCommandsModule;

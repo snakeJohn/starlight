@@ -1175,6 +1175,10 @@ textarea:focus {
     content: "\2928";
 }
 
+.fa-dot-circle::before {
+    content: "\25c9";
+}
+
 .fa-list-ul::before {
     content: "\2630";
 }

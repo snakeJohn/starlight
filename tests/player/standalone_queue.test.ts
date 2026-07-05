@@ -148,6 +148,45 @@ describe('PlaylistManager standalone queue', () => {
     }
   });
 
+  it('stops after one natural play in once mode but keeps manual previous and next available', async () => {
+    vi.useFakeTimers();
+    const firstSong = { ...song, title: '第一首', duration: 1, url: 'https://audio.test/first.mp3' };
+    const secondSong = { ...song, title: '第二首', duration: 1, url: 'https://audio.test/second.mp3' };
+    const { manager, minaService } = createManager();
+
+    try {
+      await expect(manager.playStandalone([firstSong, secondSong], 0, 'once')).resolves.toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1100);
+
+      expect(minaService.playURL).toHaveBeenCalledTimes(1);
+      expect(manager.getStatus()).toMatchObject({
+        state: 'stopped',
+        play_mode: 'once',
+        current_index: 0,
+      });
+
+      await expect(manager.playStandalone([firstSong, secondSong], 0, 'once')).resolves.toBe(true);
+      await expect(manager.next()).resolves.toBe(true);
+      expect(manager.getStatus()).toMatchObject({
+        state: 'playing',
+        play_mode: 'once',
+        current_index: 1,
+        current_song: expect.objectContaining({ title: '第二首' }),
+      });
+
+      await expect(manager.previous()).resolves.toBe(true);
+      expect(manager.getStatus()).toMatchObject({
+        state: 'playing',
+        play_mode: 'once',
+        current_index: 0,
+        current_song: expect.objectContaining({ title: '第一首' }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('loads synthetic custom playlists and resolves dynamic song URLs at playback time', async () => {
     const dynamicSong = { ...song, id: -100000000, type: 'dynamic', title: '为龙', artist: '河图', url: '' };
     const dynamicPlaylistLoader = vi.fn(async () => [dynamicSong]);

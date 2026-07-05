@@ -364,7 +364,7 @@ describe('speaker player module', () => {
   it('sets the selected play mode instead of cycling modes implicitly', async () => {
     const { elements } = installPlayerRenderDom();
     elements.get('[data-role="speaker-player-mode"]')!.value = 'loop';
-    const fetchMock = vi.fn(async () => okResponse({ play_mode: 'random' }));
+    const fetchMock = vi.fn(async () => okResponse({ play_mode: 'once' }));
     vi.stubGlobal('fetch', fetchMock);
 
     const { state } = await import('../../static/js/state.js') as {
@@ -377,17 +377,17 @@ describe('speaker player module', () => {
     const modulePath = '../../static/js/speaker_modules/player.js';
     const { runPlayerAction } = await import(modulePath) as SpeakerPlayerModule;
 
-    await runPlayerAction('speaker-player-mode', { playMode: 'random' });
+    await runPlayerAction('speaker-player-mode', { playMode: 'once' });
 
     expect(fetchMock).toHaveBeenCalledWith('api/miot/player/mode', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
         account_id: 'acc-1',
         device_id: 'speaker-1',
-        play_mode: 'random',
+        play_mode: 'once',
       }),
     }));
-    expect(elements.get('[data-role="speaker-player-mode"]')?.value).toBe('random');
+    expect(elements.get('[data-role="speaker-player-mode"]')?.value).toBe('once');
   });
 
   it('loads authenticated cover and lyric assets for the current song', async () => {

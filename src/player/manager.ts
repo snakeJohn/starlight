@@ -771,6 +771,7 @@ export class PlaylistManager {
 
     switch (this.playMode) {
       case 'order':
+      case 'once':
         // 顺序播放：到末尾停止
         if (this.currentIndex < len - 1) {
           return this.currentIndex + 1;
@@ -823,6 +824,7 @@ export class PlaylistManager {
 
     switch (this.playMode) {
       case 'order':
+      case 'once':
         // 顺序播放：到第一首停止
         if (this.currentIndex > 0) {
           return this.currentIndex - 1;
@@ -897,6 +899,13 @@ export class PlaylistManager {
       callHostAPI('POST', `/api/v1/songs/${finishedSong.id}/played?source=miot`).catch(e => {
         songloft.log.warn('[PlaylistManager] songPlayed notify failed: ' + String(e));
       });
+    }
+
+    if (this.playMode === 'once') {
+      songloft.log.info('[PlaylistManager] Once mode complete, stopping');
+      this.state = 'stopped';
+      this.playStartTimeMs = 0;
+      return;
     }
 
     const nextIdx = this.getNextIndex();

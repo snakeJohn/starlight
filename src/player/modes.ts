@@ -1,6 +1,6 @@
 import type { PlayMode } from '../types';
 
-const PLAY_MODES = new Set<PlayMode>(['order', 'random', 'single', 'loop']);
+const PLAY_MODES = new Set<PlayMode>(['order', 'random', 'once', 'single', 'loop']);
 
 export function isPlayMode(value: unknown): value is PlayMode {
   return typeof value === 'string' && PLAY_MODES.has(value as PlayMode);

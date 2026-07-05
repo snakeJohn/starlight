@@ -23,6 +23,7 @@ const voiceCommandParams = {
     set_play_mode: [
         ['order', '顺序播放'],
         ['random', '随机播放'],
+        ['once', '单曲播放'],
         ['single', '单曲循环'],
         ['loop', '列表循环'],
     ],
