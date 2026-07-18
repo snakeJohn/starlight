@@ -61,7 +61,10 @@ describe('registerConfigHandlers', () => {
     setHostBaseUrl('');
   });
 
-  function createHarness(config = pluginConfig({ server_host: '' })) {
+  function createHarness(
+    config = pluginConfig({ server_host: '' }),
+    options: { onServerHostChange?: (host: string) => void } = {},
+  ) {
     const router = createRouter();
     const configManager = {
       getConfig: vi.fn(async () => config),
@@ -81,7 +84,7 @@ describe('registerConfigHandlers', () => {
       setEnabled: vi.fn(),
     } as unknown as VoiceEngine;
 
-    registerConfigHandlers(router, configManager, monitor, scheduler, voiceEngine);
+    registerConfigHandlers(router, configManager, monitor, scheduler, voiceEngine, options);
     return { router, configManager, monitor, scheduler, voiceEngine };
   }
 
@@ -98,6 +101,41 @@ describe('registerConfigHandlers', () => {
     expect(configManager.saveConfig).toHaveBeenCalledWith(expect.objectContaining({
       server_host: '',
       timezone: 'Asia/Hong_Kong',
+    }));
+  });
+
+  it('notifies onServerHostChange when server_host is saved', async () => {
+    const onServerHostChange = vi.fn();
+    const { router } = createHarness(pluginConfig({ server_host: '' }), { onServerHostChange });
+
+    const response = await router.handle(
+      request('POST', '/config', { server_host: '192.168.1.50:18191' }),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(onServerHostChange).toHaveBeenCalledWith('http://192.168.1.50:18191');
+  });
+
+  it('saves AI config patch including string timeout coercion', async () => {
+    const { router, configManager } = createHarness();
+
+    const response = await router.handle(request('PUT', '/config', {
+      ai_config: {
+        enabled: true,
+        api_url: 'https://api.example/v1',
+        api_key: 'sk-demo',
+        model: 'qwen-flash',
+        timeout: '9',
+      },
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(configManager.saveAIConfig).toHaveBeenCalledWith(expect.objectContaining({
+      enabled: true,
+      api_url: 'https://api.example/v1',
+      api_key: 'sk-demo',
+      model: 'qwen-flash',
+      timeout: 9,
     }));
   });
 

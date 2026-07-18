@@ -1,6 +1,8 @@
 // MIoT 智能音箱插件 - Mina API 常量定义
 // 翻译自 Go 源码: plugins/songloft-plugin-xiaomi/pkg/mina/constants.go
 
+import ttsCommandData from './tts-commands.json';
+
 /** 小米账号服务基础 URL */
 export const ACCOUNT_BASE_URL = 'https://account.xiaomi.com';
 
@@ -12,6 +14,15 @@ export const MINA_API_BASE_URL = `https://${MINA_API_HOST}`;
 
 /** 小爱音箱服务标识符 */
 export const MINA_SID = 'micoapi';
+
+/** 米家 / MIoT 服务标识符（用于 MiIO RPC） */
+export const XIAOMI_IO_SID = 'xiaomiio';
+
+/** 米家 MiIO API 基础 URL */
+export const MIIO_API_BASE_URL = 'https://api.io.mi.com/app';
+
+/** MiIO API User-Agent（与 mi-gpt / mi-service-lite 的 MiIOT 请求对齐） */
+export const MIIO_USER_AGENT = 'MICO/AndroidApp/@SHIP.TO.2A2FE0D7@/2.4.40';
 
 /** 用户代理模板（%s 将被替换为 deviceID） */
 export const USER_AGENT_TEMPLATE = 'Android-7.1.1-1.0.0-ONEPLUS A3010-136-%s APP/xiaomi.smarthome APPV/62830';
@@ -60,14 +71,14 @@ export const NEED_USE_PLAY_MUSIC_API: Record<string, boolean> = {
   'X8F': true,
   'X4B': true,
   'LX05': true,
-  'LX06': true,
+  'OH11': true,
   'OH2': true,
   'OH2P': true,
   'X6A': true,
   'LX04': true,
   'L05B': true,
   'L05C': true,
-  'L06': true,
+  'LX06': true,
   'L06A': true,
   'X08A': true,
   'X10A': true,
@@ -75,6 +86,15 @@ export const NEED_USE_PLAY_MUSIC_API: Record<string, boolean> = {
   'L16A': true,
   'L17A': true,
 };
+
+/**
+ * 支持通过 MIoT action 播放 TTS 的设备型号。
+ * 映射值为 xiaomusic 的 TTS command: "<siid>-<aiid>"（intelligent-speaker 服务的 play-text action）。
+ *
+ * 数据源:src/data/tts-commands.json,由 `npm run sync:tts` 从 miot-spec 同步补充,
+ * 人工确认的别名(如 ASX4B)与冲突值以该文件为准。切勿在此处硬编码。
+ */
+export const TTS_COMMAND: Record<string, string> = ttsCommandData;
 
 /**
  * 判断指定硬件型号是否需要通过 Mina 方式获取对话记录
@@ -94,6 +114,13 @@ export function needUsePlayMusicAPI(hardware: string, extraModels?: string[]): b
 }
 
 /**
+ * 获取指定硬件型号的 MIoT TTS command。
+ */
+export function getTTSCommand(hardware: string): string {
+  return TTS_COMMAND[hardware] || '';
+}
+
+/**
  * 格式化 UserAgent（替换 %s 为 deviceID）
  */
 export function formatUserAgent(deviceId: string): string {
@@ -106,3 +133,4 @@ export function formatUserAgent(deviceId: string): string {
 export function formatLatestAskUrl(hardware: string, timestamp: number, limit = 2): string {
   return LATEST_ASK_API_TEMPLATE.replace('%s', hardware).replace('%d', String(timestamp)).replace('%l', String(limit));
 }
+

@@ -40,6 +40,10 @@ import {
     mergeSourceRows,
 } from './music_modules/sources.js';
 import {
+    bindLxSync,
+    loadLxSyncConfig,
+} from './music_modules/lx_sync.js';
+import {
     installArtworkFallback,
     songArtist,
     songTitle,
@@ -262,9 +266,11 @@ export async function initMusicUI() {
     bindSongLists();
     bindRankings();
     bindCustomPlaylists();
+    bindLxSync();
     await loadPlatforms().catch(error => toast(error.message, 'error'));
     await loadSources().catch(error => toast(error.message, 'error'));
     await loadDownloadSettings().catch(error => toast(error.message, 'error'));
     await loadDownloadProgress().catch(error => toast(error.message, 'error'));
     await loadCustomPlaylists().catch(error => toast(error.message, 'error'));
+    await loadLxSyncConfig().catch(error => toast(error.message, 'error'));
 }

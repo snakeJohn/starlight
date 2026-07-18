@@ -30,38 +30,82 @@ function initSummaryMessage(initStatus) {
     return pending ? '初始化中' : '已连接';
 }
 
+const navIcons = {
+    search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16.5 16.5L21 21"/></svg>',
+    discover: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/></svg>',
+    playlists: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>',
+    speaker: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3.5" width="10" height="17" rx="3"/><circle cx="12" cy="15" r="2.5"/><circle cx="12" cy="8" r="1"/></svg>',
+    settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6.1 6.1l1.6 1.6M16.3 16.3l1.6 1.6M17.9 6.1l-1.6 1.6M7.7 16.3l-1.6 1.6"/></svg>',
+};
+
+function tabIconMarkup(tab) {
+    const svg = navIcons[tab.id];
+    if (svg) {
+        return `<span class="nav-icon" aria-hidden="true">${svg}</span>`;
+    }
+    return `<strong class="nav-icon">${escapeHtml(tab.icon)}</strong>`;
+}
+
 function renderNavigation() {
     const rail = $('#sideRail');
     const bottom = $('#bottomTabs');
     if (rail) {
         rail.innerHTML = `
             <div class="brand-lockup">
-                <div class="brand-mark">S</div>
+                <div class="brand-mark" aria-hidden="true" title="Starlight"></div>
                 <div>
                     <strong>Starlight</strong>
                     <span>Songloft 音乐助手</span>
                 </div>
             </div>
-            <nav class="rail-tabs">
+            <nav class="rail-tabs" aria-label="主导航">
                 ${tabs.map(tab => `
                     <button type="button" class="rail-tab ${tab.id === state.activeTab ? 'active' : ''}" data-tab="${tab.id}">
-                        <strong>${escapeHtml(tab.icon)}</strong>
+                        ${tabIconMarkup(tab)}
                         <span>${escapeHtml(tab.label)}</span>
                     </button>
                 `).join('')}
             </nav>
-            <div class="rail-footer">LX 音源仅用户导入</div>
+            <div class="rail-footer">音源与同步在「设置」</div>
         `;
     }
 
     if (bottom) {
         bottom.innerHTML = tabs.map(tab => `
             <button type="button" class="bottom-tab ${tab.id === state.activeTab ? 'active' : ''}" data-tab="${tab.id}">
-                <strong>${escapeHtml(tab.icon)}</strong>
+                ${tabIconMarkup(tab)}
                 <span>${escapeHtml(tab.label)}</span>
             </button>
         `).join('');
     }
+}
+
+function showSubnavPanel(rootSelector, panelAttr, activeKey) {
+    const root = document.querySelector(rootSelector);
+    if (!root) return;
+    root.querySelectorAll(`[${panelAttr}]`).forEach(panel => {
+        const key = panel.getAttribute(panelAttr);
+        const on = key === activeKey;
+        panel.hidden = !on;
+        panel.classList.toggle('active', on);
+    });
+}
+
+function setDiscoverSection(sectionId) {
+    const next = sectionId === 'rankings' ? 'rankings' : 'songlists';
+    document.querySelectorAll('[data-discover-section]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.discoverSection === next);
+    });
+    showSubnavPanel('#tab-discover', 'data-discover-panel', next);
+}
+
+function setSettingsSection(sectionId) {
+    const allowed = new Set(['sync', 'sources', 'automation', 'ai', 'logs']);
+    const next = allowed.has(sectionId) ? sectionId : 'sync';
+    document.querySelectorAll('[data-settings-section]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.settingsSection === next);
+    });
+    showSubnavPanel('#tab-settings', 'data-settings-panel', next);
 }
 
 function renderActiveTab(tabId) {
@@ -73,12 +117,18 @@ function renderActiveTab(tabId) {
     });
 }
 
-function activateTab(tabId) {
+function activateTab(tabId, options = {}) {
     const next = tabs.some(tab => tab.id === tabId) ? tabId : 'search';
     if (state.activeTab !== next) {
         setState({ activeTab: next });
     }
     renderActiveTab(next);
+    if (next === 'discover' && options.discoverSection) {
+        setDiscoverSection(options.discoverSection);
+    }
+    if (next === 'settings' && options.settingsSection) {
+        setSettingsSection(options.settingsSection);
+    }
 }
 
 function bindNavigation() {
@@ -86,6 +136,18 @@ function bindNavigation() {
         const button = event.target.closest('[data-tab]');
         if (button) {
             activateTab(button.dataset.tab);
+            return;
+        }
+
+        const discoverBtn = event.target.closest('[data-discover-section]');
+        if (discoverBtn) {
+            setDiscoverSection(discoverBtn.dataset.discoverSection);
+            return;
+        }
+
+        const settingsBtn = event.target.closest('[data-settings-section]');
+        if (settingsBtn) {
+            setSettingsSection(settingsBtn.dataset.settingsSection);
             return;
         }
 
@@ -98,7 +160,7 @@ function bindNavigation() {
             return;
         }
         if (action.dataset.action === 'open-logs') {
-            activateTab('logs');
+            activateTab('settings', { settingsSection: 'logs' });
         }
     });
 }
@@ -170,6 +232,8 @@ async function runInitializers(mode = 'all') {
 async function boot() {
     renderNavigation();
     renderActiveTab(state.activeTab);
+    setDiscoverSection('songlists');
+    setSettingsSection('sync');
     if (!appBindingsBound) {
         bindNavigation();
         bindStateRenderers();

@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { asArray as sharedAsArray } from '../shared/arrays.js';
 import { boolValue, hasField, numberValue, setField, textValue } from '../shared/forms.js';
 import { $, $$, toast } from '../state.js';
+import { applyAiConfigToForm, updateAiAnalysisAccess } from './ai_config.js';
 
 let savedConversationMonitorEnabled = false;
 
@@ -133,6 +134,9 @@ export async function loadConfig() {
     }
     savedConversationMonitorEnabled = !!config.conversation_monitor_enabled;
     updateAllVoiceCommandAccess(savedConversationMonitorEnabled);
+    // AI 依赖语音口令；表单随 config 一并填充
+    updateAiAnalysisAccess(!!config.voice_command_enabled);
+    applyAiConfigToForm(config.ai_config || {});
 }
 
 export async function prepareConversationMonitorFromCheckbox(input) {
@@ -163,10 +167,24 @@ export async function prepareConversationMonitorFromCheckbox(input) {
 export async function saveConfig(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const result = await putOrPost('/miot/config', configFromForm(form));
+    const payload = configFromForm(form);
+    const result = await putOrPost('/miot/config', payload);
     if (hasField(form, 'conversation_monitor_enabled')) {
         savedConversationMonitorEnabled = boolValue(form, 'conversation_monitor_enabled');
         updateAllVoiceCommandAccess(savedConversationMonitorEnabled);
+    }
+    if (hasField(form, 'voice_command_enabled')) {
+        const voiceOn = boolValue(form, 'voice_command_enabled');
+        updateAiAnalysisAccess(voiceOn);
+        if (!voiceOn) {
+            // 关闭语音口令时同步关掉 AI，避免界面显示“已开启”但实际不会跑
+            try {
+                await putOrPost('/miot/config', { ai_config: { enabled: false } });
+                applyAiConfigToForm({ enabled: false });
+            } catch {
+                // ignore secondary failure
+            }
+        }
     }
     const savedMessage = hasField(form, 'conversation_monitor_enabled') && savedConversationMonitorEnabled
         ? '已保存，可启用语音口令'

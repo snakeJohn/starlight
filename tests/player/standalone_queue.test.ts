@@ -94,7 +94,10 @@ describe('PlaylistManager standalone queue', () => {
     await expect(manager.next()).resolves.toBe(true);
 
     expect(minaService.playURL).toHaveBeenCalledTimes(3);
-    expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/song.mp3');
+    expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/song.mp3', {
+      title: '单曲',
+      artist: '歌手',
+    });
     expect(manager.hasPlaylist()).toBe(true);
     expect(manager.getStatus()).toMatchObject({
       state: 'playing',
@@ -200,7 +203,10 @@ describe('PlaylistManager standalone queue', () => {
 
     expect(dynamicPlaylistLoader).toHaveBeenCalledWith(-100000);
     expect(dynamicSongResolver).toHaveBeenCalledWith(expect.objectContaining({ title: '为龙', artist: '河图' }));
-    expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/weilong.mp3');
+    expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/weilong.mp3', {
+      title: '为龙',
+      artist: '河图',
+    });
     expect(manager.getStatus()).toMatchObject({
       playlist_id: -100000,
       current_index: 0,
@@ -224,8 +230,14 @@ describe('PlaylistManager standalone queue', () => {
     await expect(manager.previous()).resolves.toBe(true);
 
     expect(songloft.playlists.getSongs).toHaveBeenCalledWith(301, { limit: 100000 });
-    expect(minaService.playURL).toHaveBeenNthCalledWith(1, 'acc-1', 'dev-1', 'https://audio.test/first.mp3');
-    expect(minaService.playURL).toHaveBeenNthCalledWith(2, 'acc-1', 'dev-1', 'https://audio.test/second.mp3');
+    expect(minaService.playURL).toHaveBeenNthCalledWith(1, 'acc-1', 'dev-1', 'https://audio.test/first.mp3', {
+      title: '第一首',
+      artist: '歌手',
+    });
+    expect(minaService.playURL).toHaveBeenNthCalledWith(2, 'acc-1', 'dev-1', 'https://audio.test/second.mp3', {
+      title: '第二首',
+      artist: '歌手',
+    });
     expect(manager.getStatus()).toMatchObject({
       playlist_id: 301,
       current_index: 0,
@@ -244,7 +256,10 @@ describe('PlaylistManager standalone queue', () => {
     await expect(manager.play(-100000, 0, 'order')).resolves.toBe(true);
 
     expect(dynamicSongResolver).toHaveBeenCalledTimes(2);
-    expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/working.mp3');
+    expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/working.mp3', {
+      title: '可播歌曲',
+      artist: '歌手',
+    });
     expect(manager.getStatus()).toMatchObject({
       current_index: 1,
       current_song: expect.objectContaining({ title: '可播歌曲' }),

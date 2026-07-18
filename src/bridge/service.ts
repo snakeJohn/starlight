@@ -3,7 +3,7 @@
 import { StarlightError } from '../system/errors';
 import { PlatformRegistry } from '../music/platforms/registry';
 import { RuntimeManager } from '../music/runtime_manager';
-import type { SearchResultSong } from '../music/types';
+import type { MusicQuality, SearchResultSong } from '../music/types';
 import { resolveMusicLyric, type MusicLyricResult } from '../music/platforms/lyrics';
 import { toRemoteSong, type RemoteSongPayload } from './mapper';
 import { MinaService } from '../service/service';
@@ -14,6 +14,21 @@ import { normalizeHostBaseUrl } from '../utils/http';
 const STARLIGHT_PLUGIN_ENTRY_PATH = 'starlight';
 const EXISTING_REMOTE_SONG_LOOKUP_LIMIT = 20;
 
+/** Highest → lowest playback quality ladder (channel-agnostic). */
+export const PLAYBACK_QUALITY_LADDER: readonly MusicQuality[] = [
+  'flac24bit',
+  'flac',
+  '320k',
+  '128k',
+];
+
+const QUALITY_RANK: Record<string, number> = {
+  flac24bit: 4,
+  flac: 3,
+  '320k': 2,
+  '128k': 1,
+};
+
 export class BridgeService {
   constructor(
     private readonly platforms: PlatformRegistry,
@@ -22,29 +37,50 @@ export class BridgeService {
     private readonly playlistManagerMap?: PlaylistManagerMap,
   ) {}
 
+  /**
+   * Resolve a playable URL, trying highest quality first across the ladder
+   * (does not lock to the song's declared quality).
+   */
   async previewUrl(song: SearchResultSong): Promise<string> {
-    const url = await this.runtimes.getMusicUrl(
-      song.source_data.platform,
-      song.source_data.quality,
-      song.source_data.songInfo,
-      { operation: 'playback', title: song.title, artist: song.artist },
-    );
-    if (!url) {
-      const attempt = typeof this.runtimes.getLastMusicUrlAttempt === 'function'
-        ? this.runtimes.getLastMusicUrlAttempt()
-        : { attemptedSources: 0, lastFailure: null };
-      throw new StarlightError(
-        'PLAY_URL_RESOLVE_FAILED',
-        playUrlResolveFailureMessage(attempt.attemptedSources, attempt.lastFailure),
-        true,
-        {
-          attempts: attempt.attemptedSources,
-          lastFailure: attempt.lastFailure || '未找到可用播放音源',
-        },
+    const resolved = await this.resolvePlayback(song);
+    return resolved.url;
+  }
+
+  /**
+   * Resolve playback URL + the quality that actually worked.
+   * Tries flac24bit → flac → 320k → 128k for the song's platform.
+   */
+  async resolvePlayback(song: SearchResultSong): Promise<{ url: string; quality: MusicQuality }> {
+    const options = { operation: 'playback' as const, title: song.title, artist: song.artist };
+    let lastAttempt: { attemptedSources: number; lastFailure: string | null } = {
+      attemptedSources: 0,
+      lastFailure: null,
+    };
+
+    for (const quality of qualitiesToTry(song)) {
+      const url = await this.runtimes.getMusicUrl(
+        song.source_data.platform,
+        quality,
+        song.source_data.songInfo,
+        options,
       );
+      if (typeof this.runtimes.getLastMusicUrlAttempt === 'function') {
+        lastAttempt = this.runtimes.getLastMusicUrlAttempt();
+      }
+      if (url) {
+        return { url, quality };
+      }
     }
 
-    return url;
+    throw new StarlightError(
+      'PLAY_URL_RESOLVE_FAILED',
+      playUrlResolveFailureMessage(lastAttempt.attemptedSources, lastAttempt.lastFailure),
+      true,
+      {
+        attempts: lastAttempt.attemptedSources,
+        lastFailure: lastAttempt.lastFailure || '未找到可用播放音源',
+      },
+    );
   }
 
   async importSongs(songs: SearchResultSong[]): Promise<{ total: number; payloads: RemoteSongPayload[]; songs: SongloftRemoteSong[] }> {
@@ -53,9 +89,12 @@ export class BridgeService {
     }
 
     const payloads: RemoteSongPayload[] = [];
+    const acceptedSongs: SearchResultSong[] = [];
     for (const song of songs) {
-      const url = await this.previewUrl(song);
-      payloads.push(toImportRemoteSong(song, url));
+      const playback = await this.resolvePlayback(song);
+      const enriched = withPlaybackQuality(song, playback.quality);
+      payloads.push(toImportRemoteSong(enriched, playback.url));
+      acceptedSongs.push(enriched);
     }
 
     const token = await songloft.plugin.getToken();
@@ -69,7 +108,7 @@ export class BridgeService {
 
       importedSongs = [];
       for (const [index, payload] of payloads.entries()) {
-        const sourceSong = songs[index];
+        const sourceSong = acceptedSongs[index];
         const single = await postRemoteSongs(host, token, [payload]);
         if (!single.ok && !isDuplicateRemoteSongError(single.body)) {
           throw remoteImportError(single.status, single.body);
@@ -83,7 +122,7 @@ export class BridgeService {
         }
       }
     } else {
-      startImportedSongLyricSync(host, token, songs, importedSongs);
+      startImportedSongLyricSync(host, token, acceptedSongs, importedSongs);
     }
 
     return { total: payloads.length, payloads, songs: importedSongs };
@@ -105,9 +144,10 @@ export class BridgeService {
     const errors: Array<{ title: string; message: string }> = [];
     for (const song of songs) {
       try {
-        const url = await this.previewUrl(song);
-        payloads.push(toImportRemoteSong(song, url));
-        acceptedSongs.push(song);
+        const playback = await this.resolvePlayback(song);
+        const enriched = withPlaybackQuality(song, playback.quality);
+        payloads.push(toImportRemoteSong(enriched, playback.url));
+        acceptedSongs.push(enriched);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         errors.push({ title: song.title, message });
@@ -235,6 +275,10 @@ export class BridgeService {
     return { url };
   }
 
+  /**
+   * Search all enabled platforms by title/artist and return the playable hit
+   * with the highest available quality (not locked to any single source).
+   */
   async resolveSearchSong(title: string, artist = ''): Promise<SearchResultSong | null> {
     const resolved = await this.findPlayableSearchSong(title, artist);
     return resolved?.song ?? null;
@@ -266,12 +310,31 @@ export class BridgeService {
     return null;
   }
 
-  private async findPlayableSearchSong(title: string, artist: string): Promise<{ song: SearchResultSong; url: string } | null> {
+  private async findPlayableSearchSong(
+    title: string,
+    artist: string,
+  ): Promise<{ song: SearchResultSong; url: string; quality: MusicQuality; matchScore: number } | null> {
+    const candidates: Array<{
+      song: SearchResultSong;
+      url: string;
+      quality: MusicQuality;
+      matchScore: number;
+    }> = [];
+
     for await (const resolved of this.iterPlayableSearchCandidates(title, artist)) {
-      return resolved;
+      candidates.push(resolved);
     }
 
-    return null;
+    if (!candidates.length) return null;
+
+    // Prefer highest quality channel, then better title/artist match.
+    candidates.sort((a, b) => {
+      const qualityDiff = qualityRank(b.quality) - qualityRank(a.quality);
+      if (qualityDiff !== 0) return qualityDiff;
+      return b.matchScore - a.matchScore;
+    });
+
+    return candidates[0];
   }
 
   private async tryPlayResolvedCandidatesOnSpeaker(
@@ -364,7 +427,11 @@ export class BridgeService {
     artist: string,
     attemptedSources?: Set<string>,
     failures?: string[],
-  ): AsyncGenerator<{ song: SearchResultSong; url: string }, void, void> {
+  ): AsyncGenerator<
+    { song: SearchResultSong; url: string; quality: MusicQuality; matchScore: number },
+    void,
+    void
+  > {
     const keyword = [title, artist].map((item) => item.trim()).filter(Boolean).join(' ');
     if (!keyword) {
       return;
@@ -382,23 +449,60 @@ export class BridgeService {
         const candidates = (result.list ?? [])
           .map((song) => ({ song, score: scoreResolvedCandidate(title, artist, song) }))
           .filter((item) => item.score > 0)
-          .sort((a, b) => b.score - a.score);
+          .sort((a, b) => b.score - a.score)
+          // Cap per-platform probes so multi-source highest-quality pick stays responsive.
+          .slice(0, 3);
 
         for (const candidate of candidates) {
           try {
-            const url = await this.previewUrl(candidate.song);
-            yield { song: candidate.song, url };
+            const playback = await this.resolvePlayback(candidate.song);
+            const song = withPlaybackQuality(candidate.song, playback.quality);
+            yield {
+              song,
+              url: playback.url,
+              quality: playback.quality,
+              matchScore: candidate.score,
+            };
           } catch (error) {
             failures?.push(sanitizeProviderError(error));
-            songloft.log.warn(`[BridgeService] Resolved search hit is not playable on ${platform.id}: ${sanitizeProviderError(error)}`);
+            songloft.log.warn(
+              `[BridgeService] Resolved search hit is not playable on ${platform.id}: ${sanitizeProviderError(error)}`,
+            );
           }
         }
       } catch (error) {
         failures?.push(sanitizeProviderError(error));
-        songloft.log.warn(`[BridgeService] Resolve search provider ${platform.id} failed: ${sanitizeProviderError(error)}`);
+        songloft.log.warn(
+          `[BridgeService] Resolve search provider ${platform.id} failed: ${sanitizeProviderError(error)}`,
+        );
       }
     }
   }
+}
+
+function qualityRank(quality: string): number {
+  return QUALITY_RANK[String(quality || '').toLowerCase()] || 0;
+}
+
+/**
+ * Always probe highest → lowest quality, regardless of what the search hit declared.
+ * A source may advertise 320k while still serving flac; multi-source resolve then
+ * picks the channel that actually delivered the best playable URL.
+ */
+function qualitiesToTry(_song: SearchResultSong): MusicQuality[] {
+  return [...PLAYBACK_QUALITY_LADDER];
+}
+
+function withPlaybackQuality(song: SearchResultSong, quality: MusicQuality): SearchResultSong {
+  if (song.source_data.quality === quality) return song;
+  return {
+    ...song,
+    source_data: {
+      ...song.source_data,
+      quality,
+      songInfo: { ...song.source_data.songInfo },
+    },
+  };
 }
 
 function toPlayerSong(song: SearchResultSong, url: string): PlayerSong {

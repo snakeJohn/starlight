@@ -10,6 +10,11 @@ import {
     updateVoiceCommandAccess,
 } from './automation_modules/config.js';
 import {
+    bindAiConfig,
+    formatAiTestResult,
+    loadAiConfig,
+} from './automation_modules/ai_config.js';
+import {
     bindVoiceCommandEditor,
     loadVoiceCommands,
     renderVoiceCommandRow,
@@ -26,11 +31,13 @@ export {
     updateVoiceCommandAccess,
 } from './automation_modules/config.js';
 export { renderVoiceCommandRow, voiceCommandFromEditorData } from './automation_modules/voice_commands.js';
+export { formatAiTestResult, aiConfigFromForm } from './automation_modules/ai_config.js';
 
 let automationBindingsBound = false;
 
 function bindAutomation() {
     bindVoiceCommandEditor();
+    bindAiConfig();
     bindIndexingControls();
     bindScheduleControls();
     $('[data-action="refresh-automation"]')?.addEventListener('click', () => loadAutomation().catch(error => toast(error.message, 'error')));
@@ -59,6 +66,7 @@ async function loadAutomation() {
         loadIndexing(),
         loadSchedules(),
         loadConfig(),
+        loadAiConfig(),
     ]);
 }
 

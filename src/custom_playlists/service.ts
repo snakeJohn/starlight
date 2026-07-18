@@ -1,7 +1,8 @@
-import type { BridgeService } from '../bridge/service';
+import type { BridgeService, SongloftRemoteSong } from '../bridge/service';
 import { StarlightError } from '../system/errors';
 import type { MusicPlatform, SearchResultSong } from '../music/types';
 import type { PlayerSong } from '../player/manager';
+import { normalizeHostBaseUrl } from '../utils/http';
 import { CustomPlaylistStore } from './store';
 import type { CustomPlaylist, CustomPlaylistSong, ImportNetworkPlaylistInput, SongListDetail } from './types';
 import { customPlaylistIndexFromSyntheticId, syntheticSongId } from './synthetic';
@@ -44,6 +45,22 @@ function stableSongId(song: SearchResultSong): string {
 
 function hasSourceData(song: SearchResultSong | CustomPlaylistSong): song is SearchResultSong {
   return Boolean((song as SearchResultSong).source_data?.platform && (song as SearchResultSong).source_data?.songInfo);
+}
+
+/**
+ * Prefer online-resolved fields (cover, album, duration, source) while keeping
+ * a non-empty cover/album hint from the LX snapshot when the network hit is blank.
+ */
+function mergeResolvedWithHint(
+  resolved: SearchResultSong,
+  hint: SearchResultSong | CustomPlaylistSong,
+): SearchResultSong {
+  return {
+    ...resolved,
+    cover_url: resolved.cover_url || hint.cover_url || '',
+    album: resolved.album || hint.album || '',
+    duration: resolved.duration > 0 ? resolved.duration : hint.duration || 0,
+  };
 }
 
 function toPlaylistSong(song: SearchResultSong): CustomPlaylistSong {
@@ -132,25 +149,41 @@ export class CustomPlaylistService {
       throw new StarlightError('BAD_REQUEST', 'playlist name is required');
     }
 
-    const playlists = await this.store.loadAll();
-    const existing = playlists.find((playlist) => playlist.name.trim() === normalized);
+    // Fast path: same-name playlist already exists — never create a host orphan.
+    const existing = (await this.store.loadAll()).find((playlist) => playlist.name.trim() === normalized);
     if (existing) {
       return existing;
     }
 
-    const timestamp = nowIso();
-    const playlist: CustomPlaylist = {
-      id: createId(),
-      name: normalized,
-      cover_url: '',
-      imported_at: timestamp,
-      updated_at: timestamp,
-      songs: [],
-    };
-    playlist.native_playlist_id = await this.tryNativeCreate(playlist.name);
-    playlists.push(playlist);
-    await this.store.saveAll(playlists);
-    return playlist;
+    // Host I/O only when we still believe a new row is needed.
+    const nativeId = await this.tryNativeCreate(normalized);
+    let created: CustomPlaylist | null = null;
+    await this.store.mutate(async (playlists) => {
+      const raced = playlists.find((playlist) => playlist.name.trim() === normalized);
+      if (raced) {
+        // Concurrent create won; attach native id only if the winner still lacks one.
+        if (raced.native_playlist_id === undefined && nativeId !== undefined) {
+          const linked: CustomPlaylist = { ...raced, native_playlist_id: nativeId };
+          created = linked;
+          return playlists.map((playlist) => (playlist.id === raced.id ? linked : playlist));
+        }
+        created = raced;
+        return playlists;
+      }
+      const timestamp = nowIso();
+      const playlist: CustomPlaylist = {
+        id: createId(),
+        name: normalized,
+        cover_url: '',
+        imported_at: timestamp,
+        updated_at: timestamp,
+        songs: [],
+        ...(nativeId !== undefined ? { native_playlist_id: nativeId } : {}),
+      };
+      created = playlist;
+      return [...playlists, playlist];
+    });
+    return created!;
   }
 
   async addSong(playlistName: string, song: SearchResultSong | CustomPlaylistSong): Promise<CustomPlaylist> {
@@ -167,7 +200,8 @@ export class CustomPlaylistService {
       updated_at: nowIso(),
       songs: [...playlist.songs, toPlaylistSong(resolved)],
     };
-    await this.tryNativeAddSongs(updated, imported.payloads ?? []);
+    // Songloft playlists accept library song ids, not remote import payloads.
+    await this.tryNativeAddSongIds(updated.native_playlist_id, remoteSongIds(imported.songs ?? []));
     await this.replace(updated);
     return updated;
   }
@@ -178,19 +212,20 @@ export class CustomPlaylistService {
       throw new StarlightError('BAD_REQUEST', 'playlist name is required');
     }
 
-    const playlists = await this.store.loadAll();
-    const playlist = playlists.find((item) => item.id === id);
-    if (!playlist) {
-      throw new StarlightError('BAD_REQUEST', 'playlist not found');
-    }
-    const updated = { ...playlist, name: normalized, updated_at: nowIso() };
-    await this.store.saveAll(playlists.map((item) => (item.id === id ? updated : item)));
-    return updated;
+    let updated: CustomPlaylist | null = null;
+    await this.store.mutate((playlists) => {
+      const playlist = playlists.find((item) => item.id === id);
+      if (!playlist) {
+        throw new StarlightError('BAD_REQUEST', 'playlist not found');
+      }
+      updated = { ...playlist, name: normalized, updated_at: nowIso() };
+      return playlists.map((item) => (item.id === id ? updated! : item));
+    });
+    return updated!;
   }
 
   async delete(id: string): Promise<{ id: string }> {
-    const playlists = await this.store.loadAll();
-    await this.store.saveAll(playlists.filter((playlist) => playlist.id !== id));
+    await this.store.mutate((playlists) => playlists.filter((playlist) => playlist.id !== id));
     return { id };
   }
 
@@ -200,39 +235,43 @@ export class CustomPlaylistService {
       throw new StarlightError('BAD_REQUEST', 'sourceListId is required');
     }
 
-    const playlists = await this.store.loadAll();
-    const existing = playlists.find((playlist) => playlist.source === input.source && playlist.sourceListId === sourceListId);
-    if (existing) {
-      const { native_playlist_id: _nativePlaylistId, ...existingWithoutNative } = existing;
-      const refreshed: CustomPlaylist = {
-        ...existingWithoutNative,
-        name: input.detail.name || existing.name,
-        cover_url: detailCover(input.detail) || existing.cover_url,
+    let result: CustomPlaylist | null = null;
+    await this.store.mutate((playlists) => {
+      const existing = playlists.find(
+        (playlist) => playlist.source === input.source && playlist.sourceListId === sourceListId,
+      );
+      if (existing) {
+        const { native_playlist_id: _nativePlaylistId, ...existingWithoutNative } = existing;
+        const refreshed: CustomPlaylist = {
+          ...existingWithoutNative,
+          name: input.detail.name || existing.name,
+          cover_url: detailCover(input.detail) || existing.cover_url,
+          source: input.source,
+          source_name: SOURCE_NAMES[input.source] || input.source,
+          sourceListId,
+          updated_at: nowIso(),
+          songs: input.detail.songs.map(toPortablePlaylistSong),
+        };
+        result = refreshed;
+        return playlists.map((playlist) => (playlist.id === existing.id ? refreshed : playlist));
+      }
+
+      const timestamp = nowIso();
+      const playlist: CustomPlaylist = {
+        id: createId('imported'),
+        name: input.detail.name || sourceListId,
+        cover_url: detailCover(input.detail),
         source: input.source,
         source_name: SOURCE_NAMES[input.source] || input.source,
         sourceListId,
-        updated_at: nowIso(),
+        imported_at: timestamp,
+        updated_at: timestamp,
         songs: input.detail.songs.map(toPortablePlaylistSong),
       };
-      await this.store.saveAll(playlists.map((playlist) => (playlist.id === existing.id ? refreshed : playlist)));
-      return refreshed;
-    }
-
-    const timestamp = nowIso();
-    const playlist: CustomPlaylist = {
-      id: createId('imported'),
-      name: input.detail.name || sourceListId,
-      cover_url: detailCover(input.detail),
-      source: input.source,
-      source_name: SOURCE_NAMES[input.source] || input.source,
-      sourceListId,
-      imported_at: timestamp,
-      updated_at: timestamp,
-      songs: input.detail.songs.map(toPortablePlaylistSong),
-    };
-    playlists.push(playlist);
-    await this.store.saveAll(playlists);
-    return playlist;
+      result = playlist;
+      return [...playlists, playlist];
+    });
+    return result!;
   }
 
   async importSongloftPlaylistSnapshot(input: {
@@ -245,27 +284,31 @@ export class CustomPlaylistService {
       throw new StarlightError('BAD_REQUEST', 'playlist name is required');
     }
     const nativePlaylistId = input.nativePlaylistId;
-    const playlists = await this.store.loadAll();
-    const existing = playlists.find((playlist) => String(playlist.native_playlist_id) === String(nativePlaylistId));
-    const timestamp = nowIso();
     const songs = input.songs.map(toNativePlaylistSong);
-    const playlist: CustomPlaylist = {
-      ...(existing ?? {
-        id: createId('songloft'),
-        imported_at: timestamp,
-      }),
-      name: normalizedName,
-      cover_url: songs[0]?.cover_url || existing?.cover_url || '',
-      native_playlist_id: nativePlaylistId,
-      native_playlist_name: normalizedName,
-      updated_at: timestamp,
-      songs,
-    };
-
-    await this.store.saveAll(existing
-      ? playlists.map((item) => (item.id === existing.id ? playlist : item))
-      : [...playlists, playlist]);
-    return playlist;
+    let result: CustomPlaylist | null = null;
+    await this.store.mutate((playlists) => {
+      const existing = playlists.find(
+        (playlist) => String(playlist.native_playlist_id) === String(nativePlaylistId),
+      );
+      const timestamp = nowIso();
+      const playlist: CustomPlaylist = {
+        ...(existing ?? {
+          id: createId('songloft'),
+          imported_at: timestamp,
+        }),
+        name: normalizedName,
+        cover_url: songs[0]?.cover_url || existing?.cover_url || '',
+        native_playlist_id: nativePlaylistId,
+        native_playlist_name: normalizedName,
+        updated_at: timestamp,
+        songs,
+      };
+      result = playlist;
+      return existing
+        ? playlists.map((item) => (item.id === existing.id ? playlist : item))
+        : [...playlists, playlist];
+    });
+    return result!;
   }
 
   async refreshNetworkPlaylist(
@@ -278,17 +321,25 @@ export class CustomPlaylistService {
       throw new StarlightError('BAD_REQUEST', 'imported playlist not found');
     }
 
+    // Network fetch outside the store lock.
     const detail = await detailLoader(existing.source, existing.sourceListId);
-    const { native_playlist_id: _nativePlaylistId, ...existingWithoutNative } = existing;
-    const refreshed: CustomPlaylist = {
-      ...existingWithoutNative,
-      name: detail.name || existing.name,
-      cover_url: detailCover(detail) || existing.cover_url,
-      updated_at: nowIso(),
-      songs: detail.songs.map(toPortablePlaylistSong),
-    };
-    await this.store.saveAll(playlists.map((playlist) => (playlist.id === id ? refreshed : playlist)));
-    return refreshed;
+    let refreshed: CustomPlaylist | null = null;
+    await this.store.mutate((current) => {
+      const still = current.find((playlist) => playlist.id === id);
+      if (!still || !still.source || !still.sourceListId) {
+        throw new StarlightError('BAD_REQUEST', 'imported playlist not found');
+      }
+      const { native_playlist_id: _nativePlaylistId, ...existingWithoutNative } = still;
+      refreshed = {
+        ...existingWithoutNative,
+        name: detail.name || still.name,
+        cover_url: detailCover(detail) || still.cover_url,
+        updated_at: nowIso(),
+        songs: detail.songs.map(toPortablePlaylistSong),
+      };
+      return current.map((playlist) => (playlist.id === id ? refreshed! : playlist));
+    });
+    return refreshed!;
   }
 
   async loadDynamicPlayerSongs(playlistId: number): Promise<PlayerSong[] | null> {
@@ -298,7 +349,9 @@ export class CustomPlaylistService {
       return null;
     }
     const playlist = playlists[index];
-    if (playlist.native_playlist_id !== undefined) {
+    // Only numeric Songloft native playlist ids skip dynamic local load.
+    // String ids (e.g. legacy lx:*) are treated as local custom playlists.
+    if (typeof playlist.native_playlist_id === 'number') {
       return null;
     }
     return playlist.songs.map((song, songIndex) => ({
@@ -347,39 +400,171 @@ export class CustomPlaylistService {
       }
     }
 
+    // Import every resolved song into the Songloft song library first
+    // (URL + cover from multi-source resolve; lyrics filled asynchronously by bridge).
     const imported = await this.bridge.importSongsBestEffort(resolvedSongs);
-    const nativePlaylistId = playlist.native_playlist_id ?? await this.tryNativeCreate(playlist.name);
-    const updated: CustomPlaylist = {
-      ...playlist,
-      ...(nativePlaylistId !== undefined ? { native_playlist_id: nativePlaylistId } : {}),
-      updated_at: nowIso(),
-    };
-    await this.tryNativeAddSongs(updated, imported.payloads ?? []);
-    await this.replace(updated);
+    // Reuse linked Songloft playlist, else match by name, else create with the same name.
+    // Prefer live store name/link fields (playlist may have been updated by LX sync mid-import).
+    // Validate preferred native id still exists — user may have deleted the Songloft playlist.
+    const live = (await this.store.loadAll()).find((item) => item.id === id) ?? playlist;
+    const nativePlaylistId = await this.resolveNativePlaylistId(
+      live.name || playlist.name,
+      live.native_playlist_id ?? playlist.native_playlist_id,
+    );
+
+    // Host playlist API expects Songloft library song ids (not remote payloads).
+    // This is the same contract as SongloftPlaylistService.addSongIds.
+    const songIds = remoteSongIds(imported.songs ?? []);
+    const missingIdCount = Math.max(0, imported.total - songIds.length);
+    if (missingIdCount > 0) {
+      errors.push({
+        title: 'Songloft 歌曲库',
+        message: `${missingIdCount} 首歌曲导入成功但未返回 Songloft song id，无法加入歌单`,
+      });
+    }
+    await this.tryNativeAddSongIds(nativePlaylistId, songIds);
+
+    // Patch Songloft link fields and refresh local song metadata from online resolve
+    // (cover_url / source_data) without clobbering concurrent LX song-list rewrites.
+    const patched = await this.patchPlaylistAfterImport(id, {
+      native_playlist_id: nativePlaylistId,
+      native_playlist_name: live.name || playlist.name,
+      resolvedSongs,
+    });
 
     return {
-      playlist: updated,
+      playlist: patched ?? {
+        ...live,
+        ...(nativePlaylistId !== undefined ? { native_playlist_id: nativePlaylistId } : {}),
+        native_playlist_name: live.name || playlist.name,
+        updated_at: nowIso(),
+      },
       total: imported.total,
-      skipped: errors.length + imported.skipped,
+      skipped: errors.length + imported.skipped + missingIdCount,
       errors: [...errors, ...imported.errors],
     };
   }
 
   private async replace(updated: CustomPlaylist): Promise<void> {
-    const playlists = await this.store.loadAll();
-    await this.store.saveAll(playlists.map((playlist) => (playlist.id === updated.id ? updated : playlist)));
+    await this.store.mutate((playlists) =>
+      playlists.map((playlist) => (playlist.id === updated.id ? updated : playlist)),
+    );
   }
 
+  /**
+   * Merge only Songloft link fields onto the current store row.
+   * Avoids clobbering songs/name updated by concurrent LX setLocalListData.
+   */
+  private async patchPlaylistLink(
+    id: string,
+    link: {
+      native_playlist_id?: string | number;
+      native_playlist_name?: string;
+    },
+  ): Promise<CustomPlaylist | undefined> {
+    return this.patchPlaylistAfterImport(id, link);
+  }
+
+  /**
+   * Patch link fields and optionally enrich matching songs with online metadata
+   * (cover / source_data). Matching is by title+artist so concurrent LX list
+   * rewrites that keep the same tracks still get covers; new tracks are left alone.
+   */
+  private async patchPlaylistAfterImport(
+    id: string,
+    link: {
+      native_playlist_id?: string | number;
+      native_playlist_name?: string;
+      resolvedSongs?: SearchResultSong[];
+    },
+  ): Promise<CustomPlaylist | undefined> {
+    let result: CustomPlaylist | undefined;
+    const resolvedByKey = new Map<string, SearchResultSong>();
+    for (const song of link.resolvedSongs || []) {
+      resolvedByKey.set(stableSongTextKey(song), song);
+    }
+
+    await this.store.mutate((playlists) =>
+      playlists.map((playlist) => {
+        if (playlist.id !== id) return playlist;
+
+        const songs =
+          resolvedByKey.size === 0
+            ? playlist.songs
+            : playlist.songs.map((existing) => {
+                const hit =
+                  resolvedByKey.get(stableSongTextKey(existing))
+                  || [...resolvedByKey.values()].find(
+                    (r) =>
+                      normalizeKey(r.title) === normalizeKey(existing.title)
+                      && normalizeKey(r.artist) === normalizeKey(existing.artist),
+                  );
+                if (!hit) return existing;
+                const mapped = toPlaylistSong(hit);
+                return {
+                  ...existing,
+                  cover_url: mapped.cover_url || existing.cover_url,
+                  album: mapped.album || existing.album,
+                  duration: mapped.duration || existing.duration,
+                  source_name: mapped.source_name || existing.source_name,
+                  source_data: mapped.source_data || existing.source_data,
+                  // Keep existing stable_key if present so UI keys stay stable.
+                  stable_key: existing.stable_key || mapped.stable_key,
+                };
+              });
+
+        const coverFromSongs = songs.find((s) => s.cover_url)?.cover_url || '';
+        result = {
+          ...playlist,
+          ...(link.native_playlist_id !== undefined
+            ? { native_playlist_id: link.native_playlist_id }
+            : {}),
+          ...(link.native_playlist_name !== undefined
+            ? { native_playlist_name: link.native_playlist_name }
+            : {}),
+          cover_url: playlist.cover_url || coverFromSongs,
+          songs,
+          updated_at: nowIso(),
+        };
+        return result;
+      }),
+    );
+    return result;
+  }
+
+  /**
+   * Always re-resolve via Starlight multi-source online search (title + artist).
+   * Do not trust LX / portable source_data for playback — cover, lyrics and URL
+   * come from whichever channel can provide the highest playable quality.
+   *
+   * Falls back to the existing source_data only when online search finds nothing
+   * (so offline/local ids still have a chance via previewUrl quality ladder).
+   */
   private async resolveSongForOwnPlaylist(song: SearchResultSong | CustomPlaylistSong): Promise<SearchResultSong> {
+    const title = String(song.title || '').trim();
+    const artist = String(song.artist || '').trim();
+    if (title) {
+      try {
+        const resolved = await this.bridge.resolveSearchSong(title, artist);
+        if (resolved) {
+          return mergeResolvedWithHint(resolved, song);
+        }
+      } catch (error) {
+        songloft.log.warn(
+          `[CustomPlaylistService] Online resolve failed for "${title}": ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     if (hasSourceData(song)) {
       return song;
     }
 
-    const resolved = await this.bridge.resolveSearchSong(song.title, song.artist);
-    if (!resolved) {
-      throw new StarlightError('PLAY_URL_RESOLVE_FAILED', `未找到可用音源：${song.title}${song.artist ? ` - ${song.artist}` : ''}`, true);
-    }
-    return resolved;
+    throw new StarlightError(
+      'PLAY_URL_RESOLVE_FAILED',
+      `未找到可用音源：${title}${artist ? ` - ${artist}` : ''}`,
+      true,
+    );
   }
 
   private async tryNativeCreate(name: string): Promise<string | number | undefined> {
@@ -395,17 +580,184 @@ export class CustomPlaylistService {
     }
   }
 
-  private async tryNativeAddSongs(playlist: CustomPlaylist, payloads: unknown[]): Promise<void> {
-    const addSongs = this.nativePlaylists.addSongs;
-    if (typeof addSongs !== 'function' || playlist.native_playlist_id === undefined) {
-      return;
+  /**
+   * Resolve a live Songloft playlist id for linking:
+   * 1) preferred id if it still exists on the host
+   * 2) existing playlist with the same name
+   * 3) create a new playlist
+   *
+   * Step 1 prevents silent no-ops after the user deletes a Songloft playlist while
+   * Starlight still holds a stale native_playlist_id.
+   */
+  private async resolveNativePlaylistId(
+    name: string,
+    preferredId?: string | number,
+  ): Promise<string | number | undefined> {
+    const canList = typeof this.nativePlaylists.list === 'function';
+    // Without list API we cannot detect deletions — keep preferred id if any.
+    if (!canList) {
+      if (preferredId !== undefined && preferredId !== null && preferredId !== '') {
+        return preferredId;
+      }
+      return this.tryNativeCreate(name);
     }
+
+    const items = await this.listNativePlaylists();
+    if (preferredId !== undefined && preferredId !== null && preferredId !== '') {
+      const stillThere = items.some((item) => String(item.id) === String(preferredId));
+      if (stillThere) return preferredId;
+      songloft.log.info(
+        `[CustomPlaylistService] Stale native_playlist_id=${preferredId} for "${name}"; will re-link`,
+      );
+    }
+    const byName = this.findNativePlaylistIdInItems(items, name);
+    if (byName !== undefined) return byName;
+    return this.tryNativeCreate(name);
+  }
+
+  private async listNativePlaylists(): Promise<Array<{ id: string | number; name: string }>> {
+    const list = this.nativePlaylists.list;
+    if (typeof list !== 'function') return [];
     try {
-      await addSongs.call(this.nativePlaylists, playlist.native_playlist_id, payloads);
+      const raw = await list.call(this.nativePlaylists);
+      const items = Array.isArray(raw)
+        ? raw
+        : raw && typeof raw === 'object'
+          ? Array.isArray((raw as { items?: unknown }).items)
+            ? (raw as { items: unknown[] }).items
+            : Array.isArray((raw as { playlists?: unknown }).playlists)
+              ? (raw as { playlists: unknown[] }).playlists
+              : []
+          : [];
+      const result: Array<{ id: string | number; name: string }> = [];
+      for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
+        const record = item as Record<string, unknown>;
+        const id = nativeId(record);
+        if (id === undefined) continue;
+        const itemName = stringField(record.name) || stringField(record.title);
+        result.push({ id, name: itemName });
+      }
+      return result;
     } catch (error) {
-      songloft.log.warn(`[CustomPlaylistService] Native playlist addSongs failed: ${error instanceof Error ? error.message : String(error)}`);
+      songloft.log.warn(
+        `[CustomPlaylistService] Native playlist list failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return [];
     }
   }
+
+  private findNativePlaylistIdInItems(
+    items: Array<{ id: string | number; name: string }>,
+    name: string,
+  ): string | number | undefined {
+    const normalized = normalizeName(name);
+    if (!normalized) return undefined;
+    for (const item of items) {
+      if (normalizeName(item.name) === normalized) return item.id;
+    }
+    return undefined;
+  }
+
+  /** Prefer an existing Songloft playlist with the same name to avoid duplicates on re-sync. */
+  private async findNativePlaylistIdByName(name: string): Promise<string | number | undefined> {
+    const items = await this.listNativePlaylists();
+    return this.findNativePlaylistIdInItems(items, name);
+  }
+
+  /**
+   * Add library songs into a Songloft native playlist by numeric song id.
+   * Prefer the documented host REST API; fall back to SDK helpers that accept ids.
+   */
+  private async tryNativeAddSongIds(
+    nativePlaylistId: string | number | undefined,
+    songIds: number[],
+  ): Promise<void> {
+    if (nativePlaylistId === undefined || nativePlaylistId === null || nativePlaylistId === '') {
+      return;
+    }
+    const ids = uniquePositiveSongIds(songIds);
+    if (!ids.length) return;
+
+    const playlistId = typeof nativePlaylistId === 'number'
+      ? nativePlaylistId
+      : Number(String(nativePlaylistId).trim());
+    if (!Number.isInteger(playlistId) || playlistId <= 0) {
+      songloft.log.warn(
+        `[CustomPlaylistService] Invalid native playlist id for song add: ${String(nativePlaylistId)}`,
+      );
+      return;
+    }
+
+    // 1) Official host API — same as SongloftPlaylistService.addSongIds.
+    try {
+      await this.hostAddSongIds(playlistId, ids);
+      return;
+    } catch (error) {
+      songloft.log.warn(
+        `[CustomPlaylistService] Host playlist add songs failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    // 2) Append-only SDK addSongs (never setSongs — partial ids would wipe the playlist).
+    const addSongs = this.nativePlaylists.addSongs;
+    if (typeof addSongs === 'function') {
+      try {
+        await addSongs.call(this.nativePlaylists, playlistId, ids);
+        return;
+      } catch (error) {
+        // Some hosts expect { song_ids } instead of a bare id array.
+        try {
+          await addSongs.call(this.nativePlaylists, playlistId, { song_ids: ids });
+          return;
+        } catch (inner) {
+          songloft.log.warn(
+            `[CustomPlaylistService] Native playlist addSongs failed: ${error instanceof Error ? error.message : String(error)}; fallback: ${inner instanceof Error ? inner.message : String(inner)}`,
+          );
+        }
+      }
+    }
+  }
+
+  private async hostAddSongIds(playlistId: number, songIds: number[]): Promise<void> {
+    const host = normalizeHostBaseUrl(await songloft.plugin.getHostUrl());
+    const token = await songloft.plugin.getToken();
+    if (!host) {
+      throw new Error('Songloft host URL is empty');
+    }
+    const response = await fetch(`${host}/api/v1/playlists/${playlistId}/songs`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ song_ids: songIds }),
+    });
+    if (!response.ok) {
+      const text = typeof response.text === 'function'
+        ? (await response.text().catch(() => '')).trim().slice(0, 200)
+        : '';
+      throw new Error(`HTTP ${response.status}${text ? ` ${text}` : ''}`);
+    }
+  }
+}
+
+function remoteSongIds(songs: SongloftRemoteSong[]): number[] {
+  return uniquePositiveSongIds(songs.map((song) => song.id));
+}
+
+function uniquePositiveSongIds(values: unknown[]): number[] {
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const value of values) {
+    const id = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+    if (typeof id === 'number' && Number.isInteger(id) && id > 0 && !seen.has(id)) {
+      ids.push(id);
+      seen.add(id);
+    }
+  }
+  return ids;
 }
 
 export { SOURCE_NAMES as CUSTOM_PLAYLIST_SOURCE_NAMES };

@@ -96,9 +96,15 @@ export interface PluginConfig {
   external_search_timeout: number;     // 外部搜索超时（秒）
   extra_music_api_models?: string[];
   indicator_light_enabled?: boolean;
+  /** 触屏音箱默认封面/歌词 audioID（player_play_music） */
+  default_cover_id?: string;
+  /** 触屏音箱歌词模式：播放时搜索小米曲库匹配 audioID */
+  touchscreen_lyrics_enabled?: boolean;
   interrupt_tts_hint_enabled: boolean;
   interrupt_tts_hint_text: string;
   conversation_poll_interval: number;
+  /** 对话轮询调试日志开关 */
+  conversation_poll_debug?: boolean;
   smart_resume_timeout: number;
   max_song_index: number;
   ai_config: AIConfig;
@@ -156,6 +162,8 @@ export interface TaskParams {
   song_name?: string;      // 用于 play_playlist_from 指定起始歌曲
   play_mode?: string;
   volume?: number;
+  /** play_playlist 起始位置：beginning(默认) | random | resume */
+  start_position?: 'beginning' | 'random' | 'resume' | string;
 }
 
 /** 任务执行日志 */
