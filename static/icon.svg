@@ -1,18 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- 圆形浅色容器：对齐默认插件图标的圆底样式 -->
-  <circle cx="128" cy="128" r="128" fill="#E3EEFF"/>
-
-  <!-- 音箱主体：单色实心 -->
-  <rect x="84" y="60" width="88" height="136" rx="20" ry="20" fill="#3B6FE0"/>
-
-  <!-- 顶部指示灯：用容器色镂空 -->
-  <circle cx="128" cy="96" r="9" fill="#E3EEFF"/>
-
-  <!-- 扬声器外环：容器色镂空形成圆环 -->
-  <circle cx="128" cy="152" r="26" fill="#E3EEFF"/>
-  <!-- 扬声器中心实心 -->
-  <circle cx="128" cy="152" r="12" fill="#3B6FE0"/>
-  <!-- 扬声器中心高光点 -->
-  <circle cx="128" cy="152" r="4" fill="#E3EEFF"/>
+  <defs>
+    <linearGradient id="bg" x1="40" y1="20" x2="220" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#DCEBFF"/>
+      <stop offset="55%" stop-color="#E8F1FF"/>
+      <stop offset="100%" stop-color="#F4F8FF"/>
+    </linearGradient>
+    <linearGradient id="speaker" x1="90" y1="50" x2="170" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4B8DFF"/>
+      <stop offset="100%" stop-color="#0A84FF"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="0.35" cy="0.25" r="0.85">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="128" cy="128" r="128" fill="url(#bg)"/>
+  <circle cx="128" cy="128" r="128" fill="url(#glass)"/>
+  <rect x="84" y="58" width="88" height="140" rx="22" ry="22" fill="url(#speaker)"/>
+  <rect x="90" y="64" width="76" height="28" rx="12" fill="#ffffff" fill-opacity="0.18"/>
+  <circle cx="128" cy="96" r="9" fill="#F4F8FF"/>
+  <circle cx="128" cy="154" r="28" fill="#F4F8FF"/>
+  <circle cx="128" cy="154" r="13" fill="url(#speaker)"/>
+  <circle cx="128" cy="154" r="4.5" fill="#F4F8FF"/>
 </svg>
 

@@ -725,4 +725,28 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toMatch(/input,\s*select,\s*textarea\s*\{[^}]*border:\s*1px solid var\(--hairline\)/s);
     expect(stylesheet).toMatch(/input:focus,\s*select:focus,\s*textarea:focus\s*\{[^}]*box-shadow:\s*0 0 0 3px var\(--focus-ring\)/s);
   });
+
+  it('mounts a 洛雪同步 panel shell on the songlists tab for LX Sync wiring', () => {
+    const html = indexHtml();
+    const stylesheet = css();
+    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
+    const rankingsStart = html.indexOf('<section class="tab-panel" id="tab-rankings">');
+    const songlistsHtml = html.slice(songlistsStart, rankingsStart);
+
+    expect(songlistsHtml).toContain('data-role="lx-sync-panel"');
+    expect(songlistsHtml).toContain('data-role="lx-sync-base-url"');
+    expect(songlistsHtml).toContain('data-role="lx-sync-username"');
+    expect(songlistsHtml).toContain('data-role="lx-sync-password"');
+    expect(songlistsHtml).toContain('data-action="lx-sync-connect"');
+    expect(songlistsHtml).toContain('data-action="lx-sync-disconnect"');
+    expect(songlistsHtml).toContain('data-action="lx-sync-preview"');
+    expect(songlistsHtml).toContain('data-action="lx-sync-pull"');
+    expect(songlistsHtml).toContain('data-role="lx-sync-status"');
+    expect(songlistsHtml).toContain('data-role="lx-sync-preview-list"');
+    expect(songlistsHtml).toContain('洛雪同步');
+    expect(stylesheet).toContain('.lx-sync-panel');
+    expect(stylesheet).toContain('prefers-reduced-motion');
+    expect(stylesheet).toContain('--radius-lg');
+    expect(stylesheet).toContain('backdrop-filter');
+  });
 });

@@ -56,7 +56,7 @@ function setStatus(message, config = state.lxSyncConfig) {
 }
 
 function renderPreview(preview) {
-    const node = $('[data-role="lx-sync-preview"]');
+    const node = $('[data-role="lx-sync-preview-list"]') || $('[data-role="lx-sync-preview"]');
     if (!node) return;
     const playlists = asArray(preview?.playlists);
     if (!playlists.length) {
