@@ -336,6 +336,46 @@
                     <div class="list-stack tight" data-role="custom-playlist-list"></div>
                     <div data-role="custom-playlist-detail"></div>
                 </section>
+                <section class="surface-section" data-role="lx-sync-panel">
+                    <div class="section-bar">
+                        <h2>洛雪同步</h2>
+                        <span data-role="lx-sync-status">未连接</span>
+                    </div>
+                    <form class="control-grid compact" data-role="lx-sync-form">
+                        <label class="wide-field">
+                            <span>服务器地址</span>
+                            <input name="baseUrl" data-role="lx-sync-base-url" placeholder="http://192.168.1.10:9527" autocomplete="off">
+                        </label>
+                        <label>
+                            <span>用户名</span>
+                            <input name="username" data-role="lx-sync-username" placeholder="用户名" autocomplete="username">
+                        </label>
+                        <label>
+                            <span>密码</span>
+                            <input name="password" type="password" data-role="lx-sync-password" placeholder="仅用于登录，不保存" autocomplete="current-password">
+                        </label>
+                        <label>
+                            <span>冲突策略</span>
+                            <select name="conflict" data-role="lx-sync-conflict">
+                                <option value="replace">整单替换</option>
+                                <option value="merge">按歌曲合并</option>
+                            </select>
+                        </label>
+                        <label class="checkbox-field">
+                            <input type="checkbox" name="importDefaultList" data-role="lx-sync-import-default" checked>
+                            <span>导入默认列表</span>
+                        </label>
+                        <div class="row-actions">
+                            <button class="primary-button" type="button" data-action="lx-sync-connect">连接</button>
+                            <button class="ghost-button" type="button" data-action="lx-sync-disconnect">断开</button>
+                            <button class="ghost-button" type="button" data-action="lx-sync-preview">预览</button>
+                            <button class="primary-button" type="button" data-action="lx-sync-pull">同步到自建歌单</button>
+                            <button class="ghost-button" type="button" data-action="lx-sync-save-config">保存设置</button>
+                        </div>
+                    </form>
+                    <p class="field-help" data-role="lx-sync-message">连接自建 LX Sync Server 后可拉取歌单并导入「我的歌单」。</p>
+                    <div class="list-stack tight" data-role="lx-sync-preview"></div>
+                </section>
                 <section class="surface-section">
                     <div class="section-bar">
                         <h2>导入歌单</h2>

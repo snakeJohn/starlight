@@ -20,6 +20,7 @@ import { BridgeService } from './bridge/service';
 import { DownloadService } from './download/service';
 import { CustomPlaylistStore } from './custom_playlists/store';
 import { CustomPlaylistService } from './custom_playlists/service';
+import { LxSyncService } from './lx_sync/service';
 import { prefixRouter } from './router/prefix';
 
 // 导入所有handler注册函数
@@ -36,6 +37,7 @@ import { registerMusicHandlers } from './handlers/music';
 import { registerBridgeHandlers } from './handlers/bridge';
 import { registerDownloadHandlers } from './handlers/download';
 import { registerCustomPlaylistHandlers } from './handlers/custom_playlists';
+import { registerLxSyncHandlers } from './handlers/lx_sync';
 import { registerHealthHandlers } from './handlers/health';
 import { registerSongloftLibraryHandlers } from './handlers/songloft_library';
 import { registerDiagnosticsHandlers } from './handlers/diagnostics';
@@ -62,6 +64,7 @@ let platformRegistry: PlatformRegistry;
 let bridgeService: BridgeService;
 let downloadService: DownloadService;
 let customPlaylistService: CustomPlaylistService;
+let lxSyncService: LxSyncService;
 let songloftPlaylistService: SongloftPlaylistService;
 
 async function onInit(): Promise<void> {
@@ -99,7 +102,12 @@ async function onInit(): Promise<void> {
   bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService, playlistManagerMap);
   songloftPlaylistService = new SongloftPlaylistService(bridgeService, platformRegistry);
   downloadService = new DownloadService(downloadRuntimeManager);
-  customPlaylistService = new CustomPlaylistService(new CustomPlaylistStore(), bridgeService);
+  const customPlaylistStore = new CustomPlaylistStore();
+  customPlaylistService = new CustomPlaylistService(customPlaylistStore, bridgeService);
+  lxSyncService = new LxSyncService({
+    playlistStore: customPlaylistStore,
+    customPlaylists: customPlaylistService,
+  });
   playlistManagerMap.setDynamicPlaylistOptions({
     dynamicPlaylistLoader: (playlistId) => customPlaylistService.loadDynamicPlayerSongs(playlistId),
     dynamicSongResolver: (song) => bridgeService.resolvePlayableSong(song.title, song.artist),
@@ -146,6 +154,7 @@ async function onInit(): Promise<void> {
   registerBridgeHandlers(router, bridgeService);
   registerDownloadHandlers(router, downloadSourceManager, downloadRuntimeManager, downloadService);
   registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);
+  registerLxSyncHandlers(router, lxSyncService);
   registerSongloftLibraryHandlers(router, { playlistManagerMap, playlistService: songloftPlaylistService });
   registerHealthHandlers(router, sourceManager, runtimeManager);
   registerDiagnosticsHandlers(router);
