@@ -7,7 +7,6 @@ import {
   type LxMusicInfo,
   type LxMusicInfoMeta,
   type LxMusicPlatform,
-  type LxPlaylistPreview,
   type LxUserListInfo,
 } from './types';
 
@@ -183,25 +182,31 @@ function mapUserList(userList: LxUserListInfo): LxMappedPlaylist {
 
 /**
  * Map LX ListData into Starlight custom playlist drafts.
+ *
+ * - Default: skip empty love/default/user lists (no empty playlist noise).
+ * - Protocol snapshot (`includeEmpty: true`): keep empty lists so overwrite/clear
+ *   can wipe or replace the corresponding custom playlists.
  */
 export function mapListDataToPlaylists(
   data: LxListData,
-  options: { importDefaultList?: boolean } = {},
+  options: { includeEmpty?: boolean } = {},
 ): LxMappedPlaylist[] {
-  const importDefaultList = options.importDefaultList !== false;
+  const includeEmpty = options.includeEmpty === true;
   const playlists: LxMappedPlaylist[] = [];
 
   const loveSongs = mapSongs(data.loveList);
-  playlists.push({
-    name: '我喜欢',
-    lxListId: LX_LIST_IDS.love,
-    kind: 'love',
-    cover_url: firstCover(loveSongs),
-    songs: loveSongs,
-  });
+  if (includeEmpty || loveSongs.length > 0) {
+    playlists.push({
+      name: '我喜欢',
+      lxListId: LX_LIST_IDS.love,
+      kind: 'love',
+      cover_url: firstCover(loveSongs),
+      songs: loveSongs,
+    });
+  }
 
-  if (importDefaultList) {
-    const defaultSongs = mapSongs(data.defaultList);
+  const defaultSongs = mapSongs(data.defaultList);
+  if (includeEmpty || defaultSongs.length > 0) {
     playlists.push({
       name: '默认列表',
       lxListId: LX_LIST_IDS.default,
@@ -213,36 +218,12 @@ export function mapListDataToPlaylists(
 
   const userLists = Array.isArray(data.userList) ? data.userList : [];
   for (const userList of userLists) {
-    playlists.push(mapUserList(userList));
+    const mapped = mapUserList(userList);
+    if (!includeEmpty && mapped.songs.length === 0) continue;
+    playlists.push(mapped);
   }
 
   return playlists;
-}
-
-export function summarizeListData(
-  data: LxListData,
-  options: { importDefaultList?: boolean } = {},
-): LxPlaylistPreview[] {
-  return mapListDataToPlaylists(data, options).map((playlist) => ({
-    id: playlist.lxListId,
-    name: playlist.name,
-    songCount: playlist.songs.length,
-    kind: playlist.kind,
-  }));
-}
-
-export function mergeSongsByStableKey(
-  existing: CustomPlaylistSong[],
-  incoming: CustomPlaylistSong[],
-): CustomPlaylistSong[] {
-  const map = new Map<string, CustomPlaylistSong>();
-  for (const song of existing) {
-    map.set(song.stable_key, song);
-  }
-  for (const song of incoming) {
-    map.set(song.stable_key, song);
-  }
-  return Array.from(map.values());
 }
 
 export function isLxListData(value: unknown): value is LxListData {
@@ -395,12 +376,13 @@ export function mapPlaylistsToListData(
 
   for (const playlist of selected) {
     const songs = (playlist.songs || []).map(songToLxMusic);
+    // Fixed lists only by sourceListId — never by display name (user may create "我喜欢").
     const sourceListId = String(playlist.sourceListId || '');
-    if (sourceListId === LX_LIST_IDS.love || playlist.name.trim() === '我喜欢') {
+    if (sourceListId === LX_LIST_IDS.love) {
       love.push(...songs);
       continue;
     }
-    if (sourceListId === LX_LIST_IDS.default || playlist.name.trim() === '默认列表') {
+    if (sourceListId === LX_LIST_IDS.default) {
       defaults.push(...songs);
       continue;
     }

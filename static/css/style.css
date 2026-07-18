@@ -1,44 +1,43 @@
 :root {
     color-scheme: light dark;
     --host-surface: var(--md-sys-color-surface, var(--md-surface, var(--sl-color-surface, #ffffff)));
-    --host-background: var(--md-sys-color-background, var(--md-background, var(--sl-color-background, #eef1f6)));
-    --host-primary: var(--md-sys-color-primary, var(--md-primary, var(--sl-color-primary, #0A84FF)));
-    --host-outline: var(--md-sys-color-outline-variant, var(--md-outline-variant, var(--sl-color-border, #c8d0db)));
-    --host-on-surface: var(--md-sys-color-on-surface, var(--md-on-surface, var(--sl-color-text, #0f1419)));
+    --host-background: var(--md-sys-color-background, var(--md-background, var(--sl-color-background, #f3f5f8)));
+    --host-primary: var(--md-sys-color-primary, var(--md-primary, var(--sl-color-primary, #2563eb)));
+    --host-outline: var(--md-sys-color-outline-variant, var(--md-outline-variant, var(--sl-color-border, #d0d7e2)));
+    --host-on-surface: var(--md-sys-color-on-surface, var(--md-on-surface, var(--sl-color-text, #111827)));
     --host-on-surface-variant: var(--md-sys-color-on-surface-variant, var(--md-on-surface-variant, var(--sl-color-text-muted, #5b6573)));
-    /* iOS 26 Liquid Glass tokens */
-    --surface-elevated: color-mix(in srgb, var(--host-surface) 62%, transparent);
-    --surface-glass: color-mix(in srgb, var(--host-surface) 52%, transparent);
-    --surface-solid: color-mix(in srgb, var(--host-surface) 88%, transparent);
-    --surface-control: color-mix(in srgb, var(--host-surface) 78%, transparent);
-    --surface-muted: color-mix(in srgb, var(--host-background) 78%, var(--host-primary) 12%);
-    --hairline: color-mix(in srgb, var(--host-outline) 55%, transparent);
+    /* Solid elevated utility surfaces (host Material / Songloft mapped) */
+    --surface-elevated: var(--host-surface);
+    --surface-solid: var(--host-surface);
+    --surface-control: color-mix(in srgb, var(--host-background) 55%, var(--host-surface) 45%);
+    --surface-muted: color-mix(in srgb, var(--host-background) 88%, var(--host-primary) 6%);
+    --hairline: color-mix(in srgb, var(--host-outline) 72%, transparent);
     --surface-line: var(--hairline);
-    --glass-highlight: color-mix(in srgb, #ffffff 42%, transparent);
-    --glass-shadow: 0 10px 40px rgba(15, 23, 42, 0.08), 0 1px 0 var(--glass-highlight) inset;
-    --blur-shell: 28px;
-    --blur-card: 24px;
-    --blur-strong: 40px;
+    --glass-highlight: color-mix(in srgb, #ffffff 18%, transparent);
+    --blur-shell: 12px;
+    --blur-card: 10px;
     --accent: var(--host-primary);
-    --accent-strong: color-mix(in srgb, var(--accent) 88%, #0b1020 12%);
-    --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+    --accent-strong: color-mix(in srgb, var(--accent) 86%, #0b1020 14%);
+    --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
     --focus-ring: color-mix(in srgb, var(--accent) 28%, transparent);
     --text: var(--host-on-surface);
     --muted: var(--host-on-surface-variant);
-    --success: #1b8a5a;
-    --warning: #b56a00;
-    --danger: #c4362e;
-    --radius: 16px;
-    --radius-sm: 12px;
-    --radius-lg: 22px;
+    --success: #15803d;
+    --warning: #b45309;
+    --danger: #dc2626;
+    --radius: 12px;
+    --radius-sm: 10px;
+    --radius-lg: 16px;
     --radius-pill: 999px;
-    --shadow-soft: 0 18px 48px rgba(22, 33, 54, 0.1);
-    --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", sans-serif;
-    --ease-spring: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-    --duration-fast: 160ms;
-    --duration-tab: 180ms;
-    --global-player-height: 132px;
-    --bottom-tabs-height: calc(72px + env(safe-area-inset-bottom));
+    --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.05), 0 4px 14px rgba(15, 23, 42, 0.06);
+    --shadow-elevated: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.08);
+    --font-system: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --duration-fast: 140ms;
+    --duration-tab: 160ms;
+    --control-height: 44px;
+    --global-player-height: 120px;
+    --bottom-tabs-height: calc(64px + env(safe-area-inset-bottom, 0px));
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-right: env(safe-area-inset-right, 0px);
     --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -57,15 +56,12 @@ html {
 body {
     margin: 0;
     font: 14px/1.45 var(--font-system);
-    letter-spacing: -0.01em;
+    letter-spacing: -0.011em;
     color: var(--text);
-    background:
-        radial-gradient(1200px 600px at 8% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 55%),
-        radial-gradient(900px 520px at 92% 8%, color-mix(in srgb, #64d2ff 12%, transparent), transparent 50%),
-        radial-gradient(700px 480px at 50% 100%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 55%),
-        var(--host-background);
-    background-attachment: fixed;
+    background: var(--host-background);
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
 button,
@@ -77,7 +73,7 @@ textarea {
 
 button {
     cursor: pointer;
-    transition: transform var(--duration-fast) var(--ease-spring), background var(--duration-fast) ease, border-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease, color var(--duration-fast) ease, opacity var(--duration-fast) ease;
+    transition: transform var(--duration-fast) var(--ease-out), background var(--duration-fast) ease, border-color var(--duration-fast) ease, box-shadow var(--duration-fast) ease, color var(--duration-fast) ease, opacity var(--duration-fast) ease;
 }
 
 button:active:not(:disabled) {
@@ -102,8 +98,6 @@ textarea:disabled {
 .side-rail,
 .status-strip {
     background: var(--surface-elevated);
-    backdrop-filter: saturate(1.2) blur(var(--blur-shell));
-    -webkit-backdrop-filter: saturate(1.2) blur(var(--blur-shell));
     border-color: var(--surface-line);
 }
 
@@ -111,12 +105,11 @@ textarea:disabled {
     position: sticky;
     top: 0;
     height: 100vh;
-    padding: 20px 14px;
+    padding: 18px 12px;
     border-right: 1px solid var(--surface-line);
     display: grid;
     grid-template-rows: auto 1fr auto;
-    gap: 18px;
-    box-shadow: 1px 0 0 var(--glass-highlight);
+    gap: 16px;
 }
 
 .brand-lockup {
@@ -132,15 +125,15 @@ textarea:disabled {
     width: 42px;
     height: 42px;
     border-radius: var(--radius-sm);
-    display: grid;
-    place-items: center;
-    background:
-        linear-gradient(145deg, color-mix(in srgb, var(--accent) 92%, #fff 8%), var(--accent-strong));
-    color: white;
-    font-weight: 700;
-    font-size: 15px;
-    letter-spacing: -0.02em;
-    box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 32%, transparent), 0 1px 0 var(--glass-highlight) inset;
+    display: block;
+    flex-shrink: 0;
+    background-color: var(--surface-elevated);
+    background-image: url(../icon.png);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 28%, transparent);
+    overflow: hidden;
 }
 
 .brand-lockup strong,
@@ -208,8 +201,7 @@ textarea:disabled {
 .bottom-tab.active {
     color: var(--accent-strong);
     background: var(--accent-soft);
-    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
-    box-shadow: 0 1px 0 var(--glass-highlight) inset;
+    border-color: color-mix(in srgb, var(--accent) 24%, var(--surface-line));
 }
 
 .rail-footer {
@@ -226,17 +218,16 @@ textarea:disabled {
 }
 
 .status-strip {
-    min-height: 56px;
+    min-height: 48px;
     position: sticky;
     top: 0;
     z-index: 10;
     border-bottom: 1px solid var(--surface-line);
-    padding: 10px 20px;
+    padding: 8px 18px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 12px;
-    box-shadow: 0 1px 0 var(--glass-highlight) inset;
+    gap: 10px;
 }
 
 .status-side {
@@ -265,7 +256,7 @@ textarea:disabled {
     border: 1px solid var(--surface-line);
     border-radius: 999px;
     padding: 4px 10px;
-    background: color-mix(in srgb, var(--surface-solid) 72%, transparent);
+    background: var(--surface-muted);
     color: var(--muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -297,9 +288,9 @@ textarea:disabled {
 
 .tab-panel {
     display: none;
-    padding: 20px 22px 28px;
+    padding: 18px 20px 28px;
     min-width: 0;
-    animation: tab-fade var(--duration-tab) var(--ease-spring);
+    animation: tab-fade var(--duration-tab) var(--ease-out);
 }
 
 .tab-panel.active {
@@ -347,10 +338,8 @@ textarea:disabled {
     padding: 16px;
     border: 1px solid var(--surface-line);
     border-radius: var(--radius-lg);
-    background: var(--surface-glass);
-    backdrop-filter: saturate(1.15) blur(var(--blur-card));
-    -webkit-backdrop-filter: saturate(1.15) blur(var(--blur-card));
-    box-shadow: var(--glass-shadow);
+    background: var(--surface-elevated);
+    box-shadow: var(--shadow-soft);
 }
 
 .songlist-discovery {
@@ -400,6 +389,133 @@ textarea:disabled {
     gap: 10px;
 }
 
+/* Vertical form layout — fields stack with consistent rhythm */
+.form-stack {
+    display: grid;
+    gap: 14px;
+    align-items: stretch;
+}
+
+.field-row {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    align-content: start;
+}
+
+.field-row > .field-label,
+.field-row > span.field-label {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.3;
+}
+
+.field-row-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--control-height);
+    padding-top: 18px;
+}
+
+/* Input + trailing action buttons, same height */
+.input-with-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px;
+    min-width: 0;
+}
+
+.input-with-actions > input,
+.input-with-actions > select {
+    flex: 1 1 160px;
+    min-width: 0;
+    height: var(--control-height);
+    min-height: 44px;
+}
+
+.input-with-actions > button,
+.input-with-actions > .ghost-button,
+.input-with-actions > .primary-button {
+    flex: 0 0 auto;
+    min-height: 44px;
+    height: var(--control-height);
+    align-self: stretch;
+}
+
+.form-grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 14px;
+    align-items: end;
+}
+
+.form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+/* In-page sub-navigation (Discover / Settings) */
+.page-subnav {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    margin: 0 0 16px;
+    padding: 2px 0 10px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+}
+
+.page-subnav-item {
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 0 14px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--surface-line);
+    background: var(--surface-elevated);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.page-subnav-item.active {
+    color: #fff;
+    background: var(--accent);
+    border-color: transparent;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.page-subnav-item:hover:not(.active):not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--surface-line));
+    color: var(--text);
+}
+
+.discover-section,
+.settings-section {
+    min-width: 0;
+}
+
+.discover-section:not(.active),
+.settings-section:not(.active) {
+    display: none;
+}
+
+.discover-section.active,
+.settings-section.active {
+    display: block;
+}
+
+.settings-stack {
+    display: grid;
+    gap: 14px;
+}
+
 label {
     min-width: 0;
     display: grid;
@@ -419,13 +535,12 @@ textarea {
     background: var(--surface-control);
     color: var(--text);
     outline: none;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
 }
 
 input,
 select {
-    height: 40px;
+    height: var(--control-height);
+    min-height: 44px;
     padding: 0 12px;
 }
 
@@ -457,10 +572,10 @@ textarea:focus {
 .ghost-button,
 .file-button span,
 .icon-button {
-    min-height: 40px;
-    border-radius: var(--radius-pill);
+    min-height: 44px;
+    border-radius: var(--radius-sm);
     border: 1px solid transparent;
-    padding: 0 16px;
+    padding: 0 14px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -471,24 +586,21 @@ textarea:focus {
 }
 
 .primary-button {
-    background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, #fff 8%), var(--accent));
+    background: var(--accent);
     color: #fff;
-    box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 28%, transparent), 0 1px 0 color-mix(in srgb, #fff 28%, transparent) inset;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .primary-button:hover:not(:disabled) {
-    filter: brightness(1.04);
+    filter: brightness(1.05);
 }
 
 .ghost-button,
 .file-button span,
 .icon-button {
-    background: var(--surface-control);
+    background: var(--surface-elevated);
     color: var(--text);
     border-color: var(--surface-line);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 1px 0 var(--glass-highlight) inset;
 }
 
 .ghost-button:hover,
@@ -496,8 +608,8 @@ textarea:focus {
 .icon-button:hover,
 .rail-tab:hover,
 .bottom-tab:hover {
-    border-color: color-mix(in srgb, var(--accent) 38%, var(--surface-line));
-    background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface-control));
+    border-color: color-mix(in srgb, var(--accent) 32%, var(--surface-line));
+    background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface-elevated));
 }
 
 .file-button input {
@@ -597,11 +709,10 @@ textarea:focus {
     width: 100%;
     border: 1px solid var(--surface-line);
     border-radius: var(--radius);
-    background: color-mix(in srgb, var(--host-surface) 82%, transparent);
+    background: var(--surface-elevated);
     color: var(--text);
     padding: 10px 12px;
     text-align: left;
-    box-shadow: 0 1px 0 var(--glass-highlight) inset;
     transition: border-color var(--duration-fast) ease, background var(--duration-fast) ease, box-shadow var(--duration-fast) ease;
 }
 
@@ -614,7 +725,7 @@ textarea:focus {
 .songlist-row:hover,
 .ranking-row:hover {
     border-color: color-mix(in srgb, var(--accent) 28%, var(--surface-line));
-    background: color-mix(in srgb, var(--host-surface) 90%, var(--accent) 4%);
+    background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface-elevated));
 }
 
 .data-row,
@@ -784,7 +895,6 @@ textarea:focus {
     background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface-muted));
     color: var(--muted);
     font-size: 12px;
-    box-shadow: 0 1px 0 var(--glass-highlight) inset;
 }
 
 .target-playlist-banner strong {
@@ -800,8 +910,7 @@ textarea:focus {
     display: grid;
     place-items: center;
     padding: clamp(16px, 4vw, 32px);
-    background: color-mix(in srgb, var(--surface-solid) 36%, transparent);
-    backdrop-filter: blur(18px);
+    background: color-mix(in srgb, #0b1220 48%, transparent);
 }
 
 .songloft-target-dialog[hidden] {
@@ -816,9 +925,7 @@ textarea:focus {
     border-radius: var(--radius-lg);
     padding: 20px;
     background: var(--surface-elevated);
-    backdrop-filter: saturate(1.2) blur(var(--blur-strong));
-    -webkit-backdrop-filter: saturate(1.2) blur(var(--blur-strong));
-    box-shadow: var(--shadow-soft), 0 1px 0 var(--glass-highlight) inset;
+    box-shadow: var(--shadow-elevated);
 }
 
 .songloft-target-grid {
@@ -903,7 +1010,7 @@ textarea:focus {
     border: 1px dashed var(--surface-line);
     border-radius: var(--radius);
     padding: 18px;
-    background: color-mix(in srgb, var(--surface-solid) 62%, transparent);
+    background: var(--surface-muted);
 }
 
 .download-progress {
@@ -976,7 +1083,7 @@ textarea:focus {
     border: 1px solid var(--surface-line);
     border-radius: var(--radius);
     padding: 10px;
-    background: color-mix(in srgb, var(--surface-solid) 90%, transparent);
+    background: var(--surface-elevated);
 }
 
 .source-log-row[data-status="failed"] {
@@ -1046,7 +1153,7 @@ textarea:focus {
     border: 1px solid var(--surface-line);
     border-radius: var(--radius);
     padding: 10px;
-    background: color-mix(in srgb, var(--surface-solid) 90%, transparent);
+    background: var(--surface-elevated);
 }
 
 .voice-record-meta {
@@ -1370,9 +1477,7 @@ textarea:focus {
     border: 1px solid var(--surface-line);
     border-radius: var(--radius-sm);
     background: var(--surface-elevated);
-    backdrop-filter: saturate(1.2) blur(var(--blur-card));
-    -webkit-backdrop-filter: saturate(1.2) blur(var(--blur-card));
-    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18), 0 1px 0 var(--glass-highlight) inset;
+    box-shadow: var(--shadow-elevated);
 }
 
 .lx-play-mode-menu[hidden] {
@@ -1460,8 +1565,7 @@ textarea:focus {
     border: 1px solid var(--surface-line);
     border-radius: var(--radius);
     padding: 12px;
-    background: color-mix(in srgb, var(--surface-muted) 70%, transparent);
-    box-shadow: 0 1px 0 var(--glass-highlight) inset;
+    background: var(--surface-muted);
 }
 
 .speaker-player {
@@ -1657,19 +1761,17 @@ textarea:focus {
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--surface-line);
-    border-radius: calc(var(--radius) + 2px);
-    background:
-        linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 24%, transparent), transparent 58%),
-        color-mix(in srgb, var(--surface-elevated) 92%, white 8%);
-    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    border-radius: var(--radius);
+    background: var(--surface-elevated);
+    box-shadow: var(--shadow-soft);
     text-align: left;
-    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
 .speaker-playlist-row:hover {
     border-color: color-mix(in srgb, var(--accent) 28%, var(--surface-line));
-    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.11);
-    transform: translateY(-1px);
+    box-shadow: var(--shadow-elevated);
+    background: color-mix(in srgb, var(--accent-soft) 35%, var(--surface-elevated));
 }
 
 .speaker-playlist-row .row-main {
@@ -1697,7 +1799,7 @@ textarea:focus {
     border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--surface-line));
     border-radius: 999px;
     padding: 0 10px;
-    background: color-mix(in srgb, var(--accent-soft) 62%, white 38%);
+    background: var(--accent-soft);
     color: color-mix(in srgb, var(--accent) 72%, var(--text));
     font-size: 12px;
     font-weight: 700;
@@ -1734,8 +1836,7 @@ textarea:focus {
     right: 0;
     bottom: var(--global-player-height);
     z-index: -1;
-    background: rgba(15, 23, 42, 0.32);
-    backdrop-filter: blur(6px);
+    background: rgba(15, 23, 42, 0.36);
 }
 
 .speaker-song-list-panel {
@@ -1744,10 +1845,8 @@ textarea:focus {
     flex-direction: column;
     min-height: 0;
     background: var(--surface-elevated);
-    backdrop-filter: saturate(1.2) blur(var(--blur-strong));
-    -webkit-backdrop-filter: saturate(1.2) blur(var(--blur-strong));
     border-left: 1px solid var(--surface-line);
-    box-shadow: -12px 0 44px rgba(15, 23, 42, 0.14), 0 1px 0 var(--glass-highlight) inset;
+    box-shadow: -8px 0 28px rgba(15, 23, 42, 0.12);
 }
 
 .speaker-song-list-header {
@@ -1934,12 +2033,10 @@ textarea:focus {
     grid-template-columns: minmax(260px, 1fr) minmax(180px, 0.8fr) auto;
     gap: 12px;
     align-items: center;
-    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--surface-line);
     background: var(--surface-elevated);
-    backdrop-filter: saturate(1.25) blur(var(--blur-shell));
-    -webkit-backdrop-filter: saturate(1.25) blur(var(--blur-shell));
-    box-shadow: 0 -12px 40px rgba(20, 26, 38, 0.12), 0 1px 0 var(--glass-highlight) inset;
+    box-shadow: 0 -4px 18px rgba(15, 23, 42, 0.08);
 }
 
 .global-player-main {
@@ -2428,20 +2525,60 @@ legend {
     overflow-wrap: anywhere;
 }
 
-/* 洛雪同步 panel shell */
+/* AI 口令分析 — stacked fields, aligned labels/inputs */
+.ai-config-panel {
+    display: grid;
+    gap: 14px;
+}
+
+.ai-config-form.form-stack,
+.ai-config-form {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: 1fr;
+}
+
+.ai-config-form .field-row input {
+    width: 100%;
+}
+
+.ai-test-block {
+    display: grid;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px solid var(--surface-line);
+}
+
+.ai-test-result {
+    margin: 0;
+    padding: 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--surface-line);
+    background: var(--surface-muted);
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: min(36vh, 320px);
+    overflow: auto;
+}
+
+/* 洛雪同步 — vertical stack, address/password rows with trailing actions */
 .lx-sync-panel {
     display: grid;
-    gap: 12px;
+    gap: 14px;
 }
 
 .checkbox-field {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-height: 40px;
+    min-height: var(--control-height);
     padding: 0 2px;
     color: var(--text);
     font-size: 13px;
+    font-weight: 600;
 }
 
 .checkbox-field input[type="checkbox"] {
@@ -2451,11 +2588,16 @@ legend {
     flex-shrink: 0;
 }
 
+.lx-sync-form.form-stack,
 .lx-sync-form {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 10px;
-    align-items: end;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    align-items: stretch;
+}
+
+.lx-sync-form .field-row input {
+    width: 100%;
 }
 
 .lx-sync-actions {
@@ -2470,14 +2612,6 @@ legend {
     color: var(--muted);
     font-size: 12px;
     overflow-wrap: anywhere;
-}
-
-.lx-sync-preview-list {
-    display: grid;
-    gap: 8px;
-    max-height: min(40vh, 360px);
-    overflow-y: auto;
-    overscroll-behavior-y: auto;
 }
 
 .toast.success {
@@ -2662,8 +2796,28 @@ legend {
 
     .control-grid,
     .control-grid.compact,
-    .toggle-grid {
+    .toggle-grid,
+    .form-grid-2 {
         grid-template-columns: 1fr;
+    }
+
+    .field-row-inline {
+        padding-top: 0;
+    }
+
+    .page-subnav {
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+    }
+
+    .page-subnav-item {
+        min-height: 40px;
+        padding: 0 12px;
+        font-size: 12px;
+    }
+
+    .input-with-actions > button {
+        flex: 1 1 auto;
     }
 
     .wide-field {

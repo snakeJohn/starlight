@@ -1,11 +1,10 @@
+/** Primary navigation — mobile bottom bar shows all five. */
 export const tabs = [
     { id: 'search', label: '搜索', icon: 'S' },
+    { id: 'discover', label: '发现', icon: 'D' },
+    { id: 'playlists', label: '歌单', icon: 'L' },
     { id: 'speaker', label: '音箱', icon: 'M' },
-    { id: 'songlists', label: '歌单', icon: 'L' },
-    { id: 'rankings', label: '排行', icon: '#' },
-    { id: 'sources', label: '音源', icon: '+' },
-    { id: 'logs', label: '日志', icon: '!' },
-    { id: 'automation', label: '自动化', icon: 'A' },
+    { id: 'settings', label: '设置', icon: 'G' },
 ];
 
 export const state = {
@@ -55,7 +54,6 @@ export const state = {
     customPlaylistDetailId: '',
     customPlaylistDetailPage: 1,
     lxSyncConfig: null,
-    lxSyncPreview: null,
     lxSyncStatus: '未连接',
     platforms: [],
     sources: [],

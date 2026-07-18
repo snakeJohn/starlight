@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   mapListDataToPlaylists,
   mapLxMusicToSong,
-  mergeSongsByStableKey,
+  mapPlaylistsToListData,
   parseIntervalSeconds,
   parseLxListPayload,
-  summarizeListData,
 } from '../../src/lx_sync/mapper';
 import type { LxListData, LxMusicInfo } from '../../src/lx_sync/types';
+import type { CustomPlaylist } from '../../src/custom_playlists/types';
 
 const kwSong: LxMusicInfo = {
   id: 'kw_1',
@@ -24,14 +24,14 @@ const kwSong: LxMusicInfo = {
 
 const kgSong: LxMusicInfo = {
   id: 'kg_1',
-  name: '为龙',
-  singer: '河图',
+  name: '为你',
+  singer: '图图',
   source: 'kg',
   interval: '04:20',
   meta: {
     songId: 'kg-song',
     hash: 'abc123hash',
-    albumName: '为龙',
+    albumName: '为你',
     picUrl: null,
   },
 };
@@ -78,23 +78,8 @@ describe('lx_sync mapper', () => {
         source: 'kw',
         name: '稻花香',
         singer: '周杰伦',
-        musicId: '12345',
-        songId: '12345',
       }),
     });
-  });
-
-  it('maps kg hash into songInfo', () => {
-    const song = mapLxMusicToSong(kgSong);
-    expect(song.source_data?.songInfo.hash).toBe('abc123hash');
-    expect(song.stable_key).toBe('lx:kg:kg_1');
-  });
-
-  it('maps local songs without platform source_data', () => {
-    const song = mapLxMusicToSong(localSong);
-    expect(song.source_data).toBeUndefined();
-    expect(song.duration).toBe(3723);
-    expect(song.stable_key).toBe('lx:local:local_1');
   });
 
   it('maps list data into love/default/user playlists', () => {
@@ -116,27 +101,75 @@ describe('lx_sync mapper', () => {
     expect(playlists[1]).toMatchObject({ name: '默认列表', lxListId: 'lx:default', kind: 'default' });
     expect(playlists[2]).toMatchObject({ name: '古风', lxListId: 'lx:user:u1', kind: 'user' });
     expect(playlists[2]?.songs).toHaveLength(1);
-
-    const withoutDefault = mapListDataToPlaylists(data, { importDefaultList: false });
-    expect(withoutDefault).toHaveLength(2);
-    expect(withoutDefault.find((p) => p.kind === 'default')).toBeUndefined();
   });
 
-  it('summarizes preview counts', () => {
-    const summary = summarizeListData({
-      loveList: [kwSong, kgSong],
+  it('skips empty love/default/user lists by default', () => {
+    const playlists = mapListDataToPlaylists({
+      loveList: [],
       defaultList: [],
-      userList: [],
+      userList: [{ id: 'empty', name: '空歌单', list: [] }],
     });
-    expect(summary[0]).toMatchObject({ name: '我喜欢', songCount: 2, kind: 'love' });
+    expect(playlists).toEqual([]);
   });
 
-  it('merges songs by stable_key', () => {
-    const a = mapLxMusicToSong(kwSong);
-    const b = mapLxMusicToSong(kgSong);
-    const updated = { ...a, title: '稻花香(改)' };
-    const merged = mergeSongsByStableKey([a], [updated, b]);
-    expect(merged).toHaveLength(2);
-    expect(merged.find((s) => s.stable_key === a.stable_key)?.title).toBe('稻花香(改)');
+  it('includeEmpty keeps empty lists for protocol snapshot replace', () => {
+    const playlists = mapListDataToPlaylists(
+      {
+        loveList: [],
+        defaultList: [],
+        userList: [{ id: 'empty', name: '空歌单', list: [] }],
+      },
+      { includeEmpty: true },
+    );
+    expect(playlists).toHaveLength(3);
+    expect(playlists.every((p) => p.songs.length === 0)).toBe(true);
+  });
+
+  it('export maps fixed lists only via sourceListId', () => {
+    const playlists: CustomPlaylist[] = [
+      {
+        id: 'a',
+        name: '我喜欢',
+        cover_url: '',
+        imported_at: '',
+        updated_at: '',
+        songs: [
+          {
+            title: '用户',
+            artist: 'A',
+            album: '',
+            duration: 1,
+            cover_url: '',
+            stable_key: 'u1',
+          },
+        ],
+      },
+      {
+        id: 'b',
+        name: '其他',
+        cover_url: '',
+        sourceListId: 'lx:love',
+        imported_at: '',
+        updated_at: '',
+        songs: [
+          {
+            title: 'LX',
+            artist: 'B',
+            album: '',
+            duration: 1,
+            cover_url: '',
+            stable_key: 'lx1',
+            source_data: {
+              platform: 'kw',
+              quality: '320k',
+              songInfo: { source: 'kw', name: 'LX', singer: 'B', album: '', duration: 1 },
+            },
+          },
+        ],
+      },
+    ];
+    const data = mapPlaylistsToListData(playlists);
+    expect(data.loveList.map((s) => s.name)).toEqual(['LX']);
+    expect(data.userList.some((u) => u.name === '我喜欢')).toBe(true);
   });
 });

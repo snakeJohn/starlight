@@ -62,6 +62,29 @@ function css(): string {
   return readFileSync(resolve(process.cwd(), 'static/css/style.css'), 'utf8');
 }
 
+/** Slice a top-level tab panel body by id (new 5-tab IA). */
+function panelHtml(html: string, id: string): string {
+  const marker = `id="tab-${id}"`;
+  const pos = html.indexOf(marker);
+  if (pos < 0) return '';
+  const start = html.lastIndexOf('<section', pos);
+  const next = html.indexOf('<section class="tab-panel', pos + 10);
+  const end = next > pos ? next : html.indexOf('</main>', pos);
+  return html.slice(start, end);
+}
+
+function settingsSection(html: string, section: string): string {
+  const settings = panelHtml(html, 'settings');
+  const start = settings.indexOf(`data-settings-panel="${section}"`);
+  if (start < 0) return '';
+  const nextMarkers = ['sync', 'sources', 'automation', 'ai', 'logs']
+    .filter((s) => s !== section)
+    .map((s) => settings.indexOf(`data-settings-panel="${s}"`, start + 1))
+    .filter((i) => i > start);
+  const end = nextMarkers.length ? Math.min(...nextMarkers) : settings.length;
+  return settings.slice(start, end);
+}
+
 describe('static UI layout copy', () => {
   it('orders music qualities from low to high without changing labels', () => {
     const html = indexHtml();
@@ -112,33 +135,32 @@ describe('static UI layout copy', () => {
     expect(customPlaylists).toContain('data-action="add-selected-custom-playlist-songs"');
   });
 
-  it('orders songlist management before import and discovery', () => {
+  it('orders songlist management before import; discovery lives under Discover', () => {
     const html = indexHtml();
-    const myPlaylists = html.indexOf('<h2>我的歌单</h2>');
-    const importPlaylists = html.indexOf('<h2>导入歌单</h2>');
-    const searchPlaylists = html.indexOf('<h2>搜索歌单</h2>');
+    const playlists = panelHtml(html, 'playlists');
+    const discover = panelHtml(html, 'discover');
+    const myPlaylists = playlists.indexOf('<h2>我的歌单</h2>');
+    const importPlaylists = playlists.indexOf('<h2>导入歌单</h2>');
 
     expect(myPlaylists).toBeGreaterThanOrEqual(0);
     expect(importPlaylists).toBeGreaterThan(myPlaylists);
-    expect(searchPlaylists).toBeGreaterThan(importPlaylists);
+    expect(playlists).not.toContain('<h2>搜索歌单</h2>');
+    expect(discover).toContain('<h2>搜索歌单</h2>');
+    expect(discover).toContain('data-discover-panel="rankings"');
   });
 
   it('shows the Songloft access host in the speaker settings only', () => {
     const html = indexHtml();
-    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const speakerHtml = html.slice(speakerStart, songlistsStart);
-    const automationHtml = html.slice(
-      html.indexOf('<section class="tab-panel" id="tab-automation">'),
-      html.indexOf('</main>'),
-    );
+    const speakerHtml = panelHtml(html, 'speaker');
+    const settingsHtml = panelHtml(html, 'settings');
+    const automationSection = settingsSection(html, 'automation');
 
     expect(speakerHtml).toContain('Songloft 访问地址');
     expect(speakerHtml).toContain('音箱访问 Songloft 播放接口用的局域网或公网地址');
     expect(speakerHtml).toContain('data-role="server-host-warning"');
     expect(speakerHtml).toContain('name="server_host"');
-    expect(automationHtml).not.toContain('name="server_host"');
-    expect(html).not.toContain('id="tab-settings"');
+    expect(automationSection).not.toContain('name="server_host"');
+    expect(settingsHtml).toContain('id="tab-settings"');
   });
 
   it('uses an interactive voice command editor instead of a JSON textarea', () => {
@@ -147,6 +169,24 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-role="voice-command-list"');
     expect(html).toContain('data-action="add-voice-command"');
     expect(html).not.toContain('data-role="voice-json"');
+  });
+
+  it('exposes AI voice-command analysis settings under Settings', () => {
+    const html = indexHtml();
+    const stylesheet = readFileSync(resolve(process.cwd(), 'static/css/style.css'), 'utf8');
+    const aiSection = settingsSection(html, 'ai');
+
+    expect(aiSection).toContain('data-role="ai-config-panel"');
+    expect(aiSection).toContain('data-role="ai-config-form"');
+    expect(aiSection).toContain('data-role="ai-api-url"');
+    expect(aiSection).toContain('data-role="ai-api-key"');
+    expect(aiSection).toContain('data-action="ai-test"');
+    expect(aiSection).toContain('AI 口令分析');
+    expect(aiSection).toContain('field-row');
+    expect(aiSection).toContain('input-with-actions');
+    expect(stylesheet).toContain('.ai-config-panel');
+    expect(stylesheet).toContain('.form-stack');
+    expect(stylesheet).toContain('.input-with-actions');
   });
 
   it('shows only QR code login in the speaker account panel', () => {
@@ -196,16 +236,12 @@ describe('static UI layout copy', () => {
 
   it('adds highest-quality selectors to songlist and ranking pages', () => {
     const html = indexHtml();
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const rankingsStart = html.indexOf('<section class="tab-panel" id="tab-rankings">');
-    const sourcesStart = html.indexOf('<section class="tab-panel" id="tab-sources">');
-    const songlistsHtml = html.slice(songlistsStart, rankingsStart);
-    const rankingsHtml = html.slice(rankingsStart, sourcesStart);
+    const discover = panelHtml(html, 'discover');
 
-    expect(songlistsHtml).toContain('data-role="songlist-quality"');
-    expect(songlistsHtml).toContain('<option value="flac24bit" selected>flac24bit</option>');
-    expect(rankingsHtml).toContain('data-role="ranking-quality"');
-    expect(rankingsHtml).toContain('<option value="flac24bit" selected>flac24bit</option>');
+    expect(discover).toContain('data-role="songlist-quality"');
+    expect(discover).toContain('<option value="flac24bit" selected>flac24bit</option>');
+    expect(discover).toContain('data-role="ranking-quality"');
+    expect(discover).toContain('<option value="flac24bit" selected>flac24bit</option>');
   });
 
   it('passes songlist and ranking quality through detail requests', () => {
@@ -240,9 +276,7 @@ describe('static UI layout copy', () => {
 
   it('keeps download settings and progress at the bottom of merged source management', () => {
     const html = indexHtml();
-    const sourcesStart = html.indexOf('<section class="tab-panel" id="tab-sources">');
-    const logsStart = html.indexOf('<section class="tab-panel" id="tab-logs">');
-    const sourcesHtml = html.slice(sourcesStart, logsStart);
+    const sourcesHtml = settingsSection(html, 'sources');
     const sourcePagination = sourcesHtml.indexOf('data-role="source-pagination"');
     const downloadSettings = sourcesHtml.indexOf('data-role="download-settings-form"');
     const downloadProgress = sourcesHtml.indexOf('data-role="download-progress"');
@@ -261,9 +295,7 @@ describe('static UI layout copy', () => {
   it('merges playback and download source management into one paged selectable control', () => {
     const html = indexHtml();
     const sourcesModule = musicSourcesJs();
-    const sourcesStart = html.indexOf('<section class="tab-panel" id="tab-sources">');
-    const logsStart = html.indexOf('<section class="tab-panel" id="tab-logs">');
-    const sourcesHtml = html.slice(sourcesStart, logsStart);
+    const sourcesHtml = settingsSection(html, 'sources');
 
     expect(sourcesHtml).toContain('data-action="enable-selected-playback-sources"');
     expect(sourcesHtml).toContain('data-action="disable-selected-playback-sources"');
@@ -325,15 +357,8 @@ describe('static UI layout copy', () => {
 
   it('keeps speaker playback and index controls in the speaker page only', () => {
     const html = indexHtml();
-    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const speakerHtml = html.slice(speakerStart, songlistsStart);
-    const automationHtml = html.slice(
-      html.indexOf('<section class="tab-panel" id="tab-automation">'),
-      html.indexOf('<section class="tab-panel" id="tab-settings">') >= 0
-        ? html.indexOf('<section class="tab-panel" id="tab-settings">')
-        : html.indexOf('</main>'),
-    );
+    const speakerHtml = panelHtml(html, 'speaker');
+    const automationHtml = settingsSection(html, 'automation');
 
     expect(speakerHtml).not.toContain('<h2>音箱控制</h2>');
     expect(speakerHtml).toContain('speaker-player-panel');
@@ -347,9 +372,7 @@ describe('static UI layout copy', () => {
 
   it('provides a visible action to clear the current speaker device selection', () => {
     const html = indexHtml();
-    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const speakerHtml = html.slice(speakerStart, songlistsStart);
+    const speakerHtml = panelHtml(html, 'speaker');
 
     expect(speakerHtml).toContain('data-action="clear-device-selection"');
     expect(speakerHtml).toContain('取消选择</button>');
@@ -357,9 +380,7 @@ describe('static UI layout copy', () => {
 
   it('provides a visible action to save the current speaker device selection', () => {
     const html = indexHtml();
-    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const speakerHtml = html.slice(speakerStart, songlistsStart);
+    const speakerHtml = panelHtml(html, 'speaker');
 
     expect(speakerHtml).toContain('data-action="save-device-selection"');
     expect(speakerHtml).toContain('保存设备</button>');
@@ -368,9 +389,7 @@ describe('static UI layout copy', () => {
   it('integrates speaker settings into the device control panel', () => {
     const html = indexHtml();
     const stylesheet = css();
-    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const speakerHtml = html.slice(speakerStart, songlistsStart);
+    const speakerHtml = panelHtml(html, 'speaker');
     const deviceStart = speakerHtml.indexOf('<section class="surface-section speaker-device-panel">');
     const operationsStart = speakerHtml.indexOf('<div class="two-column speaker-operations-layout">');
     const deviceHtml = speakerHtml.slice(deviceStart, operationsStart);
@@ -389,19 +408,28 @@ describe('static UI layout copy', () => {
     expect(stylesheet).not.toContain('grid-template-columns: minmax(150px, 0.82fr) minmax(190px, 1fr) minmax(220px, 0.92fr);');
   });
 
-  it('moves visible settings into speaker and automation pages and removes the settings tab', () => {
+  it('uses a 5-tab IA: speaker device config stays on speaker; automation/AI/sync under settings', () => {
     const html = indexHtml();
     const stateJs = readFileSync(resolve(process.cwd(), 'static/js/state.js'), 'utf8');
-    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const speakerHtml = html.slice(speakerStart, songlistsStart);
-    const automationHtml = html.slice(
-      html.indexOf('<section class="tab-panel" id="tab-automation">'),
-      html.indexOf('</main>'),
-    );
+    const speakerHtml = panelHtml(html, 'speaker');
+    const automationHtml = settingsSection(html, 'automation');
+    const settingsHtml = panelHtml(html, 'settings');
 
-    expect(stateJs).not.toContain("id: 'settings'");
-    expect(html).not.toContain('id="tab-settings"');
+    expect(stateJs).toContain("id: 'settings'");
+    expect(stateJs).toContain("id: 'discover'");
+    expect(stateJs).toContain("id: 'playlists'");
+    expect(stateJs).not.toContain("id: 'songlists'");
+    expect(stateJs).not.toContain("id: 'rankings'");
+    expect(stateJs).not.toContain("id: 'logs'");
+    expect(stateJs).not.toContain("id: 'automation'");
+    expect(html).toContain('id="tab-settings"');
+    expect(html).toContain('id="tab-discover"');
+    expect(html).toContain('id="tab-playlists"');
+    expect(html).not.toContain('id="tab-songlists"');
+    expect(html).not.toContain('id="tab-rankings"');
+    expect(html).not.toContain('id="tab-sources"');
+    expect(html).not.toContain('id="tab-logs"');
+    expect(html).not.toContain('id="tab-automation"');
     expect(speakerHtml).toContain('data-role="speaker-config-form"');
     expect(speakerHtml).toContain('name="conversation_monitor_enabled" type="checkbox"');
     expect(speakerHtml).toContain('name="voice_command_enabled" type="checkbox" disabled');
@@ -413,6 +441,10 @@ describe('static UI layout copy', () => {
     expect(automationHtml).toContain('<option value="once">单曲播放</option>');
     expect(automationHtml).toContain('<option value="loop">列表循环</option>');
     expect(automationHtml).not.toContain('<option value="repeat">循环</option>');
+    expect(settingsHtml).toContain('data-settings-section="sync"');
+    expect(settingsHtml).toContain('data-settings-section="sources"');
+    expect(settingsHtml).toContain('data-settings-section="ai"');
+    expect(settingsHtml).toContain('data-settings-section="logs"');
     expect(html).not.toContain('name="timezone"');
     expect(html).not.toContain('name="extra_music_api_models"');
     expect(html).not.toContain('额外型号');
@@ -492,9 +524,7 @@ describe('static UI layout copy', () => {
 
   it('mounts a playable Songloft playlist browser in the speaker page', () => {
     const html = indexHtml();
-    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const speakerHtml = html.slice(speakerStart, songlistsStart);
+    const speakerHtml = panelHtml(html, 'speaker');
 
     expect(speakerHtml).toContain('speaker-playlist-panel');
     expect(speakerHtml).toContain('data-role="speaker-playlist-select"');
@@ -526,8 +556,9 @@ describe('static UI layout copy', () => {
     expect(automation).not.toContain('extra_music_api_models');
     expect(automation).not.toContain('indicator_light_enabled');
     expect(automation).not.toContain('interrupt_tts_hint');
-    expect(automation).not.toContain('ai_config');
     expect(automation).not.toContain('host-url');
+    // AI 口令分析已作为一等能力挂在自动化页（ai_config 模块）
+    expect(automation).toContain('ai_config');
   });
 
   it('does not retain local player state fields', () => {
@@ -549,9 +580,7 @@ describe('static UI layout copy', () => {
 
   it('mounts a 12 hour speaker voice record widget in the speaker page', () => {
     const html = indexHtml();
-    const speakerStart = html.indexOf('<section class="tab-panel" id="tab-speaker">');
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const speakerHtml = html.slice(speakerStart, songlistsStart);
+    const speakerHtml = panelHtml(html, 'speaker');
 
     expect(speakerHtml).toContain('<h2>语音记录</h2>');
     expect(speakerHtml).toContain('data-role="voice-record-summary"');
@@ -667,20 +696,22 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toMatch(/@media \(max-width: 760px\)\s*\{[\s\S]*\.voice-record-meta\s*\{[\s\S]*flex-direction:\s*column/s);
   });
 
-  it('adds a source diagnostics log menu with filtering and clearing controls', () => {
+  it('adds a source diagnostics log section under Settings with filtering and clearing controls', () => {
     const html = indexHtml();
     const state = stateJs();
     const app = appJs();
     const diagnostics = diagnosticsJs();
     const stylesheet = css();
+    const logsSection = settingsSection(html, 'logs');
 
-    expect(state).toContain("{ id: 'logs', label: '日志'");
+    expect(state).toContain("{ id: 'settings', label: '设置'");
     expect(app).toContain('initDiagnosticsUI');
-    expect(html).toContain('<section class="tab-panel" id="tab-logs">');
-    expect(html).toContain('data-role="diagnostics-operation-filter"');
-    expect(html).toContain('data-action="refresh-source-logs"');
-    expect(html).toContain('data-action="clear-source-logs"');
-    expect(html).toContain('data-role="source-log-list"');
+    expect(app).toContain("settingsSection: 'logs'");
+    expect(html).toContain('id="tab-settings"');
+    expect(logsSection).toContain('data-role="diagnostics-operation-filter"');
+    expect(logsSection).toContain('data-action="refresh-source-logs"');
+    expect(logsSection).toContain('data-action="clear-source-logs"');
+    expect(logsSection).toContain('data-role="source-log-list"');
     expect(diagnostics).toContain('/diagnostics/source-logs');
     expect(diagnostics).toContain('renderSourceLogs');
     expect(stylesheet).toContain('.source-log-row');
@@ -689,13 +720,19 @@ describe('static UI layout copy', () => {
   it('keeps static assets and plugin API requests relative to the Songloft plugin entry path', () => {
     const html = indexHtml();
     const api = apiJs();
+    const app = appJs();
+    const stylesheet = css();
 
     expect(html).toContain('href="static/css/style.css"');
     expect(html).toContain('src="static/js/app.js"');
-    expect(html).toContain('href="static/icon.svg"');
+    expect(html).toContain('href="static/icon.png"');
     expect(html).not.toContain('/api/v1/jsplugin/starlight/static/');
     expect(api).toContain("const BASE = 'api'");
     expect(api).not.toContain('/api/v1/jsplugin');
+    // Side-rail brand mark uses the plugin icon (not the letter "S").
+    expect(app).toContain('class="brand-mark"');
+    expect(app).not.toContain('brand-mark" aria-hidden="true">S</div>');
+    expect(stylesheet).toContain('url(../icon.png)');
   });
 
   it('maps Starlight visual tokens to Songloft and Material theme variables', () => {
@@ -726,25 +763,29 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toMatch(/input:focus,\s*select:focus,\s*textarea:focus\s*\{[^}]*box-shadow:\s*0 0 0 3px var\(--focus-ring\)/s);
   });
 
-  it('mounts a 洛雪同步 panel shell on the songlists tab for local JSON import/export', () => {
+  it('mounts a 洛雪同步 server panel under Settings with aligned form rows', () => {
     const html = indexHtml();
     const stylesheet = css();
-    const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
-    const rankingsStart = html.indexOf('<section class="tab-panel" id="tab-rankings">');
-    const songlistsHtml = html.slice(songlistsStart, rankingsStart);
+    const syncHtml = settingsSection(html, 'sync');
+    const playlistsHtml = panelHtml(html, 'playlists');
 
-    expect(songlistsHtml).toContain('data-role="lx-sync-panel"');
-    expect(songlistsHtml).toContain('data-role="lx-sync-payload"');
-    expect(songlistsHtml).toContain('data-role="lx-sync-file"');
-    expect(songlistsHtml).toContain('data-action="lx-sync-preview"');
-    expect(songlistsHtml).toContain('data-action="lx-sync-import"');
-    expect(songlistsHtml).toContain('data-action="lx-sync-export"');
-    expect(songlistsHtml).not.toContain('data-role="lx-sync-base-url"');
-    expect(songlistsHtml).not.toContain('data-action="lx-sync-connect"');
-    expect(songlistsHtml).toContain('data-role="lx-sync-status"');
-    expect(songlistsHtml).toContain('data-role="lx-sync-preview-list"');
-    expect(songlistsHtml).toContain('洛雪同步');
+    expect(syncHtml).toContain('data-role="lx-sync-panel"');
+    expect(syncHtml).toContain('data-role="lx-sync-server-address"');
+    expect(syncHtml).toContain('data-role="lx-sync-password"');
+    expect(syncHtml).toContain('data-action="lx-sync-copy-address"');
+    expect(syncHtml).toContain('data-action="lx-sync-save-config"');
+    expect(syncHtml).not.toContain('data-role="lx-sync-payload"');
+    expect(syncHtml).not.toContain('data-action="lx-sync-import"');
+    expect(syncHtml).not.toContain('data-role="lx-sync-conflict"');
+    expect(syncHtml).not.toContain('data-role="lx-sync-import-default"');
+    expect(syncHtml).toContain('data-role="lx-sync-status"');
+    expect(syncHtml).toContain('data-role="lx-sync-device-list"');
+    expect(syncHtml).toContain('洛雪同步');
+    expect(syncHtml).toContain('input-with-actions');
+    expect(syncHtml).toContain('form-stack');
+    expect(playlistsHtml).not.toContain('data-role="lx-sync-panel"');
     expect(stylesheet).toContain('.lx-sync-panel');
+    expect(stylesheet).toContain('.page-subnav');
     expect(stylesheet).toContain('prefers-reduced-motion');
     expect(stylesheet).toContain('--radius-lg');
     expect(stylesheet).toContain('backdrop-filter');

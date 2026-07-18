@@ -136,7 +136,8 @@ describe('BridgeService', () => {
 
     await expect(service.previewUrl(song)).resolves.toBe('https://audio.test/song.mp3');
 
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo, {
+    // Quality ladder always tries highest first (channel-agnostic).
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', 'flac24bit', song.source_data.songInfo, {
       operation: 'playback',
       title: 'Song',
       artist: 'Singer',
@@ -379,7 +380,11 @@ describe('BridgeService', () => {
         title: 'Song',
         url: 'https://audio.test/song.mp3',
         plugin_entry_path: 'starlight',
-        source_data: JSON.stringify(song.source_data),
+        // Import records the quality that actually resolved (highest on ladder).
+        source_data: JSON.stringify({
+          ...song.source_data,
+          quality: 'flac24bit',
+        }),
         dedup_key: 'kw:123',
       }),
     ]);
@@ -623,7 +628,7 @@ describe('BridgeService', () => {
     });
     await flushBackgroundSync();
 
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo, {
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', 'flac24bit', song.source_data.songInfo, {
       operation: 'playback',
       title: 'Song',
       artist: 'Singer',
@@ -708,12 +713,12 @@ describe('BridgeService', () => {
       urls: ['https://audio.test/song.mp3', 'https://audio.test/song.mp3'],
     });
 
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo, {
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', 'flac24bit', song.source_data.songInfo, {
       operation: 'playback',
       title: 'Song',
       artist: 'Singer',
     });
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', secondSong.source_data.songInfo, {
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', 'flac24bit', secondSong.source_data.songInfo, {
       operation: 'playback',
       title: 'Second Song',
       artist: 'Singer',
@@ -762,12 +767,12 @@ describe('BridgeService', () => {
     });
 
     expect(provider.search).toHaveBeenCalledWith('Song Singer', 1, 5);
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', song.source_data.songInfo, {
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', 'flac24bit', song.source_data.songInfo, {
       operation: 'playback',
       title: 'Song',
       artist: 'Singer',
     });
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kg', '320k', fallbackSong.source_data.songInfo, {
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kg', 'flac24bit', fallbackSong.source_data.songInfo, {
       operation: 'playback',
       title: 'Song',
       artist: 'Singer',
@@ -828,19 +833,103 @@ describe('BridgeService', () => {
   });
 
   it('resolves a playable search song by title and artist across providers', async () => {
+    const kgHit = {
+      ...secondSong,
+      source_data: {
+        platform: 'kg' as const,
+        quality: '320k' as const,
+        songInfo: {
+          source: 'kg',
+          name: 'Second Song',
+          singer: 'Singer',
+          album: 'Album',
+          duration: 200,
+          musicId: '456',
+          hash: '456',
+        },
+      },
+    } satisfies SearchResultSong;
     const emptyProvider = createProvider('kw', []);
-    const hitProvider = createProvider('kg', [secondSong]);
+    const hitProvider = createProvider('kg', [kgHit]);
     const { service, runtimes } = createService({ providers: [emptyProvider, hitProvider] });
 
-    await expect(service.resolveSearchSong('Second Song', 'Singer')).resolves.toBe(secondSong);
+    await expect(service.resolveSearchSong('Second Song', 'Singer')).resolves.toEqual(
+      expect.objectContaining({
+        title: 'Second Song',
+        artist: 'Singer',
+        source_data: expect.objectContaining({ platform: 'kg', quality: 'flac24bit' }),
+      }),
+    );
 
     expect(emptyProvider.search).toHaveBeenCalledWith('Second Song Singer', 1, 5);
     expect(hitProvider.search).toHaveBeenCalledWith('Second Song Singer', 1, 5);
-    expect(runtimes.getMusicUrl).toHaveBeenCalledWith('kw', '320k', secondSong.source_data.songInfo, {
-      operation: 'playback',
-      title: 'Second Song',
+    // Quality ladder tries highest first on the hit channel.
+    expect(runtimes.getMusicUrl).toHaveBeenCalledWith(
+      'kg',
+      'flac24bit',
+      kgHit.source_data.songInfo,
+      expect.objectContaining({ operation: 'playback', title: 'Second Song', artist: 'Singer' }),
+    );
+  });
+
+  it('picks the higher-quality playable channel across providers', async () => {
+    const flacSong = {
+      ...song,
+      title: 'Song',
       artist: 'Singer',
-    });
+      cover_url: 'https://img.test/flac.jpg',
+      source_data: {
+        platform: 'wy' as const,
+        quality: 'flac' as const,
+        songInfo: {
+          source: 'wy',
+          name: 'Song',
+          singer: 'Singer',
+          album: 'Album',
+          duration: 200,
+          musicId: 'wy-1',
+          songmid: 'wy-1',
+          types: [{ type: 'flac' }],
+        },
+      },
+    } satisfies SearchResultSong;
+    const lowSong = {
+      ...song,
+      cover_url: 'https://img.test/low.jpg',
+      source_data: {
+        platform: 'kw' as const,
+        quality: '128k' as const,
+        songInfo: {
+          source: 'kw',
+          name: 'Song',
+          singer: 'Singer',
+          album: 'Album',
+          duration: 200,
+          musicId: 'kw-1',
+          songmid: 'kw-1',
+          types: [{ type: '128k' }],
+        },
+      },
+    } satisfies SearchResultSong;
+    const runtimes = {
+      getMusicUrl: vi.fn(async (platform: string, quality: string) => {
+        if (platform === 'wy' && quality === 'flac') return 'https://audio.test/flac.mp3';
+        if (platform === 'kw' && (quality === '128k' || quality === '320k')) return 'https://audio.test/low.mp3';
+        return null;
+      }),
+      getLastMusicUrlAttempt: vi.fn(() => ({ attemptedSources: 1, lastFailure: null })),
+    } as unknown as RuntimeManager;
+    const providers = [createProvider('kw', [lowSong]), createProvider('wy', [flacSong])];
+    const platforms = {
+      all: vi.fn(() => providers.map((p) => ({ id: p.id, name: p.name }))),
+      get: vi.fn((id: string) => providers.find((p) => p.id === id) ?? null),
+    } as unknown as PlatformRegistry;
+    const service = new BridgeService(platforms, runtimes, {} as MinaService);
+
+    const resolved = await service.resolveSearchSong('Song', 'Singer');
+    expect(resolved?.source_data.platform).toBe('wy');
+    expect(resolved?.source_data.quality).toBe('flac');
+    expect(resolved?.cover_url).toBe('https://img.test/flac.jpg');
   });
 
   it('skips provider search hits whose playback URL cannot be resolved', async () => {

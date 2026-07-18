@@ -21,6 +21,12 @@ import { DownloadService } from './download/service';
 import { CustomPlaylistStore } from './custom_playlists/store';
 import { CustomPlaylistService } from './custom_playlists/service';
 import { LxSyncService } from './lx_sync/service';
+import {
+  handleLxProtocolHttp,
+  handleLxSyncWebSocket,
+  type InboundWebSocket,
+  type WebSocketRequest,
+} from './lx_sync';
 import { prefixRouter } from './router/prefix';
 
 // 导入所有handler注册函数
@@ -109,6 +115,7 @@ async function onInit(): Promise<void> {
   lxSyncService = new LxSyncService({
     playlistStore: customPlaylistStore,
     customPlaylists: customPlaylistService,
+    hostBaseUrl: pluginConfig.server_host || '',
   });
   playlistManagerMap.setDynamicPlaylistOptions({
     dynamicPlaylistLoader: (playlistId) => customPlaylistService.loadDynamicPlayerSongs(playlistId),
@@ -147,7 +154,11 @@ async function onInit(): Promise<void> {
   registerAuthHandlers(miotRouter, authService);
   registerDeviceHandlers(miotRouter, minaService, accountManager, playlistManagerMap, conversationMonitor);
   registerPlaylistHandlers(miotRouter, playlistManagerMap, minaService);
-  registerConfigHandlers(miotRouter, configManager, conversationMonitor, scheduler, voiceEngine);
+  registerConfigHandlers(miotRouter, configManager, conversationMonitor, scheduler, voiceEngine, {
+    onServerHostChange: (serverHost) => {
+      lxSyncService.setHostBaseUrl(serverHost);
+    },
+  });
   registerConversationHandlers(miotRouter, conversationMonitor, configManager);
   registerScheduleHandlers(miotRouter, scheduler, configManager);
   registerVoiceCommandHandlers(miotRouter, configManager);
@@ -210,10 +221,30 @@ async function onDeinit(): Promise<void> {
 }
 
 async function onHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
+  // Public LX Music sync protocol (no JWT) — must run before normal API router.
+  if (lxSyncService) {
+    const protocol = await handleLxProtocolHttp(req, lxSyncService);
+    if (protocol) return protocol;
+  }
   return await router.handle(req);
+}
+
+/**
+ * LX desktop/mobile WebSocket: /socket?i=&t=
+ * Must return promptly after attaching handlers — list sync RPCs run in background
+ * so the host can keep delivering WS frames (see protocol_ws startListSyncSession).
+ */
+async function onWebSocket(req: WebSocketRequest, socket: InboundWebSocket): Promise<void> {
+  if (!lxSyncService) {
+    await socket.close(1011, 'not ready');
+    return;
+  }
+  // handleLxSyncWebSocket returns after auth + handler attach; sync is fire-and-forget.
+  await handleLxSyncWebSocket(req, socket, lxSyncService);
 }
 
 // 暴露为全局（QuickJS 需要显式声明）。SDK 0.8+ 已正式支持 async 签名。
 globalThis.onInit = onInit;
 globalThis.onDeinit = onDeinit;
 globalThis.onHTTPRequest = onHTTPRequest;
+(globalThis as { onWebSocket?: typeof onWebSocket }).onWebSocket = onWebSocket;

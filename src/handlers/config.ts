@@ -53,6 +53,11 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   return Math.max(min, Math.min(max, parsed));
 }
 
+export type ConfigHandlerOptions = {
+  /** Called when server_host is saved so dependent services (e.g. LX sync address) refresh. */
+  onServerHostChange?: (serverHost: string) => void;
+};
+
 /**
  * 注册配置相关路由
  * GET  /config → 获取配置
@@ -64,6 +69,7 @@ export function registerConfigHandlers(
   conversationMonitor: ConversationMonitor,
   scheduler: Scheduler,
   voiceEngine: VoiceEngine,
+  options: ConfigHandlerOptions = {},
 ): void {
 
   // GET /config - 获取配置
@@ -131,6 +137,7 @@ export function registerConfigHandlers(
         }
         config.server_host = serverHost;
         setHostBaseUrl(serverHost);
+        options.onServerHostChange?.(serverHost);
       }
 
       // 更新 timezone
@@ -267,8 +274,13 @@ export function registerConfigHandlers(
         if (typeof newAI.model === 'string') {
           aiConfig.model = newAI.model;
         }
-        if (typeof newAI.timeout === 'number') {
-          aiConfig.timeout = newAI.timeout;
+        if (typeof newAI.timeout === 'number' && Number.isFinite(newAI.timeout)) {
+          aiConfig.timeout = Math.min(30, Math.max(1, Math.floor(newAI.timeout)));
+        } else if (typeof newAI.timeout === 'string' && newAI.timeout.trim()) {
+          const parsed = Number(newAI.timeout);
+          if (Number.isFinite(parsed)) {
+            aiConfig.timeout = Math.min(30, Math.max(1, Math.floor(parsed)));
+          }
         }
         await configManager.saveAIConfig(aiConfig);
       }

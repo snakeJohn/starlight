@@ -1,4 +1,4 @@
-import type { CustomPlaylist, CustomPlaylistSong } from '../custom_playlists/types';
+import type { CustomPlaylistSong } from '../custom_playlists/types';
 
 /** Supported online music platforms in LX Music data. */
 export type LxMusicPlatform = 'kw' | 'kg' | 'tx' | 'mg' | 'wy';
@@ -47,50 +47,59 @@ export interface LxListData {
   tempList?: LxMusicInfo[];
 }
 
-export type LxSyncConflict = 'replace' | 'merge';
+export type LxSyncMode =
+  | 'merge_local_remote'
+  | 'merge_remote_local'
+  | 'overwrite_local_remote'
+  | 'overwrite_remote_local'
+  | 'overwrite_local_remote_full'
+  | 'overwrite_remote_local_full'
+  | 'cancel';
 
-/** Local preferences only — no remote server credentials. */
+/** Auth device key (issued on first connect). */
+export interface LxClientKeyInfo {
+  clientId: string;
+  key: string;
+  deviceName: string;
+  isMobile: boolean;
+  lastConnectDate: number;
+  serverName?: string;
+  /**
+   * Fingerprint of list data after a successful full sync with this device.
+   * When set, subsequent reconnects auto-merge without the first-sync mode dialog
+   * (same idea as lx-music-sync-server device snapshot keys).
+   */
+  listSnapshotKey?: string;
+}
+
+/** Local server preferences (protocol server mode). */
 export interface LxSyncConfig {
-  importDefaultList: boolean;
-  conflict: LxSyncConflict;
-  lastImportAt?: string;
-  lastExportAt?: string;
+  password: string;
+  serverId: string;
+  serverName: string;
+  enabled: boolean;
+  lastSyncAt?: string;
 }
 
 export interface LxSyncConfigPublic {
-  importDefaultList: boolean;
-  conflict: LxSyncConflict;
-  lastImportAt?: string;
-  lastExportAt?: string;
+  /** Full URL LX clients should connect to (no trailing slash). */
+  serverAddress: string;
+  password: string;
+  serverId: string;
+  serverName: string;
+  enabled: boolean;
+  lastSyncAt?: string;
+  devices: Array<Pick<LxClientKeyInfo, 'clientId' | 'deviceName' | 'isMobile' | 'lastConnectDate'>>;
+  connectedCount: number;
 }
 
 export interface LxSyncConfigPatch {
-  importDefaultList?: boolean;
-  conflict?: LxSyncConflict;
+  password?: string;
+  serverName?: string;
+  enabled?: boolean;
+  /** When true, regenerate password. */
+  regeneratePassword?: boolean;
 }
-
-export interface LxPlaylistPreview {
-  id: string;
-  name: string;
-  songCount: number;
-  kind: 'love' | 'default' | 'user';
-}
-
-export interface LxSyncPreviewResult {
-  playlists: LxPlaylistPreview[];
-  totalSongs: number;
-}
-
-export interface LxSyncImportStats {
-  playlistsCreated: number;
-  playlistsUpdated: number;
-  songsImported: number;
-  playlists: Array<Pick<CustomPlaylist, 'id' | 'name'> & { songCount: number }>;
-  lastImportAt: string;
-}
-
-/** @deprecated Use LxSyncImportStats */
-export type LxSyncPullStats = LxSyncImportStats;
 
 export interface LxMappedPlaylist {
   name: string;
@@ -101,17 +110,9 @@ export interface LxMappedPlaylist {
   songs: CustomPlaylistSong[];
 }
 
-export const LX_SYNC_CONFIG_KEY = 'starlight:lx_sync:config';
-
 export const LX_LIST_IDS = {
   love: 'lx:love',
   default: 'lx:default',
 } as const;
 
-/** @deprecated Use LX_LIST_IDS */
-export const LX_NATIVE_IDS = LX_LIST_IDS;
-
-export const DEFAULT_LX_SYNC_CONFIG: LxSyncConfig = {
-  importDefaultList: true,
-  conflict: 'replace',
-};
+export { LX_SYNC_CONFIG_KEY, LX_SYNC_DEVICES_KEY, DEFAULT_SERVER_NAME } from './constants';

@@ -42,7 +42,6 @@ import {
 import {
     bindLxSync,
     loadLxSyncConfig,
-    setLxSyncDependencies,
 } from './music_modules/lx_sync.js';
 import {
     installArtworkFallback,
@@ -255,10 +254,6 @@ setCustomPlaylistDependencies({
     playSongloftSongOnSpeaker,
     openSongloftPlaylistTarget,
     setControlDisabled,
-});
-
-setLxSyncDependencies({
-    loadCustomPlaylists,
 });
 
 export async function initMusicUI() {

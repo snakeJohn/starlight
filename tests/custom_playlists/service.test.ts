@@ -44,18 +44,48 @@ const kgSong = {
   },
 } satisfies SearchResultSong;
 
+function responseJson(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+/** Bridge import result with Songloft library song ids (required to fill native playlists). */
+function importResult(songs: SearchResultSong[]) {
+  return {
+    total: songs.length,
+    skipped: 0,
+    payloads: songs.map((song, index) => ({ id: index + 1, title: song.title })),
+    songs: songs.map((song, index) => ({ id: index + 101, title: song.title, artist: song.artist })),
+    errors: [] as Array<{ title: string; message: string }>,
+  };
+}
+
+function mockHostPlaylistAdd(expected?: { playlistId: number; songIds: number[] }) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes('/api/v1/playlists/') && url.endsWith('/songs') && init?.method === 'POST') {
+      if (expected) {
+        expect(url).toContain(`/api/v1/playlists/${expected.playlistId}/songs`);
+        expect(JSON.parse(String(init.body))).toEqual({ song_ids: expected.songIds });
+      }
+      return responseJson({ added: expected?.songIds.length ?? 1 });
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  });
+  globalThis.fetch = fetchMock;
+  return fetchMock;
+}
+
 function createService() {
   const bridge = {
     importSongs: vi.fn(async (songs: SearchResultSong[]) => ({
       total: songs.length,
       payloads: songs.map((song) => ({ title: song.title, source_data: JSON.stringify(song.source_data) })),
+      songs: songs.map((song, index) => ({ id: index + 101, title: song.title })),
     })),
-    importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => ({
-      total: songs.length,
-      skipped: 0,
-      payloads: songs.map((song) => ({ title: song.title, source_data: JSON.stringify(song.source_data) })),
-      errors: [],
-    })),
+    importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => importResult(songs)),
     resolveSearchSong: vi.fn(async (title: string, artist?: string) => ({
       ...(title === kgSong.title ? kgSong : kwSong),
       artist: artist || (title === kgSong.title ? kgSong.artist : kwSong.artist),
@@ -73,6 +103,44 @@ describe('CustomPlaylistService', () => {
     vi.clearAllMocks();
   });
 
+  it('serializes concurrent mutate so last writer cannot drop prior edits', async () => {
+    const store = new CustomPlaylistStore();
+    await store.saveAll([]);
+
+    const a = store.mutate(async (list) => {
+      // Yield so a concurrent mutate can queue behind this exclusive section.
+      await Promise.resolve();
+      return [
+        ...list,
+        {
+          id: 'a',
+          name: 'A',
+          cover_url: '',
+          imported_at: 't',
+          updated_at: 't',
+          songs: [],
+        },
+      ];
+    });
+    const b = store.mutate(async (list) => {
+      await Promise.resolve();
+      return [
+        ...list,
+        {
+          id: 'b',
+          name: 'B',
+          cover_url: '',
+          imported_at: 't',
+          updated_at: 't',
+          songs: [],
+        },
+      ];
+    });
+    await Promise.all([a, b]);
+    const final = await store.loadAll();
+    expect(final.map((p) => p.id).sort()).toEqual(['a', 'b']);
+  });
+
   it('returns an existing playlist when creating the same name twice', async () => {
     const { service } = createService();
 
@@ -81,6 +149,24 @@ describe('CustomPlaylistService', () => {
 
     expect(second.id).toBe(first.id);
     await expect(service.list()).resolves.toHaveLength(1);
+  });
+
+  it('does not create a second native Songloft playlist when the name already exists', async () => {
+    const createNative = vi.fn(async (input: { name: string }) => ({
+      id: createNative.mock.calls.length + 10,
+      name: input.name,
+    }));
+    (songloft.playlists as unknown as Record<string, unknown>).create = createNative;
+    const { service } = createService();
+
+    const first = await service.create('古风');
+    expect(createNative).toHaveBeenCalledTimes(1);
+    expect(first.native_playlist_id).toBe(11);
+
+    const second = await service.create('古风');
+    expect(second.id).toBe(first.id);
+    // Idempotent create must not orphan another host playlist.
+    expect(createNative).toHaveBeenCalledTimes(1);
   });
 
   it('stores source name and full LX source_data when adding a song', async () => {
@@ -219,6 +305,8 @@ describe('CustomPlaylistService', () => {
 
   it('resolves portable playlist song references when adding them into an own playlist', async () => {
     const { bridge, service } = createService();
+    (songloft.playlists as unknown as Record<string, unknown>).create = vi.fn(async () => ({ id: 55 }));
+    const fetchMock = mockHostPlaylistAdd({ playlistId: 55, songIds: [101] });
 
     const playlist = await service.addSong('古风', {
       title: '为龙',
@@ -232,23 +320,90 @@ describe('CustomPlaylistService', () => {
     expect(bridge.resolveSearchSong).toHaveBeenCalledWith('为龙', '河图');
     expect(bridge.importSongs).toHaveBeenCalledWith([kgSong]);
     expect(playlist.songs[0]?.source_data).toEqual(kgSong.source_data);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it('re-resolves online even when LX source_data is present (multi-source, not locked)', async () => {
+    const onlineHit = {
+      ...kwSong,
+      cover_url: 'https://img.test/online-cover.jpg',
+      source_data: {
+        ...kwSong.source_data,
+        quality: 'flac' as const,
+      },
+    } satisfies SearchResultSong;
+    const bridge = {
+      importSongs: vi.fn(async (songs: SearchResultSong[]) => ({
+        total: songs.length,
+        payloads: songs.map((song) => ({ title: song.title })),
+        songs: songs.map((song, index) => ({ id: index + 101, title: song.title })),
+      })),
+      importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => importResult(songs)),
+      resolveSearchSong: vi.fn(async () => onlineHit),
+    } as unknown as BridgeService;
+    mockHostPlaylistAdd();
+    const store = new CustomPlaylistStore();
+    await store.saveAll([
+      {
+        id: 'lx_with_src',
+        name: '古风',
+        cover_url: '',
+        sourceListId: 'lx:user:1',
+        imported_at: '2020-01-01T00:00:00.000Z',
+        updated_at: '2020-01-01T00:00:00.000Z',
+        songs: [
+          {
+            title: '稻花香',
+            artist: '周杰伦',
+            album: '',
+            duration: 0,
+            cover_url: '',
+            stable_key: 'lx:kw:old',
+            // Stale / incomplete LX source — must NOT short-circuit online resolve.
+            source_data: {
+              platform: 'kw',
+              quality: '128k',
+              songInfo: {
+                source: 'kw',
+                name: '稻花香',
+                singer: '周杰伦',
+                album: '',
+                duration: 0,
+                musicId: 'old',
+              },
+            },
+          },
+        ],
+      },
+    ]);
+    const service = new CustomPlaylistService(store, bridge, {
+      create: vi.fn(async () => ({ id: 1 })),
+      addSongs: vi.fn(async () => undefined),
+    });
+
+    await service.syncToSongloftPlaylist('lx_with_src');
+    expect(bridge.resolveSearchSong).toHaveBeenCalledWith('稻花香', '周杰伦');
+    expect(bridge.importSongsBestEffort).toHaveBeenCalledWith([
+      expect.objectContaining({
+        cover_url: 'https://img.test/online-cover.jpg',
+        source_data: expect.objectContaining({ quality: 'flac' }),
+      }),
+    ]);
+    const after = await store.loadAll();
+    expect(after[0].songs[0]?.cover_url).toBe('https://img.test/online-cover.jpg');
   });
 
   it('syncs imported portable playlists into a native Songloft playlist on demand', async () => {
     const bridge = {
       importSongs: vi.fn(),
-      importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => ({
-        total: songs.length,
-        skipped: 0,
-        payloads: songs.map((song, index) => ({ id: index + 1, title: song.title })),
-        errors: [],
-      })),
+      importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => importResult(songs)),
       resolveSearchSong: vi.fn(async (title: string) => (title === kgSong.title ? kgSong : null)),
     } as unknown as BridgeService;
     const nativePlaylists = {
       create: vi.fn(async () => ({ id: 77 })),
       addSongs: vi.fn(async () => undefined),
     };
+    const fetchMock = mockHostPlaylistAdd({ playlistId: 77, songIds: [101] });
     const service = new CustomPlaylistService(new CustomPlaylistStore(), bridge, nativePlaylists);
     const imported = await service.importNetworkPlaylist({
       source: 'kg',
@@ -267,16 +422,285 @@ describe('CustomPlaylistService', () => {
       skipped: 0,
     });
 
+    // Network playlist songs already have source_data but still re-resolve online.
     expect(bridge.resolveSearchSong).toHaveBeenCalledWith('为龙', '河图');
     expect(bridge.importSongsBestEffort).toHaveBeenCalledWith([kgSong]);
     expect(nativePlaylists.create).toHaveBeenCalledWith({ name: '酷狗热歌' });
-    expect(nativePlaylists.addSongs).toHaveBeenCalledWith(77, [expect.objectContaining({ title: '为龙' })]);
+    // Host REST API gets library song ids — not remote payloads.
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:18191/api/v1/playlists/77/songs',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ song_ids: [101] }),
+      }),
+    );
+    expect(nativePlaylists.addSongs).not.toHaveBeenCalled();
     await expect(service.list()).resolves.toEqual([
       expect.objectContaining({
         id: imported.id,
         native_playlist_id: 77,
       }),
     ]);
+  });
+
+  it('does not clobber concurrent song updates when linking to Songloft', async () => {
+    const store = new CustomPlaylistStore();
+    await store.saveAll([
+      {
+        id: 'lx_race',
+        name: '古风精选',
+        cover_url: '',
+        sourceListId: 'lx:user:ul1',
+        source_name: '洛雪同步',
+        imported_at: '2020-01-01T00:00:00.000Z',
+        updated_at: '2020-01-01T00:00:00.000Z',
+        songs: [
+          {
+            title: '为龙',
+            artist: '河图',
+            album: '',
+            duration: 1,
+            cover_url: '',
+            stable_key: 'lx:kg:1',
+            source_data: kgSong.source_data,
+          },
+        ],
+      },
+    ]);
+    const bridge = {
+      importSongs: vi.fn(async () => ({ total: 0, payloads: [], songs: [] })),
+      importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => {
+        // Mid-import: LX snapshot rewrote songs under the same playlist id.
+        await store.saveAll([
+          {
+            id: 'lx_race',
+            name: '古风精选',
+            cover_url: '',
+            sourceListId: 'lx:user:ul1',
+            source_name: '洛雪同步',
+            imported_at: '2020-01-01T00:00:00.000Z',
+            updated_at: '2020-01-02T00:00:00.000Z',
+            songs: [
+              {
+                title: '新曲',
+                artist: '新歌手',
+                album: '',
+                duration: 1,
+                cover_url: '',
+                stable_key: 'lx:new',
+              },
+            ],
+          },
+        ]);
+        return importResult(songs);
+      }),
+      resolveSearchSong: vi.fn(async () => kgSong),
+    } as unknown as BridgeService;
+    const nativePlaylists = {
+      create: vi.fn(async () => ({ id: 88 })),
+      addSongs: vi.fn(async () => undefined),
+    };
+    mockHostPlaylistAdd({ playlistId: 88, songIds: [101] });
+    const service = new CustomPlaylistService(store, bridge, nativePlaylists);
+
+    const result = await service.syncToSongloftPlaylist('lx_race');
+    expect(result.playlist.native_playlist_id).toBe(88);
+    // Songs from concurrent LX write must survive (no full-object replace).
+    const after = await store.loadAll();
+    expect(after[0].songs.map((s) => s.title)).toEqual(['新曲']);
+    expect(after[0].native_playlist_id).toBe(88);
+  });
+
+  it('adds Songloft library song ids via host playlist API (not remote payloads)', async () => {
+    const bridge = {
+      importSongs: vi.fn(async () => ({ total: 0, payloads: [], songs: [] })),
+      importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => importResult(songs)),
+      resolveSearchSong: vi.fn(async () => kgSong),
+    } as unknown as BridgeService;
+    const nativePlaylists = {
+      create: vi.fn(async () => ({ id: 33 })),
+      setSongs: vi.fn(async () => undefined),
+      addSongs: vi.fn(async () => undefined),
+    };
+    const store = new CustomPlaylistStore();
+    await store.saveAll([
+      {
+        id: 'lx_set',
+        name: '测试',
+        cover_url: '',
+        sourceListId: 'lx:user:1',
+        imported_at: '2020-01-01T00:00:00.000Z',
+        updated_at: '2020-01-01T00:00:00.000Z',
+        songs: [
+          {
+            title: '为龙',
+            artist: '河图',
+            album: '',
+            duration: 1,
+            cover_url: '',
+            stable_key: 'k',
+            source_data: kgSong.source_data,
+          },
+        ],
+      },
+    ]);
+    const fetchMock = mockHostPlaylistAdd({ playlistId: 33, songIds: [101] });
+    const service = new CustomPlaylistService(store, bridge, nativePlaylists);
+    await service.syncToSongloftPlaylist('lx_set');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:18191/api/v1/playlists/33/songs',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ song_ids: [101] }),
+      }),
+    );
+    // Host path succeeds — SDK helpers should not be needed.
+    expect(nativePlaylists.setSongs).not.toHaveBeenCalled();
+    expect(nativePlaylists.addSongs).not.toHaveBeenCalled();
+  });
+
+  it('falls back to SDK addSongs(ids) when host playlist API is unavailable', async () => {
+    const bridge = {
+      importSongs: vi.fn(async () => ({ total: 0, payloads: [], songs: [] })),
+      importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => importResult(songs)),
+      resolveSearchSong: vi.fn(async () => kgSong),
+    } as unknown as BridgeService;
+    const nativePlaylists = {
+      create: vi.fn(async () => ({ id: 44 })),
+      addSongs: vi.fn(async () => undefined),
+    };
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('host down');
+    });
+    const store = new CustomPlaylistStore();
+    await store.saveAll([
+      {
+        id: 'lx_sdk',
+        name: 'SDK 回退',
+        cover_url: '',
+        sourceListId: 'lx:user:sdk',
+        imported_at: '2020-01-01T00:00:00.000Z',
+        updated_at: '2020-01-01T00:00:00.000Z',
+        songs: [
+          {
+            title: '为龙',
+            artist: '河图',
+            album: '',
+            duration: 1,
+            cover_url: '',
+            stable_key: 'k',
+            source_data: kgSong.source_data,
+          },
+        ],
+      },
+    ]);
+    const service = new CustomPlaylistService(store, bridge, nativePlaylists);
+    await service.syncToSongloftPlaylist('lx_sdk');
+    expect(nativePlaylists.addSongs).toHaveBeenCalledWith(44, [101]);
+  });
+
+  it('reuses an existing Songloft playlist by the same name when linking', async () => {
+    const bridge = {
+      importSongs: vi.fn(async () => ({ total: 0, payloads: [], songs: [] })),
+      importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => importResult(songs)),
+      resolveSearchSong: vi.fn(async () => kgSong),
+    } as unknown as BridgeService;
+    const nativePlaylists = {
+      list: vi.fn(async () => [{ id: 501, name: '古风精选' }]),
+      create: vi.fn(async () => ({ id: 999 })),
+      addSongs: vi.fn(async () => undefined),
+    };
+    const store = new CustomPlaylistStore();
+    await store.saveAll([
+      {
+        id: 'lx_user',
+        name: '古风精选',
+        cover_url: '',
+        sourceListId: 'lx:user:ul1',
+        source_name: '洛雪同步',
+        imported_at: '2020-01-01T00:00:00.000Z',
+        updated_at: '2020-01-01T00:00:00.000Z',
+        songs: [
+          {
+            title: '为龙',
+            artist: '河图',
+            album: '',
+            duration: 1,
+            cover_url: '',
+            stable_key: 'lx:kg:1',
+            source_data: kgSong.source_data,
+          },
+        ],
+      },
+    ]);
+    const fetchMock = mockHostPlaylistAdd({ playlistId: 501, songIds: [101] });
+    const service = new CustomPlaylistService(store, bridge, nativePlaylists);
+
+    await expect(service.syncToSongloftPlaylist('lx_user')).resolves.toMatchObject({
+      playlist: expect.objectContaining({ native_playlist_id: 501, name: '古风精选' }),
+      total: 1,
+    });
+    expect(nativePlaylists.list).toHaveBeenCalled();
+    expect(nativePlaylists.create).not.toHaveBeenCalled();
+    expect(bridge.importSongsBestEffort).toHaveBeenCalledWith([
+      expect.objectContaining({ title: '为龙', source_data: kgSong.source_data }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:18191/api/v1/playlists/501/songs',
+      expect.objectContaining({ body: JSON.stringify({ song_ids: [101] }) }),
+    );
+  });
+
+  it('recreates Songloft playlist when stored native_playlist_id was deleted', async () => {
+    const bridge = {
+      importSongs: vi.fn(async () => ({ total: 0, payloads: [], songs: [] })),
+      importSongsBestEffort: vi.fn(async (songs: SearchResultSong[]) => importResult(songs)),
+      resolveSearchSong: vi.fn(async () => kgSong),
+    } as unknown as BridgeService;
+    const nativePlaylists = {
+      // Stale id 77 is gone; host only has unrelated playlists.
+      list: vi.fn(async () => [{ id: 1, name: '其他' }]),
+      create: vi.fn(async () => ({ id: 902 })),
+      addSongs: vi.fn(async () => undefined),
+    };
+    const store = new CustomPlaylistStore();
+    await store.saveAll([
+      {
+        id: 'lx_deleted',
+        name: '古风精选',
+        cover_url: '',
+        sourceListId: 'lx:user:ul1',
+        source_name: '洛雪同步',
+        native_playlist_id: 77,
+        native_playlist_name: '古风精选',
+        imported_at: '2020-01-01T00:00:00.000Z',
+        updated_at: '2020-01-01T00:00:00.000Z',
+        songs: [
+          {
+            title: '为龙',
+            artist: '河图',
+            album: '',
+            duration: 1,
+            cover_url: '',
+            stable_key: 'lx:kg:1',
+            source_data: kgSong.source_data,
+          },
+        ],
+      },
+    ]);
+    const fetchMock = mockHostPlaylistAdd({ playlistId: 902, songIds: [101] });
+    const service = new CustomPlaylistService(store, bridge, nativePlaylists);
+
+    await expect(service.syncToSongloftPlaylist('lx_deleted')).resolves.toMatchObject({
+      playlist: expect.objectContaining({ native_playlist_id: 902, name: '古风精选' }),
+      total: 1,
+    });
+    expect(nativePlaylists.list).toHaveBeenCalled();
+    expect(nativePlaylists.create).toHaveBeenCalledWith({ name: '古风精选' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:18191/api/v1/playlists/902/songs',
+      expect.objectContaining({ body: JSON.stringify({ song_ids: [101] }) }),
+    );
   });
 
   it('refreshes the existing playlist when importing the same source and upstream id twice', async () => {

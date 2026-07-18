@@ -6,7 +6,7 @@
   "author": "Songloft Starlight",
   "homepage": "https://github.com/snakeJohn/starlight",
   "license": "Apache-2.0",
-  "icon": "icon.svg",
+  "icon": "icon.png",
   "entryPath": "starlight",
   "main": "main.js",
   "minHostVersion": "2.0.0",
@@ -18,11 +18,18 @@
     "playlists.write",
     "inter-plugin",
     "command",
-    "jsenv"
+    "jsenv",
+    "websocket"
   ],
   "updateUrl": "https://raw.githubusercontent.com/snakeJohn/starlight/main/plugin.json",
   "download_url": "https://github.com/snakeJohn/starlight/releases/download/V-2026.07.05.07.47/starlight-V-2026.07.05.07.47.zip",
   "entryHash": "82bbfade0f5178712714e2156d04b64b0bb074ee8f1c1db0d7d7b3e701cbfd4e",
   "zipHash": "80f81c19215b6884e1843fecf20e2da0b456592b1a69f2cea84d243a478a9988",
-  "releaseVersion": "V-2026.07.05.07.47"
+  "releaseVersion": "V-2026.07.05.07.47",
+  "publicPaths": [
+    "/hello",
+    "/id",
+    "/ah",
+    "/socket"
+  ]
 }
