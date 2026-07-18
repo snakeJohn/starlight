@@ -10,15 +10,6 @@ export function setLxSyncDependencies(dependencies = {}) {
     }
 }
 
-function statusText(config) {
-    if (!config) return '未连接';
-    if (config.connected) {
-        const last = config.lastSyncAt ? ` · 上次同步 ${formatTime(config.lastSyncAt)}` : '';
-        return `已连接 ${config.username || ''}${last}`.trim();
-    }
-    return config.username || config.baseUrl ? '已保存，未连接' : '未连接';
-}
-
 function formatTime(value) {
     try {
         const date = new Date(value);
@@ -29,21 +20,29 @@ function formatTime(value) {
     }
 }
 
+function statusText(config) {
+    if (!config) return '就绪';
+    const bits = [];
+    if (config.lastImportAt) bits.push(`上次导入 ${formatTime(config.lastImportAt)}`);
+    if (config.lastExportAt) bits.push(`上次导出 ${formatTime(config.lastExportAt)}`);
+    return bits.length ? bits.join(' · ') : '就绪';
+}
+
 function formEl() {
     return $('[data-role="lx-sync-form"]');
+}
+
+function payloadEl() {
+    return $('[data-role="lx-sync-payload"]');
 }
 
 function applyConfigToForm(config) {
     const form = formEl();
     if (!form || !config) return;
-    if (form.elements.baseUrl) form.elements.baseUrl.value = config.baseUrl || '';
-    if (form.elements.username) form.elements.username.value = config.username || '';
     if (form.elements.conflict) form.elements.conflict.value = config.conflict === 'merge' ? 'merge' : 'replace';
     if (form.elements.importDefaultList) {
         form.elements.importDefaultList.checked = config.importDefaultList !== false;
     }
-    // Never refill password.
-    if (form.elements.password) form.elements.password.value = '';
 }
 
 function setStatus(message, config = state.lxSyncConfig) {
@@ -56,13 +55,13 @@ function setStatus(message, config = state.lxSyncConfig) {
 }
 
 function renderPreview(preview) {
-    const node = $('[data-role="lx-sync-preview-list"]') || $('[data-role="lx-sync-preview"]');
+    const node = $('[data-role="lx-sync-preview-list"]');
     if (!node) return;
     const playlists = asArray(preview?.playlists);
     if (!playlists.length) {
         node.innerHTML = preview
-            ? '<div class="empty-state">服务器上没有可导入的歌单</div>'
-            : '';
+            ? '<div class="empty-state">JSON 中没有可导入的歌单</div>'
+            : '<div class="empty-state">粘贴 JSON 或选择文件后可预览歌单摘要。</div>';
         return;
     }
     node.innerHTML = playlists.map(playlist => `
@@ -83,28 +82,35 @@ export async function loadLxSyncConfig() {
     return config;
 }
 
-function readFormValues() {
+function readOptions() {
     const form = formEl();
     if (!form) {
-        return { baseUrl: '', username: '', password: '', conflict: 'replace', importDefaultList: true };
+        return { conflict: 'replace', importDefaultList: true };
     }
     return {
-        baseUrl: form.elements.baseUrl?.value?.trim() || '',
-        username: form.elements.username?.value?.trim() || '',
-        password: form.elements.password?.value || '',
         conflict: form.elements.conflict?.value === 'merge' ? 'merge' : 'replace',
         importDefaultList: Boolean(form.elements.importDefaultList?.checked),
     };
 }
 
+async function readPayloadText() {
+    const textarea = payloadEl();
+    const text = textarea?.value?.trim() || '';
+    if (text) return text;
+
+    const fileInput = $('[data-role="lx-sync-file"]');
+    const file = fileInput?.files?.[0];
+    if (file) {
+        const content = await file.text();
+        if (textarea) textarea.value = content;
+        return content.trim();
+    }
+    throw new Error('请粘贴洛雪列表 JSON，或选择 .json 文件');
+}
+
 async function saveConfigFromForm() {
-    const values = readFormValues();
-    const config = await api.put('/lx-sync/config', {
-        baseUrl: values.baseUrl,
-        username: values.username,
-        conflict: values.conflict,
-        importDefaultList: values.importDefaultList,
-    });
+    const options = readOptions();
+    const config = await api.put('/lx-sync/config', options);
     setState({ lxSyncConfig: config });
     applyConfigToForm(config);
     setStatus('设置已保存', config);
@@ -112,45 +118,14 @@ async function saveConfigFromForm() {
     return config;
 }
 
-async function connectFromForm() {
-    const values = readFormValues();
-    if (!values.baseUrl || !values.username || !values.password) {
-        throw new Error('请填写服务器地址、用户名和密码');
-    }
-    // Persist non-secret options first
-    await api.put('/lx-sync/config', {
-        baseUrl: values.baseUrl,
-        username: values.username,
-        conflict: values.conflict,
-        importDefaultList: values.importDefaultList,
-    }).catch(() => {});
-
-    const config = await api.post('/lx-sync/connect', {
-        baseUrl: values.baseUrl,
-        username: values.username,
-        password: values.password,
-    });
-    setState({ lxSyncConfig: config });
-    applyConfigToForm(config);
-    setStatus(statusText(config), config);
-    toast('洛雪同步已连接');
-    return config;
-}
-
-async function disconnectLxSync() {
-    const config = await api.post('/lx-sync/disconnect');
-    setState({ lxSyncConfig: config, lxSyncPreview: null });
-    applyConfigToForm(config);
-    renderPreview(null);
-    setStatus(statusText(config), config);
-    toast('已断开洛雪同步');
-    return config;
-}
-
 async function previewLxSync() {
-    // Persist form options so preview matches what the user currently sees.
-    await saveConfigFromForm().catch(() => {});
-    const preview = await api.get('/lx-sync/preview');
+    const options = readOptions();
+    await api.put('/lx-sync/config', options).catch(() => {});
+    const payload = await readPayloadText();
+    const preview = await api.post('/lx-sync/preview', {
+        listData: payload,
+        ...options,
+    });
     setState({ lxSyncPreview: preview });
     renderPreview(preview);
     setStatus(`预览 ${preview?.playlists?.length || 0} 个歌单，共 ${preview?.totalSongs || 0} 首`);
@@ -158,22 +133,59 @@ async function previewLxSync() {
     return preview;
 }
 
-async function pullLxSync() {
-    // Persist conflict / importDefaultList before pull (same as connect).
-    await saveConfigFromForm().catch(() => {});
-    const result = await api.post('/lx-sync/pull');
+async function importLxSync() {
+    const options = readOptions();
+    await api.put('/lx-sync/config', options).catch(() => {});
+    const payload = await readPayloadText();
+    const result = await api.post('/lx-sync/import', {
+        listData: payload,
+        ...options,
+    });
     setState({
         lxSyncConfig: {
             ...(state.lxSyncConfig || {}),
-            lastSyncAt: result?.lastSyncAt,
-            connected: true,
+            lastImportAt: result?.lastImportAt,
+            conflict: options.conflict,
+            importDefaultList: options.importDefaultList,
         },
     });
     setStatus(
-        `同步完成：新建 ${result?.playlistsCreated || 0}，更新 ${result?.playlistsUpdated || 0}，歌曲 ${result?.songsImported || 0}`,
+        `导入完成：新建 ${result?.playlistsCreated || 0}，更新 ${result?.playlistsUpdated || 0}，歌曲 ${result?.songsImported || 0}`,
     );
-    toast(`已同步 ${(result?.playlistsCreated || 0) + (result?.playlistsUpdated || 0)} 个歌单`);
+    toast(`已导入 ${(result?.playlistsCreated || 0) + (result?.playlistsUpdated || 0)} 个歌单`);
     await loadCustomPlaylists().catch(() => {});
+    await loadLxSyncConfig().catch(() => {});
+    return result;
+}
+
+function downloadJson(filename, data) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function exportLxSync() {
+    const result = await api.post('/lx-sync/export', {});
+    const listData = result?.listData || result;
+    downloadJson(`lx-list-${new Date().toISOString().slice(0, 10)}.json`, listData);
+    const textarea = payloadEl();
+    if (textarea) {
+        textarea.value = JSON.stringify(listData, null, 2);
+    }
+    setState({
+        lxSyncConfig: {
+            ...(state.lxSyncConfig || {}),
+            lastExportAt: result?.lastExportAt,
+        },
+    });
+    setStatus(`导出完成 · ${formatTime(result?.lastExportAt || new Date().toISOString())}`);
+    toast('已导出洛雪列表 JSON');
     await loadLxSyncConfig().catch(() => {});
     return result;
 }
@@ -183,6 +195,23 @@ export function bindLxSync() {
     if (!panel || panel.dataset.bound === '1') return;
     panel.dataset.bound = '1';
 
+    const fileInput = $('[data-role="lx-sync-file"]');
+    if (fileInput && fileInput.dataset.bound !== '1') {
+        fileInput.dataset.bound = '1';
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files?.[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const textarea = payloadEl();
+                if (textarea) textarea.value = text;
+                toast(`已载入文件：${file.name}`);
+            } catch (error) {
+                toast(error.message || '读取文件失败', 'error');
+            }
+        });
+    }
+
     panel.addEventListener('click', async event => {
         const button = event.target.closest('button[data-action]');
         if (!button || !panel.contains(button)) return;
@@ -190,10 +219,9 @@ export function bindLxSync() {
         if (!action || !action.startsWith('lx-sync-')) return;
         button.disabled = true;
         try {
-            if (action === 'lx-sync-connect') await connectFromForm();
-            if (action === 'lx-sync-disconnect') await disconnectLxSync();
             if (action === 'lx-sync-preview') await previewLxSync();
-            if (action === 'lx-sync-pull') await pullLxSync();
+            if (action === 'lx-sync-import' || action === 'lx-sync-pull') await importLxSync();
+            if (action === 'lx-sync-export') await exportLxSync();
             if (action === 'lx-sync-save-config') await saveConfigFromForm();
         } catch (error) {
             toast(error.message || '洛雪同步操作失败', 'error');

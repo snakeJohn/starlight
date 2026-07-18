@@ -1,6 +1,6 @@
 import type { CustomPlaylist, CustomPlaylistSong } from '../custom_playlists/types';
 
-/** Supported Songloft/LX online music platforms. */
+/** Supported online music platforms in LX Music data. */
 export type LxMusicPlatform = 'kw' | 'kg' | 'tx' | 'mg' | 'wy';
 
 export interface LxMusicInfoMeta {
@@ -36,41 +36,35 @@ export interface LxUserListInfo {
   list: LxMusicInfo[];
 }
 
+/**
+ * LX Music desktop / mobile "我的列表" full snapshot shape
+ * (`defaultList` + `loveList` + `userList`).
+ */
 export interface LxListData {
   defaultList: LxMusicInfo[];
   loveList: LxMusicInfo[];
   userList: LxUserListInfo[];
+  tempList?: LxMusicInfo[];
 }
 
 export type LxSyncConflict = 'replace' | 'merge';
 
+/** Local preferences only — no remote server credentials. */
 export interface LxSyncConfig {
-  baseUrl: string;
-  username: string;
-  token?: string;
-  lastSyncAt?: string;
   importDefaultList: boolean;
   conflict: LxSyncConflict;
+  lastImportAt?: string;
+  lastExportAt?: string;
 }
 
 export interface LxSyncConfigPublic {
-  baseUrl: string;
-  username: string;
-  connected: boolean;
-  lastSyncAt?: string;
   importDefaultList: boolean;
   conflict: LxSyncConflict;
-}
-
-export interface LxSyncConnectInput {
-  baseUrl: string;
-  username: string;
-  password: string;
+  lastImportAt?: string;
+  lastExportAt?: string;
 }
 
 export interface LxSyncConfigPatch {
-  baseUrl?: string;
-  username?: string;
   importDefaultList?: boolean;
   conflict?: LxSyncConflict;
 }
@@ -87,17 +81,21 @@ export interface LxSyncPreviewResult {
   totalSongs: number;
 }
 
-export interface LxSyncPullStats {
+export interface LxSyncImportStats {
   playlistsCreated: number;
   playlistsUpdated: number;
   songsImported: number;
-  playlists: Array<Pick<CustomPlaylist, 'id' | 'name' | 'songs'> & { songCount: number }>;
-  lastSyncAt: string;
+  playlists: Array<Pick<CustomPlaylist, 'id' | 'name'> & { songCount: number }>;
+  lastImportAt: string;
 }
+
+/** @deprecated Use LxSyncImportStats */
+export type LxSyncPullStats = LxSyncImportStats;
 
 export interface LxMappedPlaylist {
   name: string;
-  native_playlist_id: string;
+  /** Stable LX-side identity stored as CustomPlaylist.sourceListId */
+  lxListId: string;
   kind: 'love' | 'default' | 'user';
   cover_url: string;
   songs: CustomPlaylistSong[];
@@ -105,14 +103,15 @@ export interface LxMappedPlaylist {
 
 export const LX_SYNC_CONFIG_KEY = 'starlight:lx_sync:config';
 
-export const LX_NATIVE_IDS = {
+export const LX_LIST_IDS = {
   love: 'lx:love',
   default: 'lx:default',
 } as const;
 
+/** @deprecated Use LX_LIST_IDS */
+export const LX_NATIVE_IDS = LX_LIST_IDS;
+
 export const DEFAULT_LX_SYNC_CONFIG: LxSyncConfig = {
-  baseUrl: '',
-  username: '',
   importDefaultList: true,
   conflict: 'replace',
 };

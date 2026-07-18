@@ -3,8 +3,8 @@ import {
   mapListDataToPlaylists,
   mapLxMusicToSong,
   mergeSongsByStableKey,
-  normalizeBaseUrl,
   parseIntervalSeconds,
+  parseLxListPayload,
   summarizeListData,
 } from '../../src/lx_sync/mapper';
 import type { LxListData, LxMusicInfo } from '../../src/lx_sync/types';
@@ -55,9 +55,9 @@ describe('lx_sync mapper', () => {
     expect(parseIntervalSeconds('bad')).toBe(0);
   });
 
-  it('normalizes base url trailing slashes', () => {
-    expect(normalizeBaseUrl('http://192.168.1.10:9527/')).toBe('http://192.168.1.10:9527');
-    expect(normalizeBaseUrl('  https://lx.example.com/// ')).toBe('https://lx.example.com');
+  it('parses list payload envelopes', () => {
+    const data = parseLxListPayload({ data: { defaultList: [], loveList: [], userList: [] } });
+    expect(data.userList).toEqual([]);
   });
 
   it('maps online platform songs with source_data', () => {
@@ -112,9 +112,9 @@ describe('lx_sync mapper', () => {
 
     const playlists = mapListDataToPlaylists(data);
     expect(playlists).toHaveLength(3);
-    expect(playlists[0]).toMatchObject({ name: '我喜欢', native_playlist_id: 'lx:love', kind: 'love' });
-    expect(playlists[1]).toMatchObject({ name: '默认列表', native_playlist_id: 'lx:default', kind: 'default' });
-    expect(playlists[2]).toMatchObject({ name: '古风', native_playlist_id: 'lx:user:u1', kind: 'user' });
+    expect(playlists[0]).toMatchObject({ name: '我喜欢', lxListId: 'lx:love', kind: 'love' });
+    expect(playlists[1]).toMatchObject({ name: '默认列表', lxListId: 'lx:default', kind: 'default' });
+    expect(playlists[2]).toMatchObject({ name: '古风', lxListId: 'lx:user:u1', kind: 'user' });
     expect(playlists[2]?.songs).toHaveLength(1);
 
     const withoutDefault = mapListDataToPlaylists(data, { importDefaultList: false });

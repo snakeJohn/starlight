@@ -1,120 +1,81 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LxSyncClient } from '../../src/lx_sync/client';
-import { StarlightError } from '../../src/system/errors';
+import { describe, expect, it } from 'vitest';
+import { parseLxListPayload, mapPlaylistsToListData, formatInterval } from '../../src/lx_sync/mapper';
+import type { CustomPlaylist } from '../../src/custom_playlists/types';
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-  } as Response;
-}
-
-describe('LxSyncClient', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it('logs in and stores token without exposing password in errors', async () => {
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      expect(url).toBe('http://192.168.1.10:9527/api/user/login');
-      expect(init?.method).toBe('POST');
-      const body = JSON.parse(String(init?.body || '{}'));
-      expect(body).toEqual({ username: 'alice', password: 'secret' });
-      return jsonResponse({ success: true, token: 'tok-abc' });
-    });
-
-    const client = new LxSyncClient({
-      baseUrl: 'http://192.168.1.10:9527/',
-      fetchImpl: fetchMock as unknown as typeof fetch,
-    });
-
-    await expect(client.login('alice', 'secret')).resolves.toBe('tok-abc');
-    expect(client.getToken()).toBe('tok-abc');
-    expect(client.getBaseUrl()).toBe('http://192.168.1.10:9527');
-  });
-
-  it('fetches list with x-user-token header', async () => {
-    const listData = {
+describe('parseLxListPayload (file/json based, no server)', () => {
+  it('parses direct ListData', () => {
+    const data = parseLxListPayload({
       defaultList: [],
       loveList: [{ id: '1', name: 'A', singer: 'B', source: 'kw', interval: '01:00', meta: {} }],
       userList: [],
-    };
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      expect(url).toBe('http://lx.test/api/user/list');
-      expect(init?.method).toBe('GET');
-      expect((init?.headers as Record<string, string>)['x-user-token']).toBe('tok-1');
-      return jsonResponse(listData);
     });
-
-    const client = new LxSyncClient({
-      baseUrl: 'http://lx.test',
-      token: 'tok-1',
-      fetchImpl: fetchMock as unknown as typeof fetch,
-    });
-
-    await expect(client.getList()).resolves.toEqual(listData);
+    expect(data.loveList).toHaveLength(1);
+    expect(data.defaultList).toEqual([]);
   });
 
-  it('unwraps nested data envelopes', async () => {
-    const fetchMock = vi.fn(async () =>
-      jsonResponse({
-        data: { defaultList: [], loveList: [], userList: [] },
-      }),
-    );
-    const client = new LxSyncClient({
-      baseUrl: 'http://lx.test',
-      token: 't',
-      fetchImpl: fetchMock as unknown as typeof fetch,
+  it('parses nested data envelope and string JSON', () => {
+    const nested = parseLxListPayload({
+      data: { defaultList: [], loveList: [], userList: [{ id: 'u1', name: 'X', list: [] }] },
     });
-    await expect(client.getList()).resolves.toEqual({
-      defaultList: [],
-      loveList: [],
-      userList: [],
-    });
+    expect(nested.userList[0].name).toBe('X');
+
+    const asString = parseLxListPayload(JSON.stringify({
+      listData: { defaultList: [{ id: 'd', name: 'D', singer: 'S', source: 'wy', interval: null, meta: {} }], loveList: [], userList: [] },
+    }));
+    expect(asString.defaultList).toHaveLength(1);
   });
 
-  it('throws AUTH_PASSWORD_FAILED on bad credentials', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ success: false, message: 'invalid' }, 401));
-    const client = new LxSyncClient({
-      baseUrl: 'http://lx.test',
-      fetchImpl: fetchMock as unknown as typeof fetch,
-    });
-    await expect(client.login('u', 'p')).rejects.toMatchObject({
-      code: 'AUTH_PASSWORD_FAILED',
-    } satisfies Partial<StarlightError>);
+  it('rejects non-list payloads', () => {
+    expect(() => parseLxListPayload({ foo: 1 })).toThrow(/未识别/);
+    expect(() => parseLxListPayload('not-json')).toThrow(/invalid JSON/);
+  });
+});
+
+describe('mapPlaylistsToListData export', () => {
+  it('exports love / default / user playlists', () => {
+    const playlists: CustomPlaylist[] = [
+      {
+        id: 'a',
+        name: '我喜欢',
+        cover_url: '',
+        sourceListId: 'lx:love',
+        imported_at: '',
+        updated_at: '',
+        songs: [{ title: 'L', artist: 'A', album: '', duration: 90, cover_url: '', stable_key: 'k1' }],
+      },
+      {
+        id: 'b',
+        name: '古风',
+        cover_url: '',
+        sourceListId: 'lx:user:ul1',
+        imported_at: '',
+        updated_at: '',
+        songs: [{
+          title: '为龙',
+          artist: '河图',
+          album: '',
+          duration: 240,
+          cover_url: '',
+          stable_key: 'k2',
+          source_data: {
+            platform: 'kg',
+            quality: '320k',
+            songInfo: { source: 'kg', name: '为龙', singer: '河图', album: '', duration: 240, hash: 'h1' },
+          },
+        }],
+      },
+    ];
+    const listData = mapPlaylistsToListData(playlists);
+    expect(listData.loveList).toHaveLength(1);
+    expect(listData.loveList[0].interval).toBe('01:30');
+    expect(listData.userList).toHaveLength(1);
+    expect(listData.userList[0].id).toBe('ul1');
+    expect(listData.userList[0].list[0].meta.hash).toBe('h1');
   });
 
-  it('requires token before getList', async () => {
-    const client = new LxSyncClient({ baseUrl: 'http://lx.test', fetchImpl: vi.fn() as unknown as typeof fetch });
-    await expect(client.getList()).rejects.toMatchObject({ code: 'AUTH_TOKEN_EXPIRED' });
-  });
-
-  it('maps list 401/403 to AUTH_TOKEN_EXPIRED', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ message: 'Unauthorized' }, 401));
-    const client = new LxSyncClient({
-      baseUrl: 'http://lx.test',
-      token: 'stale',
-      fetchImpl: fetchMock as unknown as typeof fetch,
-    });
-    await expect(client.getList()).rejects.toMatchObject({ code: 'AUTH_TOKEN_EXPIRED' });
-  });
-
-  it('posts setList with auth header', async () => {
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      expect(url).toBe('http://lx.test/api/user/list');
-      expect(init?.method).toBe('POST');
-      expect((init?.headers as Record<string, string>)['x-user-token']).toBe('tok');
-      return jsonResponse({ success: true });
-    });
-    const client = new LxSyncClient({
-      baseUrl: 'http://lx.test',
-      token: 'tok',
-      fetchImpl: fetchMock as unknown as typeof fetch,
-    });
-    await expect(
-      client.setList({ defaultList: [], loveList: [], userList: [] }),
-    ).resolves.toBeUndefined();
+  it('formats intervals', () => {
+    expect(formatInterval(65)).toBe('01:05');
+    expect(formatInterval(3661)).toBe('01:01:01');
+    expect(formatInterval(0)).toBeNull();
   });
 });

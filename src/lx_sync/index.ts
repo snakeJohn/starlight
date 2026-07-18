@@ -1,11 +1,13 @@
-export { LxSyncClient } from './client';
 export { LxSyncService } from './service';
 export {
+  formatInterval,
+  isLxListData,
   mapListDataToPlaylists,
   mapLxMusicToSong,
+  mapPlaylistsToListData,
   mergeSongsByStableKey,
-  normalizeBaseUrl,
   parseIntervalSeconds,
+  parseLxListPayload,
   summarizeListData,
 } from './mapper';
 export type {
@@ -15,8 +17,8 @@ export type {
   LxSyncConfig,
   LxSyncConfigPublic,
   LxSyncConflict,
-  LxSyncConnectInput,
+  LxSyncImportStats,
   LxSyncPreviewResult,
   LxSyncPullStats,
 } from './types';
-export { DEFAULT_LX_SYNC_CONFIG, LX_NATIVE_IDS, LX_SYNC_CONFIG_KEY } from './types';
+export { DEFAULT_LX_SYNC_CONFIG, LX_LIST_IDS, LX_NATIVE_IDS, LX_SYNC_CONFIG_KEY } from './types';

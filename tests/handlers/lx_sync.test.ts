@@ -1,14 +1,9 @@
-import { createRouter } from '@songloft/plugin-sdk';
-import type { HTTPRequest, HTTPResponse } from '@songloft/plugin-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRouter } from '@songloft/plugin-sdk';
+import type { HTTPRequest } from '@songloft/plugin-sdk';
 import { registerLxSyncHandlers } from '../../src/handlers/lx_sync';
-import type { LxSyncService } from '../../src/lx_sync/service';
-
-function parseResponseBody(response: HTTPResponse): any {
-  const body = response.body;
-  const text = typeof body === 'string' ? body : new TextDecoder().decode(body);
-  return JSON.parse(text);
-}
+import { LxSyncService } from '../../src/lx_sync/service';
+import { CustomPlaylistStore } from '../../src/custom_playlists/store';
 
 function request(method: string, path: string, body?: unknown): HTTPRequest {
   return {
@@ -20,104 +15,69 @@ function request(method: string, path: string, body?: unknown): HTTPRequest {
   } as HTTPRequest;
 }
 
-const publicConfig = {
-  baseUrl: 'http://lx.test',
-  username: 'alice',
-  connected: true,
-  importDefaultList: true,
-  conflict: 'replace' as const,
-};
-
-function createHarness() {
-  const router = createRouter();
-  const service = {
-    getConfig: vi.fn(async () => publicConfig),
-    updateConfig: vi.fn(async (patch) => ({ ...publicConfig, ...patch, connected: false })),
-    connect: vi.fn(async () => publicConfig),
-    disconnect: vi.fn(async () => ({ ...publicConfig, connected: false })),
-    preview: vi.fn(async () => ({
-      playlists: [{ id: 'lx:love', name: '我喜欢', songCount: 1, kind: 'love' }],
-      totalSongs: 1,
-    })),
-    pull: vi.fn(async () => ({
-      playlistsCreated: 1,
-      playlistsUpdated: 0,
-      songsImported: 1,
-      playlists: [],
-      lastSyncAt: '2026-07-18T00:00:00.000Z',
-    })),
-    importToSongloft: vi.fn(async (ids: string[]) => ({
-      results: ids.map((id) => ({ id, total: 0, skipped: 0, errors: [] })),
-    })),
-  } as unknown as LxSyncService;
-
-  registerLxSyncHandlers(router, service);
-  return { router, service };
-}
-
-describe('registerLxSyncHandlers', () => {
+describe('lx-sync handlers (local JSON)', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
-  it('gets and puts config without password', async () => {
-    const { router, service } = createHarness();
+  it('supports config, preview, import, export without server login', async () => {
+    const store = new CustomPlaylistStore();
+    const service = new LxSyncService({ playlistStore: store });
+    const router = createRouter();
+    registerLxSyncHandlers(router, service);
 
     const getRes = await router.handle(request('GET', '/api/lx-sync/config'));
     expect(getRes.statusCode).toBe(200);
-    expect(parseResponseBody(getRes).data).toEqual(publicConfig);
+    const getBody = JSON.parse(String(getRes.body));
+    expect(getBody.data.conflict).toBe('replace');
+    expect(getBody.data).not.toHaveProperty('baseUrl');
+
+    const rejectCreds = await router.handle(
+      request('PUT', '/api/lx-sync/config', { baseUrl: 'http://x', username: 'u' }),
+    );
+    expect(rejectCreds.statusCode).toBe(400);
 
     const putRes = await router.handle(
-      request('PUT', '/api/lx-sync/config', {
-        baseUrl: 'http://lx2.test',
-        importDefaultList: false,
-        conflict: 'merge',
-      }),
+      request('PUT', '/api/lx-sync/config', { conflict: 'merge', importDefaultList: false }),
     );
     expect(putRes.statusCode).toBe(200);
-    expect(service.updateConfig).toHaveBeenCalledWith({
-      baseUrl: 'http://lx2.test',
-      importDefaultList: false,
-      conflict: 'merge',
-    });
+    expect(JSON.parse(String(putRes.body)).data.conflict).toBe('merge');
 
-    const badPut = await router.handle(
-      request('PUT', '/api/lx-sync/config', { password: 'nope' }),
-    );
-    expect(badPut.statusCode).toBe(400);
-    expect(parseResponseBody(badPut).error.message).toMatch(/password/i);
+    const listData = {
+      defaultList: [],
+      loveList: [{ id: '1', name: 'A', singer: 'B', source: 'kw', interval: '01:00', meta: {} }],
+      userList: [],
+    };
+
+    const previewRes = await router.handle(request('POST', '/api/lx-sync/preview', { listData }));
+    expect(previewRes.statusCode).toBe(200);
+    expect(JSON.parse(String(previewRes.body)).data.totalSongs).toBe(1);
+
+    const importRes = await router.handle(request('POST', '/api/lx-sync/import', { listData }));
+    expect(importRes.statusCode).toBe(200);
+    expect(JSON.parse(String(importRes.body)).data.playlistsCreated).toBeGreaterThan(0);
+    expect((await store.loadAll()).length).toBeGreaterThan(0);
+
+    const exportRes = await router.handle(request('POST', '/api/lx-sync/export', {}));
+    expect(exportRes.statusCode).toBe(200);
+    const exported = JSON.parse(String(exportRes.body)).data.listData;
+    expect(exported.loveList.length).toBeGreaterThan(0);
   });
 
-  it('connects, disconnects, previews, pulls, imports', async () => {
-    const { router, service } = createHarness();
-
-    const connectRes = await router.handle(
-      request('POST', '/api/lx-sync/connect', {
-        baseUrl: 'http://lx.test',
-        username: 'alice',
-        password: 'secret',
-      }),
-    );
-    expect(connectRes.statusCode).toBe(200);
-    expect(service.connect).toHaveBeenCalledWith({
-      baseUrl: 'http://lx.test',
-      username: 'alice',
-      password: 'secret',
+  it('import-to-songloft requires playlist ids', async () => {
+    const service = new LxSyncService({
+      customPlaylists: {
+        syncToSongloftPlaylist: vi.fn(async () => ({
+          playlist: { id: 'x', name: 'x', cover_url: '', imported_at: '', updated_at: '', songs: [] },
+          total: 0,
+          skipped: 0,
+          errors: [],
+        })),
+      },
     });
-
-    expect((await router.handle(request('POST', '/api/lx-sync/disconnect'))).statusCode).toBe(200);
-    expect(service.disconnect).toHaveBeenCalled();
-
-    const previewRes = await router.handle(request('GET', '/api/lx-sync/preview'));
-    expect(parseResponseBody(previewRes).data.totalSongs).toBe(1);
-
-    const pullRes = await router.handle(request('POST', '/api/lx-sync/pull'));
-    expect(parseResponseBody(pullRes).data.playlistsCreated).toBe(1);
-
-    const importRes = await router.handle(
-      request('POST', '/api/lx-sync/import-to-songloft', { playlist_ids: ['a', 'b'] }),
-    );
-    expect(parseResponseBody(importRes).data.results).toHaveLength(2);
-    expect(service.importToSongloft).toHaveBeenCalledWith(['a', 'b']);
+    const router = createRouter();
+    registerLxSyncHandlers(router, service);
+    const bad = await router.handle(request('POST', '/api/lx-sync/import-to-songloft', {}));
+    expect(bad.statusCode).toBe(400);
   });
 });

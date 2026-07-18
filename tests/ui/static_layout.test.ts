@@ -726,7 +726,7 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toMatch(/input:focus,\s*select:focus,\s*textarea:focus\s*\{[^}]*box-shadow:\s*0 0 0 3px var\(--focus-ring\)/s);
   });
 
-  it('mounts a 洛雪同步 panel shell on the songlists tab for LX Sync wiring', () => {
+  it('mounts a 洛雪同步 panel shell on the songlists tab for local JSON import/export', () => {
     const html = indexHtml();
     const stylesheet = css();
     const songlistsStart = html.indexOf('<section class="tab-panel" id="tab-songlists">');
@@ -734,13 +734,13 @@ describe('static UI layout copy', () => {
     const songlistsHtml = html.slice(songlistsStart, rankingsStart);
 
     expect(songlistsHtml).toContain('data-role="lx-sync-panel"');
-    expect(songlistsHtml).toContain('data-role="lx-sync-base-url"');
-    expect(songlistsHtml).toContain('data-role="lx-sync-username"');
-    expect(songlistsHtml).toContain('data-role="lx-sync-password"');
-    expect(songlistsHtml).toContain('data-action="lx-sync-connect"');
-    expect(songlistsHtml).toContain('data-action="lx-sync-disconnect"');
+    expect(songlistsHtml).toContain('data-role="lx-sync-payload"');
+    expect(songlistsHtml).toContain('data-role="lx-sync-file"');
     expect(songlistsHtml).toContain('data-action="lx-sync-preview"');
-    expect(songlistsHtml).toContain('data-action="lx-sync-pull"');
+    expect(songlistsHtml).toContain('data-action="lx-sync-import"');
+    expect(songlistsHtml).toContain('data-action="lx-sync-export"');
+    expect(songlistsHtml).not.toContain('data-role="lx-sync-base-url"');
+    expect(songlistsHtml).not.toContain('data-action="lx-sync-connect"');
     expect(songlistsHtml).toContain('data-role="lx-sync-status"');
     expect(songlistsHtml).toContain('data-role="lx-sync-preview-list"');
     expect(songlistsHtml).toContain('洛雪同步');
