@@ -2434,6 +2434,23 @@ legend {
     gap: 12px;
 }
 
+.checkbox-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 2px;
+    color: var(--text);
+    font-size: 13px;
+}
+
+.checkbox-field input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+    flex-shrink: 0;
+}
+
 .lx-sync-form {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

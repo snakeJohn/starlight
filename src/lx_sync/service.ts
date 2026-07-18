@@ -214,25 +214,34 @@ export class LxSyncService {
     const touched: LxSyncPullStats['playlists'] = [];
 
     for (const draft of mapped) {
+      // LX identity lives in sourceListId only. Do NOT set native_playlist_id:
+      // that field is reserved for Songloft numeric playlist ids and would
+      // block loadDynamicPlayerSongs + poison syncToSongloftPlaylist.
       const existingIndex = playlists.findIndex(
         (playlist) =>
-          String(playlist.native_playlist_id) === draft.native_playlist_id ||
-          (draft.kind === 'love' && playlist.name.trim() === '我喜欢' && String(playlist.native_playlist_id || '').startsWith('lx:')) ||
-          (draft.kind === 'love' && playlist.name.trim() === '我喜欢' && !playlist.source),
+          String(playlist.sourceListId || '') === draft.native_playlist_id ||
+          String(playlist.native_playlist_id || '') === draft.native_playlist_id ||
+          (draft.kind === 'love' && playlist.name.trim() === '我喜欢' && (
+            String(playlist.sourceListId || '').startsWith('lx:') ||
+            String(playlist.native_playlist_id || '').startsWith('lx:') ||
+            playlist.source_name === '洛雪同步' ||
+            !playlist.source
+          )),
       );
 
       const existing = existingIndex >= 0 ? playlists[existingIndex] : undefined;
       const songs = this.resolveSongs(existing?.songs || [], draft.songs, conflict);
       const timestamp = nowIso();
+      const { native_playlist_id: _dropNative, ...existingWithoutNative } = (existing || {
+        id: createId('lx'),
+        imported_at: timestamp,
+      }) as CustomPlaylist & { native_playlist_id?: string | number };
       const next: CustomPlaylist = {
-        ...(existing || {
-          id: createId('lx'),
-          imported_at: timestamp,
-        }),
+        ...existingWithoutNative,
         name: draft.name,
         cover_url: draft.cover_url || existing?.cover_url || '',
         source_name: '洛雪同步',
-        native_playlist_id: draft.native_playlist_id,
+        sourceListId: draft.native_playlist_id,
         native_playlist_name: draft.name,
         updated_at: timestamp,
         songs,

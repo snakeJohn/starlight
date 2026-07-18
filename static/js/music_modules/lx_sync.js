@@ -148,6 +148,8 @@ async function disconnectLxSync() {
 }
 
 async function previewLxSync() {
+    // Persist form options so preview matches what the user currently sees.
+    await saveConfigFromForm().catch(() => {});
     const preview = await api.get('/lx-sync/preview');
     setState({ lxSyncPreview: preview });
     renderPreview(preview);
@@ -157,6 +159,8 @@ async function previewLxSync() {
 }
 
 async function pullLxSync() {
+    // Persist conflict / importDefaultList before pull (same as connect).
+    await saveConfigFromForm().catch(() => {});
     const result = await api.post('/lx-sync/pull');
     setState({
         lxSyncConfig: {

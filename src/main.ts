@@ -42,6 +42,7 @@ import { registerHealthHandlers } from './handlers/health';
 import { registerSongloftLibraryHandlers } from './handlers/songloft_library';
 import { registerDiagnosticsHandlers } from './handlers/diagnostics';
 import { setHostBaseUrl } from './utils/http';
+import { setPollDebug } from './utils/debug';
 import { SongloftPlaylistService } from './songloft/playlist_service';
 
 const router = createRouter();
@@ -82,6 +83,7 @@ async function onInit(): Promise<void> {
 
   // 与 MIoT 插件保持一致：播放地址必须使用用户配置的可访问 Songloft 地址。
   const pluginConfig = await configManager.getConfig();
+  setPollDebug(Boolean(pluginConfig.conversation_poll_debug));
   if (pluginConfig.server_host) {
     setHostBaseUrl(pluginConfig.server_host);
     songloft.log.info('宿主 API 基础 URL 已设置: ' + pluginConfig.server_host);

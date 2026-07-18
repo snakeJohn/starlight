@@ -91,6 +91,16 @@ describe('LxSyncClient', () => {
     await expect(client.getList()).rejects.toMatchObject({ code: 'AUTH_TOKEN_EXPIRED' });
   });
 
+  it('maps list 401/403 to AUTH_TOKEN_EXPIRED', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ message: 'Unauthorized' }, 401));
+    const client = new LxSyncClient({
+      baseUrl: 'http://lx.test',
+      token: 'stale',
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    await expect(client.getList()).rejects.toMatchObject({ code: 'AUTH_TOKEN_EXPIRED' });
+  });
+
   it('posts setList with auth header', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       expect(url).toBe('http://lx.test/api/user/list');

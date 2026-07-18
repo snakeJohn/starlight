@@ -108,6 +108,13 @@ export class LxSyncClient {
 
     const payload = await this.readJson(response);
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new StarlightError(
+          'AUTH_TOKEN_EXPIRED',
+          this.errorMessage(payload, '洛雪同步登录已失效，请重新连接'),
+          false,
+        );
+      }
       throw new StarlightError('INTERNAL_ERROR', this.errorMessage(payload, `拉取歌单失败 (${response.status})`), true);
     }
 

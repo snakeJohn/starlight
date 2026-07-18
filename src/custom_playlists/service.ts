@@ -298,7 +298,9 @@ export class CustomPlaylistService {
       return null;
     }
     const playlist = playlists[index];
-    if (playlist.native_playlist_id !== undefined) {
+    // Only numeric Songloft native playlist ids skip dynamic local load.
+    // String ids (e.g. legacy lx:*) are treated as local custom playlists.
+    if (typeof playlist.native_playlist_id === 'number') {
       return null;
     }
     return playlist.songs.map((song, songIndex) => ({

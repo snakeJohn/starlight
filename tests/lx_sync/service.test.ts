@@ -138,7 +138,7 @@ describe('LxSyncService', () => {
     await expect(store.loadAll()).resolves.toEqual([]);
   });
 
-  it('pulls and upserts custom playlists by native id', async () => {
+  it('pulls and upserts custom playlists by LX sourceListId without Songloft native id', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).endsWith('/login')) return jsonResponse({ token: 't1' });
       if (String(url).endsWith('/list')) return jsonResponse(sampleList);
@@ -157,8 +157,12 @@ describe('LxSyncService', () => {
 
     let playlists = await store.loadAll();
     expect(playlists.map((p) => p.name).sort()).toEqual(['古风精选', '我喜欢', '默认列表'].sort());
-    expect(playlists.find((p) => p.name === '我喜欢')?.source_name).toBe('洛雪同步');
-    expect(playlists.find((p) => p.name === '我喜欢')?.songs[0]?.source_data?.platform).toBe('kw');
+    const love = playlists.find((p) => p.name === '我喜欢');
+    expect(love?.source_name).toBe('洛雪同步');
+    expect(love?.sourceListId).toBe('lx:love');
+    expect(love?.native_playlist_id).toBeUndefined();
+    expect(love?.songs[0]?.source_data?.platform).toBe('kw');
+    expect(playlists.find((p) => p.name === '古风精选')?.sourceListId).toBe('lx:user:ul1');
 
     const second = await service.pull();
     expect(second.playlistsCreated).toBe(0);
