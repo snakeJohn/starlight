@@ -8,6 +8,7 @@ import { ConversationMonitor } from '../conversation/monitor';
 import { Scheduler } from '../schedule/scheduler';
 import { VoiceEngine } from '../voicecmd/engine';
 import { getHostBaseUrl, setHostBaseUrl } from '../utils/http';
+import { setPollDebug } from '../utils/debug';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
 function parseBody(req: HTTPRequest): any {
@@ -96,9 +97,12 @@ export function registerConfigHandlers(
           external_search_timeout: config.external_search_timeout ?? 6,
           extra_music_api_models: config.extra_music_api_models || [],
           indicator_light_enabled: !!config.indicator_light_enabled,
+          default_cover_id: config.default_cover_id || '1732418460076477549',
+          touchscreen_lyrics_enabled: !!config.touchscreen_lyrics_enabled,
           interrupt_tts_hint_enabled: !!config.interrupt_tts_hint_enabled,
           interrupt_tts_hint_text: config.interrupt_tts_hint_text || '正在搜索，请稍候',
           conversation_poll_interval: config.conversation_poll_interval ?? 1,
+          conversation_poll_debug: !!config.conversation_poll_debug,
           smart_resume_timeout: config.smart_resume_timeout ?? 30,
           max_song_index: config.max_song_index ?? 10000,
           server_host_status: getServerHostStatus(config.server_host),
@@ -191,6 +195,16 @@ export function registerConfigHandlers(
         config.indicator_light_enabled = !!body.indicator_light_enabled;
       }
 
+      // 更新 touchscreen_lyrics_enabled
+      if (body.touchscreen_lyrics_enabled !== undefined) {
+        config.touchscreen_lyrics_enabled = !!body.touchscreen_lyrics_enabled;
+      }
+
+      // 默认封面 audioID（触屏音箱）
+      if (body.default_cover_id !== undefined) {
+        config.default_cover_id = String(body.default_cover_id).trim();
+      }
+
       // 更新 interrupt_tts_hint_enabled
       if (body.interrupt_tts_hint_enabled !== undefined) {
         config.interrupt_tts_hint_enabled = !!body.interrupt_tts_hint_enabled;
@@ -210,6 +224,12 @@ export function registerConfigHandlers(
           shouldRestartConversationMonitor = true;
           shouldStopConversationMonitor = false;
         }
+      }
+
+      // 更新 conversation_poll_debug（同步到热路径日志门控）
+      if (body.conversation_poll_debug !== undefined) {
+        config.conversation_poll_debug = !!body.conversation_poll_debug;
+        setPollDebug(config.conversation_poll_debug);
       }
 
       // 更新 smart_resume_timeout
@@ -266,11 +286,12 @@ export function registerConfigHandlers(
 
       await configManager.saveConfig(config);
 
+      // 配置保存后再联动监听器启停：start() 会 await 到设备列表初始化完成
       if (shouldStopConversationMonitor) {
         conversationMonitor.stop();
       } else if (shouldRestartConversationMonitor) {
         conversationMonitor.stop();
-        conversationMonitor.start();
+        await conversationMonitor.start();
       }
 
       // 检查保存后的地址是否有效，附带 warning

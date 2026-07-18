@@ -14,6 +14,9 @@ describe('ConfigManager defaults', () => {
     expect(config.conversation_monitor_enabled).toBe(true);
     expect(config.voice_command_enabled).toBe(true);
     expect(config.conversation_poll_interval).toBe(1);
+    expect(config.conversation_poll_debug).toBe(false);
+    expect(config.touchscreen_lyrics_enabled).toBe(false);
+    expect(config.default_cover_id).toBe('1732418460076477549');
     expect(config.smart_resume_timeout).toBe(30);
     expect(config.max_song_index).toBe(10000);
     expect(config.external_search_timeout).toBe(6);

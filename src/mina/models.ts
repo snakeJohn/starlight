@@ -96,6 +96,19 @@ export interface DeviceInfoRaw {
   deviceSNProfile?: string;
 }
 
+/** 曲库搜索 API 响应（/music/search） */
+export interface MusicSearchResponse {
+  code: number;
+  data?: {
+    songList?: Array<{
+      audioID?: string;
+      songID?: string;
+      name?: string;
+      artist?: { name?: string };
+    }>;
+  };
+}
+
 /** UBus 请求响应 */
 export interface UbusResponse {
   code: number;

@@ -22,7 +22,7 @@ function parseBody(req: HTTPRequest): any {
 }
 
 /** 设备播放状态缓存（避免多调用方重复查询设备） */
-interface DeviceStatusCache {
+export interface DeviceStatusCache {
   volume: number;
   state: string;
   position: number;  // 秒
@@ -31,7 +31,8 @@ interface DeviceStatusCache {
   volumeLockedUntil: number;  // 用户显式设置音量后锁定期截止时间戳
 }
 const deviceStatusCache: Map<string, DeviceStatusCache> = new Map();
-const DEVICE_STATUS_TTL = 4000; // 4秒缓存，略短于前端5秒轮询间隔
+const deviceStatusInflight: Map<string, Promise<any>> = new Map();
+export const DEVICE_STATUS_TTL = 4000; // 4秒缓存，略短于前端5秒轮询间隔
 
 /** 主动更新设备状态缓存（供外部调用，如 playURL 成功后刷新） */
 export function updateDeviceStatusCache(accountId: string, deviceId: string, data: Partial<DeviceStatusCache> & { lockVolume?: boolean }): void {
@@ -45,6 +46,32 @@ export function updateDeviceStatusCache(accountId: string, deviceId: string, dat
     timestamp: Date.now(),
     volumeLockedUntil: data.lockVolume ? Date.now() + 10000 : (existing?.volumeLockedUntil ?? 0),
   });
+}
+
+/** 读取设备状态缓存（供 /mina/status 探针使用） */
+export function getDeviceStatusCache(accountId: string, deviceId: string): DeviceStatusCache | undefined {
+  return deviceStatusCache.get(accountId + ':' + deviceId);
+}
+
+/** 并发请求合并：同一设备同时只穿透一次云端状态查询 */
+export async function getOrFetchDeviceStatus(
+  accountId: string,
+  deviceId: string,
+  fetcher: () => Promise<any>,
+): Promise<any> {
+  const key = accountId + ':' + deviceId;
+  const existing = deviceStatusInflight.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const inflight = fetcher().finally(() => {
+    if (deviceStatusInflight.get(key) === inflight) {
+      deviceStatusInflight.delete(key);
+    }
+  });
+  deviceStatusInflight.set(key, inflight);
+  return inflight;
 }
 
 /**

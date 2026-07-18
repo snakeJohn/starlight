@@ -208,6 +208,7 @@ export class PlaylistManager {
   private randomPlayed: Set<number> = new Set(); // 随机模式已播放索引
   private voiceSuspendedAt: number = 0; // suspendForVoiceInteraction 首次调用时间戳
   private autoAdvance = true;
+  private _lastLoadNotFound: boolean = false; // 上次 loadPlaylistSongs 失败是否因歌单不存在(ID 过期)
 
   constructor(
     accountId: string,
@@ -229,13 +230,15 @@ export class PlaylistManager {
    * @param playlistId - 歌单ID
    * @param startIndex - 起始歌曲索引（默认0）
    * @param mode - 播放模式（默认order）
+   * @param opts.randomStart - 忽略 startIndex，加载歌单后随机挑一首作为起点
    * @returns 是否成功
    */
-  async play(playlistId: number, startIndex?: number, mode?: PlayMode): Promise<boolean> {
+  async play(playlistId: number, startIndex?: number, mode?: PlayMode, opts?: { randomStart?: boolean }): Promise<boolean> {
     // 立即停止定时器和重置状态，防止 loadPlaylistSongs 期间旧定时器触发 onSongFinished
     this.stopCheckTimer();
     this.state = 'idle';
     this.playStartTimeMs = 0;
+    this._lastLoadNotFound = false;
 
     // 加载歌单歌曲
     const loaded = await this.loadPlaylistSongs(playlistId);
@@ -251,8 +254,12 @@ export class PlaylistManager {
 
     // 设置播放参数
     this.playlistId = playlistId;
-    this.currentIndex = (startIndex !== undefined && startIndex >= 0 && startIndex < this.songs.length)
-      ? startIndex : 0;
+    if (opts?.randomStart && this.songs.length > 0) {
+      this.currentIndex = Math.floor(Math.random() * this.songs.length);
+    } else {
+      this.currentIndex = (startIndex !== undefined && startIndex >= 0 && startIndex < this.songs.length)
+        ? startIndex : 0;
+    }
     this.playMode = mode || 'order';
     this.autoAdvance = true;
     this.randomPlayed = new Set();
@@ -269,6 +276,14 @@ export class PlaylistManager {
 
     songloft.log.info(`[PlaylistManager] Playlist started id=${playlistId} index=${this.currentIndex} mode=${this.playMode} total=${this.songs.length}`);
     return true;
+  }
+
+  /**
+   * 上次播放失败是否因歌单 ID 已失效（歌单不存在）。
+   * 用于上层在扫描导致 auto-create 歌单 ID 变化后，刷新索引并重试。
+   */
+  isLastPlayNotFound(): boolean {
+    return this._lastLoadNotFound;
   }
 
   /**
@@ -637,6 +652,16 @@ export class PlaylistManager {
       // 这样不需要 hostBaseUrl 和 pluginToken，直接通过内部桥接访问数据库
       const songs = normalizePlayerSongs(await songloft.playlists.getSongs(playlistId, { limit: 100000 }));
       if (songs.length === 0) {
+        // 区分「空歌单」与「歌单 ID 已失效」
+        try {
+          const pl = await songloft.playlists.getById(playlistId);
+          if (!pl) {
+            this._lastLoadNotFound = true;
+            songloft.log.warn(`[PlaylistManager] playlist ${playlistId} not found (stale ID), signaling caller to refresh index`);
+          }
+        } catch (e) {
+          songloft.log.warn(`[PlaylistManager] getById check failed playlistId=${playlistId}: ${String(e)}`);
+        }
         songloft.log.error('[PlaylistManager] Bridge returned invalid songs data for playlist: ' + playlistId);
         return false;
       }
@@ -731,7 +756,10 @@ export class PlaylistManager {
 
     // 调用小爱音箱播放
     const startedAt = Date.now();
-    const ok = await this.minaService.playURL(this.accountId, this.deviceId, songURL);
+    const ok = await this.minaService.playURL(this.accountId, this.deviceId, songURL, {
+      title: song.title || '',
+      artist: song.artist || '',
+    });
     if (!ok) {
       const message = `音箱接口未接受播放 URL：${safePlaybackUrl(songURL)}`;
       songloft.log.error('[PlaylistManager] Failed to play URL on device');
