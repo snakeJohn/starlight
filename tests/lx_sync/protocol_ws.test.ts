@@ -177,8 +177,11 @@ describe('startListSyncSession', () => {
       list_sync_finished: vi.fn(async () => {}),
     };
     const socketCtx = {
-      feature: { list: false as false | { skipSnapshot?: boolean }, dislike: false as false },
-      moduleReadys: { list: false },
+      feature: {
+        list: false as false | { skipSnapshot?: boolean },
+        dislike: false as false | { skipSnapshot?: boolean },
+      },
+      moduleReadys: { list: false, dislike: false },
     };
 
     await startListSyncSession(
@@ -220,8 +223,11 @@ describe('startListSyncSession', () => {
       list_sync_finished: vi.fn(async () => {}),
     };
     const socketCtx = {
-      feature: { list: false as false | { skipSnapshot?: boolean }, dislike: false as false },
-      moduleReadys: { list: false },
+      feature: {
+        list: false as false | { skipSnapshot?: boolean },
+        dislike: false as false | { skipSnapshot?: boolean },
+      },
+      moduleReadys: { list: false, dislike: false },
     };
 
     await startListSyncSession(
@@ -262,8 +268,11 @@ describe('startListSyncSession', () => {
       list_sync_finished: vi.fn(async () => {}),
     };
     const socketCtx = {
-      feature: { list: false as false | { skipSnapshot?: boolean }, dislike: false as false },
-      moduleReadys: { list: false },
+      feature: {
+        list: false as false | { skipSnapshot?: boolean },
+        dislike: false as false | { skipSnapshot?: boolean },
+      },
+      moduleReadys: { list: false, dislike: false },
     };
 
     await startListSyncSession(service as never, makeKeyInfo(), remote, remoteQueueList, socketCtx);
@@ -307,8 +316,11 @@ describe('startListSyncSession', () => {
       list_sync_finished: vi.fn(async () => {}),
     };
     const socketCtx = {
-      feature: { list: false as false | { skipSnapshot?: boolean }, dislike: false as false },
-      moduleReadys: { list: false },
+      feature: {
+        list: false as false | { skipSnapshot?: boolean },
+        dislike: false as false | { skipSnapshot?: boolean },
+      },
+      moduleReadys: { list: false, dislike: false },
     };
 
     await startListSyncSession(service as never, makeKeyInfo(), remote, remoteQueueList, socketCtx);
@@ -349,8 +361,11 @@ describe('startListSyncSession', () => {
       list_sync_finished: vi.fn(async () => {}),
     };
     const socketCtx = {
-      feature: { list: false as false | { skipSnapshot?: boolean }, dislike: false as false },
-      moduleReadys: { list: false },
+      feature: {
+        list: false as false | { skipSnapshot?: boolean },
+        dislike: false as false | { skipSnapshot?: boolean },
+      },
+      moduleReadys: { list: false, dislike: false },
     };
 
     await startListSyncSession(service as never, makeKeyInfo(), remote, remoteQueueList, socketCtx);

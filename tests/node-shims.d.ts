@@ -28,14 +28,24 @@ declare module 'node:crypto' {
     update(data: string | Buffer | Uint8Array, enc?: string): { digest(enc: string): string };
   };
   export function randomBytes(size: number): Buffer;
+
+  type CipherLike = {
+    update(data: string | Buffer, inputEnc?: string, outputEnc?: string): Buffer;
+    final(outputEnc?: string): Buffer;
+    setAutoPadding(autoPadding?: boolean): CipherLike;
+  };
+
+  /** AES-ECB tests pass `null` IV (Node accepts null for ECB). */
   export function createCipheriv(
     algo: string,
     key: Buffer | string | Uint8Array,
-    iv: Buffer | string | Uint8Array,
-  ): {
-    update(data: string | Buffer, inputEnc?: string, outputEnc?: string): Buffer;
-    final(outputEnc?: string): Buffer;
-  };
+    iv: Buffer | string | Uint8Array | null,
+  ): CipherLike;
+  export function createDecipheriv(
+    algo: string,
+    key: Buffer | string | Uint8Array,
+    iv: Buffer | string | Uint8Array | null,
+  ): CipherLike;
   export function generateKeyPairSync(
     type: string,
     options: Record<string, unknown>,
