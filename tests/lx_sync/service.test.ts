@@ -101,6 +101,58 @@ describe('LxSyncService (protocol server)', () => {
     expect(result.results[0].total).toBe(2);
   });
 
+  it('exportSongloftPlaylistsToLx mirrors playlists and pushes list snapshot to peers', async () => {
+    const store = new CustomPlaylistStore();
+    const mirrorSongloftPlaylistsForLx = vi.fn(async () => ({
+      total: 1,
+      playlists: [
+        {
+          id: 'sl_1',
+          name: '我的收藏',
+          cover_url: '',
+          imported_at: '',
+          updated_at: '',
+          sourceListId: 'lx:user:songloft:88',
+          native_playlist_id: 88,
+          songs: [
+            {
+              title: '曲',
+              artist: '歌手',
+              album: '',
+              duration: 1,
+              cover_url: '',
+              stable_key: 'k',
+            },
+          ],
+        },
+      ],
+      errors: [],
+    }));
+    const service = new LxSyncService({
+      playlistStore: store,
+      customPlaylists: {
+        syncToSongloftPlaylist: vi.fn(),
+        mirrorSongloftPlaylistsForLx,
+      },
+    });
+    let pushed: unknown;
+    service.registerListPeer({
+      clientId: 'peer-a',
+      isListReady: () => true,
+      notifyListAction: async (action) => {
+        pushed = action;
+      },
+      close: () => {},
+    });
+
+    const result = await service.exportSongloftPlaylistsToLx();
+    expect(mirrorSongloftPlaylistsForLx).toHaveBeenCalled();
+    expect(result.total).toBe(1);
+    expect(result.pushed_to_peers).toBe(1);
+    expect(result.playlists[0].sourceListId).toBe('lx:user:songloft:88');
+    expect(pushed).toMatchObject({ action: 'list_data_overwrite' });
+  });
+
   it('stores and reuses device list snapshot keys across reconnects', async () => {
     const service = new LxSyncService();
     const issued = await service.issueClientKey('Phone', true);

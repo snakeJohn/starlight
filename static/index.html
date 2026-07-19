@@ -558,9 +558,10 @@
                         <div class="lx-sync-actions row-actions form-actions">
                             <button class="primary-button" type="button" data-action="lx-sync-save-config">保存设置</button>
                             <button class="ghost-button" type="button" data-action="lx-sync-refresh">刷新状态</button>
+                            <button class="ghost-button" type="button" data-action="lx-sync-export-from-songloft" title="将 Songloft 歌单镜像到洛雪同步列表">Songloft → 洛雪</button>
                         </div>
                     </form>
-                    <p class="field-help" data-role="lx-sync-message">在 LX Music 桌面/手机 → 设置 → 同步服务，填入上方地址与密钥即可连接。手机需与 Songloft 同一局域网。同步完成后会自动按同名写入 Songloft 歌单，并将歌曲导入歌曲库。</p>
+                    <p class="field-help" data-role="lx-sync-message">在 LX Music 桌面/手机 → 设置 → 同步服务，填入上方地址与密钥即可连接。手机需与 Songloft 同一局域网。洛雪→Songloft 会自动导入；也可点「Songloft → 洛雪」把宿主歌单推给已连接的洛雪客户端。状态约每 5 秒自动刷新。</p>
                     <div class="list-stack tight" data-role="lx-sync-device-list">
                         <div class="empty-state">尚未有设备连接。</div>
                     </div>

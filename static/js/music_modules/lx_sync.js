@@ -2,6 +2,14 @@ import { api } from '../api.js';
 import { asArray } from '../shared/arrays.js';
 import { $, escapeHtml, setState, state, toast } from '../state.js';
 
+/** Status poll interval while the settings/sync panel is relevant. */
+const LX_SYNC_POLL_MS = 5000;
+
+let pollTimer = null;
+let pollInFlight = false;
+/** When true, skip overwriting the password field so the user can edit safely. */
+let passwordFocused = false;
+
 function formatTime(value) {
     try {
         const date = new Date(value);
@@ -26,15 +34,19 @@ function formEl() {
     return $('[data-role="lx-sync-form"]');
 }
 
-function applyConfigToForm(config) {
+function applyConfigToForm(config, { preservePassword = false } = {}) {
     const form = formEl();
     if (!form || !config) return;
     const addressInput = $('[data-role="lx-sync-server-address"]');
     if (addressInput) addressInput.value = config.serverAddress || '';
     const passwordInput = $('[data-role="lx-sync-password"]');
-    if (passwordInput) passwordInput.value = config.password || '';
-    if (form.elements.serverName) form.elements.serverName.value = config.serverName || 'Starlight';
-    if (form.elements.enabled) {
+    if (passwordInput && !(preservePassword && passwordFocused)) {
+        passwordInput.value = config.password || '';
+    }
+    if (form.elements.serverName && document.activeElement !== form.elements.serverName) {
+        form.elements.serverName.value = config.serverName || 'Starlight';
+    }
+    if (form.elements.enabled && document.activeElement !== form.elements.enabled) {
         form.elements.enabled.checked = config.enabled !== false;
     }
 }
@@ -66,13 +78,45 @@ function renderDevices(config) {
     `).join('');
 }
 
-export async function loadLxSyncConfig() {
+/**
+ * Soft refresh: updates status, devices, connected count without clobbering
+ * in-progress password edits.
+ */
+export async function loadLxSyncConfig({ quiet = false } = {}) {
     const config = await api.get('/lx-sync/config');
     setState({ lxSyncConfig: config });
-    applyConfigToForm(config);
+    applyConfigToForm(config, { preservePassword: quiet });
     renderDevices(config);
     setStatus(statusText(config), config);
     return config;
+}
+
+function stopLxSyncPolling() {
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+}
+
+function startLxSyncPolling() {
+    stopLxSyncPolling();
+    pollTimer = window.setInterval(async () => {
+        if (pollInFlight) return;
+        // Only poll when sync panel is visible (settings tab + sync section).
+        const settingsTab = document.getElementById('tab-settings');
+        const syncPanel = document.querySelector('[data-settings-panel="sync"]');
+        if (!settingsTab?.classList.contains('active')) return;
+        if (syncPanel?.hidden) return;
+
+        pollInFlight = true;
+        try {
+            await loadLxSyncConfig({ quiet: true });
+        } catch {
+            // Quiet poll — avoid toast spam when host is briefly busy.
+        } finally {
+            pollInFlight = false;
+        }
+    }, LX_SYNC_POLL_MS);
 }
 
 function readOptions() {
@@ -120,10 +164,28 @@ async function copyText(text, label) {
     }
 }
 
+async function exportSongloftToLx() {
+    const result = await api.post('/lx-sync/export-from-songloft', {});
+    const total = Number(result?.total || 0);
+    const peers = Number(result?.pushed_to_peers || 0);
+    const errCount = Array.isArray(result?.errors) ? result.errors.length : 0;
+    const msg = errCount
+        ? `已导出 ${total} 个歌单到洛雪（${errCount} 个失败）；已推送 ${peers} 台在线设备`
+        : `已导出 ${total} 个 Songloft 歌单到洛雪；已推送 ${peers} 台在线设备`;
+    toast(msg);
+    setStatus(msg);
+    await loadLxSyncConfig({ quiet: true });
+    return result;
+}
+
 export function bindLxSync() {
     const panel = $('[data-role="lx-sync-panel"]');
     if (!panel || panel.dataset.bound === '1') return;
     panel.dataset.bound = '1';
+
+    const passwordInput = $('[data-role="lx-sync-password"]');
+    passwordInput?.addEventListener('focus', () => { passwordFocused = true; });
+    passwordInput?.addEventListener('blur', () => { passwordFocused = false; });
 
     panel.addEventListener('click', async event => {
         const button = event.target.closest('button[data-action]');
@@ -144,6 +206,9 @@ export function bindLxSync() {
             if (action === 'lx-sync-copy-password') {
                 const password = $('[data-role="lx-sync-password"]')?.value || state.lxSyncConfig?.password || '';
                 await copyText(password, '同步密钥');
+            }
+            if (action === 'lx-sync-export-from-songloft') {
+                await exportSongloftToLx();
             }
             if (action === 'lx-sync-regen-password') {
                 // Only rotate the key — do not re-submit the old password from the form.
@@ -169,4 +234,6 @@ export function bindLxSync() {
             button.disabled = false;
         }
     });
+
+    startLxSyncPolling();
 }

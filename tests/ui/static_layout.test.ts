@@ -777,6 +777,8 @@ describe('static UI layout copy', () => {
     expect(syncHtml).toContain('data-role="lx-sync-password"');
     expect(syncHtml).toContain('data-action="lx-sync-copy-address"');
     expect(syncHtml).toContain('data-action="lx-sync-save-config"');
+    expect(syncHtml).toContain('data-action="lx-sync-export-from-songloft"');
+    expect(syncHtml).toContain('Songloft → 洛雪');
     expect(syncHtml).not.toContain('data-role="lx-sync-payload"');
     expect(syncHtml).not.toContain('data-action="lx-sync-import"');
     expect(syncHtml).not.toContain('data-role="lx-sync-conflict"');
@@ -784,6 +786,7 @@ describe('static UI layout copy', () => {
     expect(syncHtml).toContain('data-role="lx-sync-status"');
     expect(syncHtml).toContain('data-role="lx-sync-device-list"');
     expect(syncHtml).toContain('洛雪同步');
+    expect(syncHtml).toContain('自动刷新');
     expect(syncHtml).toContain('input-with-actions');
     expect(syncHtml).toContain('form-stack');
     expect(playlistsHtml).not.toContain('data-role="lx-sync-panel"');

@@ -107,6 +107,23 @@ function nativeId(value: unknown): string | number | undefined {
   return undefined;
 }
 
+function parseSongSourceData(song: Record<string, unknown>): SearchResultSong['source_data'] | undefined {
+  const raw = song.source_data ?? song.sourceData;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const record = raw as SearchResultSong['source_data'];
+    if (record.platform && record.songInfo) return record;
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw) as SearchResultSong['source_data'];
+      if (parsed?.platform && parsed?.songInfo) return parsed;
+    } catch {
+      /* ignore */
+    }
+  }
+  return undefined;
+}
+
 function toNativePlaylistSong(song: Record<string, unknown>): CustomPlaylistSong {
   const id = nativeId(song);
   const title = stringField(song.title) || stringField(song.name) || '未知歌曲';
@@ -117,6 +134,7 @@ function toNativePlaylistSong(song: Record<string, unknown>): CustomPlaylistSong
     : typeof song.duration === 'string' && Number.isFinite(Number(song.duration))
       ? Number(song.duration)
       : 0;
+  const sourceData = parseSongSourceData(song);
   return {
     title,
     artist,
@@ -124,8 +142,14 @@ function toNativePlaylistSong(song: Record<string, unknown>): CustomPlaylistSong
     duration,
     cover_url: stringField(song.cover_url) || stringField(song.coverUrl) || stringField(song.picUrl),
     ...(id !== undefined ? { native_song_id: id } : {}),
+    ...(sourceData ? { source_data: sourceData } : {}),
     stable_key: id !== undefined ? `songloft:${id}` : stableSongTextKey({ title, artist }),
   };
+}
+
+/** Stable LX user-list id for a Songloft native playlist (exported to LX clients). */
+export function songloftLxListId(nativePlaylistId: string | number): string {
+  return `lx:user:songloft:${nativePlaylistId}`;
 }
 
 function stringField(value: unknown): string {
@@ -278,6 +302,8 @@ export class CustomPlaylistService {
     nativePlaylistId: string | number;
     name: string;
     songs: Array<Record<string, unknown>>;
+    /** When true, tag as LX-exportable (`lx:user:songloft:*`) so 洛雪 clients receive it. */
+    forLxExport?: boolean;
   }): Promise<CustomPlaylist> {
     const normalizedName = normalizeName(input.name);
     if (!normalizedName) {
@@ -285,10 +311,13 @@ export class CustomPlaylistService {
     }
     const nativePlaylistId = input.nativePlaylistId;
     const songs = input.songs.map(toNativePlaylistSong);
+    const lxListId = songloftLxListId(nativePlaylistId);
     let result: CustomPlaylist | null = null;
     await this.store.mutate((playlists) => {
       const existing = playlists.find(
-        (playlist) => String(playlist.native_playlist_id) === String(nativePlaylistId),
+        (playlist) =>
+          String(playlist.native_playlist_id) === String(nativePlaylistId)
+          || String(playlist.sourceListId || '') === lxListId,
       );
       const timestamp = nowIso();
       const playlist: CustomPlaylist = {
@@ -300,6 +329,12 @@ export class CustomPlaylistService {
         cover_url: songs[0]?.cover_url || existing?.cover_url || '',
         native_playlist_id: nativePlaylistId,
         native_playlist_name: normalizedName,
+        ...(input.forLxExport
+          ? {
+              sourceListId: lxListId,
+              source_name: existing?.source_name || 'Songloft',
+            }
+          : {}),
         updated_at: timestamp,
         songs,
       };
@@ -309,6 +344,71 @@ export class CustomPlaylistService {
         : [...playlists, playlist];
     });
     return result!;
+  }
+
+  /**
+   * Mirror Songloft host playlists into LX-exportable custom playlists
+   * (`sourceListId = lx:user:songloft:{nativeId}`) so 洛雪 clients receive them
+   * on the next list sync (and immediately if peers are live).
+   */
+  async mirrorSongloftPlaylistsForLx(nativePlaylistIds?: Array<string | number>): Promise<{
+    total: number;
+    playlists: CustomPlaylist[];
+    errors: Array<{ name: string; message: string }>;
+  }> {
+    const wanted = new Set(
+      (nativePlaylistIds || [])
+        .map((id) => String(id ?? '').trim())
+        .filter(Boolean),
+    );
+    const items = await this.listNativePlaylists();
+    const selected = wanted.size
+      ? items.filter((item) => wanted.has(String(item.id)))
+      : items;
+
+    const playlists: CustomPlaylist[] = [];
+    const errors: Array<{ name: string; message: string }> = [];
+
+    for (const item of selected) {
+      try {
+        const rawSongs = await this.loadNativePlaylistSongs(item.id);
+        const mirrored = await this.importSongloftPlaylistSnapshot({
+          nativePlaylistId: item.id,
+          name: item.name || `歌单 ${item.id}`,
+          songs: rawSongs,
+          forLxExport: true,
+        });
+        playlists.push(mirrored);
+      } catch (error) {
+        errors.push({
+          name: item.name || String(item.id),
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return { total: playlists.length, playlists, errors };
+  }
+
+  private async loadNativePlaylistSongs(
+    nativePlaylistId: string | number,
+  ): Promise<Array<Record<string, unknown>>> {
+    const getSongs = this.nativePlaylists.getSongs;
+    if (typeof getSongs !== 'function') {
+      throw new StarlightError('INTERNAL_ERROR', 'Songloft playlists.getSongs is unavailable');
+    }
+    const raw = await getSongs.call(this.nativePlaylists, nativePlaylistId, { limit: 100000 });
+    if (Array.isArray(raw)) {
+      return raw.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'));
+    }
+    if (raw && typeof raw === 'object') {
+      const record = raw as { items?: unknown; songs?: unknown; list?: unknown };
+      const list = record.items ?? record.songs ?? record.list;
+      if (Array.isArray(list)) {
+        return list.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'));
+      }
+    }
+    return [];
   }
 
   async refreshNetworkPlaylist(
