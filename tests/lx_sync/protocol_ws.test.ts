@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FEATURE_VERSION, SYNC_CODE } from '../../src/lx_sync/constants';
-import { aesEncrypt, encodeData } from '../../src/lx_sync/crypto_lx';
+import {
+  aesEncrypt,
+  decodeData,
+  encodeData,
+  LX_WS_MAX_COMPRESSED_BYTES,
+  LX_WS_MAX_INFLATED_BYTES,
+} from '../../src/lx_sync/crypto_lx';
 import { createMsg2call } from '../../src/lx_sync/message2call';
 import {
   frameToText,
@@ -544,6 +550,19 @@ describe('encodeData envelope', () => {
   it('passes short payloads through unchanged', async () => {
     const s = JSON.stringify({ name: 'x', data: 1 });
     await expect(encodeData(s)).resolves.toBe(s);
+  });
+});
+
+describe('decodeData limits', () => {
+  it('rejects oversized plain frames without parsing', async () => {
+    const huge = 'x'.repeat(LX_WS_MAX_INFLATED_BYTES + 1);
+    await expect(decodeData(huge)).rejects.toThrow(/too large/);
+  });
+
+  it('rejects oversized compressed envelopes before inflation work', async () => {
+    const b64Len = Math.ceil((LX_WS_MAX_COMPRESSED_BYTES * 4) / 3) + 20;
+    const huge = `cg_${'A'.repeat(b64Len)}`;
+    await expect(decodeData(huge)).rejects.toThrow(/too large/);
   });
 });
 

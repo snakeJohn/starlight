@@ -69,6 +69,12 @@ export class ConversationMonitor {
   /** 是否启用 */
   private enabled: boolean = false;
 
+  /** Prevent overlapping poll cycles when a previous tick is still running. */
+  private pollInFlight = false;
+
+  /** Bound webhook delivery so a hung recipient cannot stall the monitor. */
+  private static readonly WEBHOOK_TIMEOUT_MS = 5000;
+
   constructor(accountManager: AccountManager, configManager: ConfigManager) {
     this.accountManager = accountManager;
     this.configManager = configManager;
@@ -291,15 +297,25 @@ export class ConversationMonitor {
 
   /**
    * 轮询所有设备的对话记录
+   * Devices are polled sequentially so per-device message order is preserved.
+   * Concurrent timer ticks are coalesced via pollInFlight.
    */
   private async pollAll(): Promise<void> {
     if (!this.enabled) {
       return;
     }
-
-    for (const dm of this.devices.values()) {
-      if (!dm.isRunning) continue;
-      await this.pollDevice(dm);
+    if (this.pollInFlight) {
+      return;
+    }
+    this.pollInFlight = true;
+    try {
+      for (const dm of this.devices.values()) {
+        if (!this.enabled) break;
+        if (!dm.isRunning) continue;
+        await this.pollDevice(dm);
+      }
+    } finally {
+      this.pollInFlight = false;
     }
   }
 
@@ -414,7 +430,7 @@ export class ConversationMonitor {
 
   /**
    * 触发 Webhook 推送
-   * 向所有已注册的 Webhook URL 发送 POST 请求
+   * Independent webhooks run in parallel with timeout; one failure does not block others.
    */
   private async triggerWebhooks(accountId: string, deviceId: string, deviceName: string, messages: ConversationMessage[]): Promise<void> {
     const webhooks = await this.configManager.getWebhooks();
@@ -429,24 +445,54 @@ export class ConversationMonitor {
       messages,
     });
 
-    for (const wh of webhooks) {
-      await this.sendWebhook(wh, payload);
+    const results = await Promise.allSettled(
+      webhooks.map((wh) => this.sendWebhook(wh, payload)),
+    );
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status === 'rejected') {
+        const wh = webhooks[i];
+        songloft.log.warn(
+          `[ConversationMonitor] Webhook failed id=${wh?.id} url=${wh?.url}: ${String(result.reason)}`,
+        );
+      }
     }
   }
 
   /**
-   * 向单个 Webhook URL 发送 POST 请求
+   * 向单个 Webhook URL 发送 POST 请求（带超时）
    */
   private async sendWebhook(wh: WebhookConfig, payload: string): Promise<void> {
+    const timeoutMs = ConversationMonitor.WEBHOOK_TIMEOUT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await fetch(wh.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload,
-      });
+      if (typeof AbortController !== 'undefined') {
+        const controller = new AbortController();
+        timer = setTimeout(() => controller.abort(), timeoutMs);
+        await fetch(wh.url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          signal: controller.signal,
+        });
+      } else {
+        await Promise.race([
+          fetch(wh.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: payload,
+          }),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('webhook timeout')), timeoutMs);
+          }),
+        ]);
+      }
       songloft.log.info(`[ConversationMonitor] Webhook sent id=${wh.id} url=${wh.url}`);
     } catch (e) {
       songloft.log.warn(`[ConversationMonitor] Webhook failed id=${wh.id} url=${wh.url}: ${String(e)}`);
+      throw e;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 

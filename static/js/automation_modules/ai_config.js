@@ -48,11 +48,17 @@ export function applyAiConfigToForm(aiConfig = {}) {
     const enabled = Boolean(cfg.enabled) && lastVoiceEnabled;
     if (form.elements.enabled) form.elements.enabled.checked = enabled;
     if (form.elements.api_url) form.elements.api_url.value = cfg.api_url || DEFAULT_AI.api_url;
-    if (form.elements.api_key) form.elements.api_key.value = cfg.api_key || '';
+    // API never returns the raw key — only has_api_key. Leave field empty to preserve.
+    if (form.elements.api_key) {
+        form.elements.api_key.value = typeof cfg.api_key === 'string' ? cfg.api_key : '';
+        form.elements.api_key.placeholder = cfg.has_api_key
+            ? '已配置（留空保留，填 __CLEAR__ 清除）'
+            : 'API Key';
+    }
     if (form.elements.model) form.elements.model.value = cfg.model || DEFAULT_AI.model;
     if (form.elements.timeout) form.elements.timeout.value = String(cfg.timeout || DEFAULT_AI.timeout);
     setAiStatus(enabled);
-    setAiState('已加载');
+    setAiState(cfg.has_api_key ? '已加载（密钥已配置）' : '已加载');
 }
 
 export function aiConfigFromForm(form = formEl()) {
@@ -60,15 +66,20 @@ export function aiConfigFromForm(form = formEl()) {
         return { ...DEFAULT_AI };
     }
     const timeoutRaw = Number(form.elements.timeout?.value);
-    return {
+    const payload = {
         enabled: Boolean(form.elements.enabled?.checked) && lastVoiceEnabled,
         api_url: String(form.elements.api_url?.value || '').trim(),
-        api_key: String(form.elements.api_key?.value || '').trim(),
         model: String(form.elements.model?.value || '').trim() || DEFAULT_AI.model,
         timeout: Number.isFinite(timeoutRaw) && timeoutRaw > 0
             ? Math.min(30, Math.max(1, Math.floor(timeoutRaw)))
             : DEFAULT_AI.timeout,
     };
+    // Only send api_key when the user typed a value (empty = preserve server secret).
+    const key = String(form.elements.api_key?.value || '').trim();
+    if (key) {
+        payload.api_key = key;
+    }
+    return payload;
 }
 
 export function formatAiTestResult(result) {

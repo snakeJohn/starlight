@@ -228,6 +228,10 @@ export async function handleLxSyncWebSocket(
     },
   });
 
+  /** Bound concurrent decode+dispatch work per socket (abuse / flood control). */
+  let inFlightMessages = 0;
+  const MAX_IN_FLIGHT = 4;
+
   const onMessage = (raw: unknown) => {
     if (disconnected) return;
     // Host heartbeats / keepalive
@@ -235,6 +239,18 @@ export async function handleLxSyncWebSocket(
     const text = frameToText(raw);
     if (text == null || text === '') return;
     if (text === 'ping' || text === 'pong') return;
+    // Reject obviously oversized frames before async decode allocates more work.
+    if (typeof text === 'string' && text.length > 3 * 1024 * 1024) {
+      songloft.log.warn('[LxSync] frame rejected: too large');
+      void socket.close(SYNC_CLOSE_CODE.failed);
+      return;
+    }
+    if (inFlightMessages >= MAX_IN_FLIGHT) {
+      songloft.log.warn('[LxSync] frame rejected: in-flight limit');
+      void socket.close(SYNC_CLOSE_CODE.failed);
+      return;
+    }
+    inFlightMessages += 1;
     void decodeData(text)
       .then((decoded) => {
         if (disconnected) return;
@@ -251,6 +267,9 @@ export async function handleLxSyncWebSocket(
       .catch((err) => {
         songloft.log.error('[LxSync] decrypt/decode failed: ' + String(err));
         void socket.close(SYNC_CLOSE_CODE.failed);
+      })
+      .finally(() => {
+        inFlightMessages = Math.max(0, inFlightMessages - 1);
       });
   };
 

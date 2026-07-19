@@ -8,6 +8,7 @@ import { resolveHostBaseUrl } from '../utils/http';
 import { URLBuilder } from '../player/url_builder';
 import { ConfigManager } from '../config/manager';
 import type { BridgeService } from '../bridge/service';
+import { fetchWithTimeout, redactForLog } from '../utils/fetch_timeout';
 
 // 外部搜索 API 请求体
 interface SearchOneRequest {
@@ -173,34 +174,30 @@ export class OnlineSearcher {
 
     let resp: SearchOneResponse | null = null;
 
-    // 带超时的 fetch（用 Promise.race 替代 AbortController，兼容 QuickJS）
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('AbortError')), this.searchTimeoutMs);
-    });
-
     try {
       const baseUrl = await this.getSearchBaseUrl();
       const authToken = await this.getAuthToken();
-      const fetchPromise = fetch(baseUrl, {
+      const fetchResp = await fetchWithTimeout(baseUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: authToken },
         body: JSON.stringify(reqBody),
+        timeoutMs: this.searchTimeoutMs,
       });
-      const fetchResp = await Promise.race([fetchPromise, timeoutPromise]);
 
       const text = await fetchResp.text();
       try {
         resp = JSON.parse(text) as SearchOneResponse;
       } catch {
-        songloft.log.warn('[OnlineSearcher] Failed to parse search/topone response: ' + text);
+        songloft.log.warn(
+          '[OnlineSearcher] Failed to parse search/topone response: ' + redactForLog(text),
+        );
         return false;
       }
     } catch (e: any) {
-      if (e.message === 'AbortError') {
-        songloft.log.warn('[OnlineSearcher] Search/topone timeout (>6s) for keyword: ' + keyword);
-      } else {
-        songloft.log.warn('[OnlineSearcher] Search/topone fetch error: ' + String(e));
-      }
+      const msg = e?.name === 'FetchTimeoutError' || /timed out/i.test(String(e?.message || e))
+        ? `Search/topone timeout (>${this.searchTimeoutMs}ms) for keyword: ${keyword}`
+        : `Search/topone fetch error: ${String(e)}`;
+      songloft.log.warn('[OnlineSearcher] ' + msg);
       return false;
     }
 

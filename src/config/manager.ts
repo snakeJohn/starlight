@@ -13,6 +13,11 @@ import type {
   TaskLog,
   AIConfig,
 } from '../types';
+import {
+  migrateAccountSecrets,
+  migrateAISecrets,
+  migratePluginSecrets,
+} from '../security/credentials';
 
 // ===== 存储键常量 =====
 const STORAGE_PREFIX = 'starlight:miot:';
@@ -97,7 +102,7 @@ export class ConfigManager {
   /** 获取插件全局配置（与默认值合并，确保新增字段有默认值） */
   async getConfig(): Promise<PluginConfig> {
     const stored = await this.load<Partial<PluginConfig>>(STORAGE_KEY_CONFIG, {});
-    return { ...defaultPluginConfig(), ...stored };
+    return migratePluginSecrets({ ...defaultPluginConfig(), ...stored });
   }
 
   /** 保存插件全局配置 */
@@ -109,7 +114,8 @@ export class ConfigManager {
 
   /** 获取所有账号配置 */
   async getAccounts(): Promise<AccountConfig[]> {
-    return this.load<AccountConfig[]>(STORAGE_KEY_ACCOUNTS, []);
+    const accounts = await this.load<AccountConfig[]>(STORAGE_KEY_ACCOUNTS, []);
+    return accounts.map(migrateAccountSecrets);
   }
 
   /** 保存所有账号配置 */
@@ -232,7 +238,8 @@ export class ConfigManager {
 
   /** 获取 AI 配置 */
   async getAIConfig(): Promise<AIConfig> {
-    return this.load<AIConfig>(STORAGE_KEY_AI_CONFIG, defaultAIConfig());
+    const ai = await this.load<AIConfig>(STORAGE_KEY_AI_CONFIG, defaultAIConfig());
+    return migrateAISecrets({ ...defaultAIConfig(), ...ai });
   }
 
   /** 保存 AI 配置 */

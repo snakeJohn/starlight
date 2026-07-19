@@ -4,6 +4,7 @@
 import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { AccountManager } from '../account/manager';
+import { migrateAccountSecrets, toPublicAccount } from '../security/credentials';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
 function parseBody(req: HTTPRequest): any {
@@ -39,26 +40,17 @@ export function registerAccountHandlers(
         return jsonResponse({ success: false, error: 'account is required' });
       }
       const acc = await accountManager.createAccount(account, auth_type || 'password');
-      return jsonResponse({ success: true, data: acc });
+      return jsonResponse({ success: true, data: toPublicAccount(migrateAccountSecrets(acc)) });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });
     }
   });
 
-  // GET /accounts - 获取账号列表（敏感信息脱敏）
+  // GET /accounts - 获取账号列表（显式 DTO，不含密钥）
   router.get('/accounts', async () => {
     try {
       const accounts = await accountManager.getAccounts();
-      const safeAccounts = accounts.map(a => ({
-        ...a,
-        password: a.password ? '***' : '',
-        services: Object.fromEntries(
-          Object.entries(a.services || {}).map(([k, v]) => [
-            k,
-            { ...v, service_token: '***', ssecurity: '***' },
-          ]),
-        ),
-      }));
+      const safeAccounts = accounts.map((a) => toPublicAccount(migrateAccountSecrets(a)));
       return jsonResponse({ success: true, data: safeAccounts });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });
@@ -77,17 +69,10 @@ export function registerAccountHandlers(
       if (!acc) {
         return jsonResponse({ success: false, error: 'account not found' });
       }
-      const safe = {
-        ...acc,
-        password: acc.password ? '***' : '',
-        services: Object.fromEntries(
-          Object.entries(acc.services || {}).map(([k, v]) => [
-            k,
-            { ...v, service_token: '***', ssecurity: '***' },
-          ]),
-        ),
-      };
-      return jsonResponse({ success: true, data: safe });
+      return jsonResponse({
+        success: true,
+        data: toPublicAccount(migrateAccountSecrets(acc)),
+      });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });
     }

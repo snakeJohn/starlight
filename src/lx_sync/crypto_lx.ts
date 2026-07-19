@@ -545,11 +545,31 @@ export async function encodeData(data: string): Promise<string> {
 }
 
 export async function decodeData(enData: string): Promise<string> {
-  if (!enData.startsWith('cg_')) return enData;
-  const raw = base64ToBytes(enData.slice(3));
+  if (typeof enData !== 'string') {
+    throw new Error('invalid frame');
+  }
+  // Bound plain frames before JSON.parse.
+  if (!enData.startsWith('cg_')) {
+    if (utf8ToBytes(enData).length > LX_WS_MAX_INFLATED_BYTES) {
+      throw new Error('frame too large');
+    }
+    return enData;
+  }
+  const b64 = enData.slice(3);
+  // Approximate compressed size from base64 length before allocating.
+  if (b64.length > Math.ceil((LX_WS_MAX_COMPRESSED_BYTES * 4) / 3) + 4) {
+    throw new Error('compressed frame too large');
+  }
+  const raw = base64ToBytes(b64);
+  if (raw.byteLength > LX_WS_MAX_COMPRESSED_BYTES) {
+    throw new Error('compressed frame too large');
+  }
   const ungzipFn = typeof pako.ungzip === 'function' ? pako.ungzip : null;
   if (!ungzipFn) throw new Error('gzip decode unavailable');
   const inflated = ungzipFn(raw) as Uint8Array;
+  if (inflated.byteLength > LX_WS_MAX_INFLATED_BYTES) {
+    throw new Error('inflated frame too large');
+  }
   return bytesToUtf8(new Uint8Array(inflated));
 }
 
@@ -565,10 +585,22 @@ export function createServerId(): string {
   return bytesToBase64(randomBytes(16));
 }
 
+/**
+ * High-entropy LX auth secret (compatible with LX client free-text code field
+ * and existing MD5-based key derivation). ~96 bits of entropy.
+ */
 export function generatePassword(): string {
-  // 6-digit style like lx generateCode
-  const n = parseInt(randomHex(3), 16) % 1000000;
-  return String(n).padStart(6, '0');
+  // 16 random bytes → base64url without padding (22 chars, no + / =).
+  const raw = bytesToBase64(randomBytes(16))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  return raw.slice(0, 22);
 }
+
+/** Max compressed frame size for WS envelope (bytes of base64 payload after cg_). */
+export const LX_WS_MAX_COMPRESSED_BYTES = 512 * 1024;
+/** Max inflated / plain text payload size (UTF-8 bytes). */
+export const LX_WS_MAX_INFLATED_BYTES = 2 * 1024 * 1024;
 
 export { utf8ToBytes, bytesToUtf8, bytesToHex, hexToBytes };

@@ -4,9 +4,7 @@
   "description": "Songloft smart speaker and LX Music source bridge plugin",
   "private": true,
   "scripts": {
-    "prebuild": "node scripts/fetch-holidays.mjs",
     "build": "songloft-plugin build",
-    "predev": "node scripts/fetch-holidays.mjs",
     "dev": "songloft-plugin dev",
     "validate": "songloft-plugin validate",
     "typecheck": "tsc --noEmit",
@@ -24,5 +22,8 @@
   },
   "dependencies": {
     "pako": "^1.0.11"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }

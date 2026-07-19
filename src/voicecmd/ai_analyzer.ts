@@ -4,6 +4,7 @@
 /// <reference types="@songloft/plugin-sdk" />
 
 import type { AIConfig, AIAnalysisResult } from '../types';
+import { fetchWithTimeout, redactForLog } from '../utils/fetch_timeout';
 
 /** AI System Prompt */
 const AI_SYSTEM_PROMPT = `你是一个智能音箱语音指令分析专家，擅长从用户的口语指令中精确提取出**操作意图**和**关键参数**。
@@ -131,29 +132,25 @@ export class AIAnalyzer {
       extra_body: { reasoning_split: true },
     };
 
-    const fetchPromise = fetch(`${config.api_url}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.api_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('AI API call timed out')), config.timeout * 1000);
-    });
-
     let resp: Response;
     try {
-      resp = await Promise.race([fetchPromise, timeoutPromise]);
+      resp = await fetchWithTimeout(`${config.api_url}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.api_key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        timeoutMs: Math.max(1000, config.timeout * 1000),
+      });
     } catch (e) {
       songloft.log.warn(`[AIAnalyzer] fetch error: ${String(e)}`);
       throw e;
     }
 
     if (!resp.ok) {
-      throw new Error(`API error: ${resp.status} ${await resp.text()}`);
+      const errBody = redactForLog(await resp.text());
+      throw new Error(`API error: ${resp.status} ${errBody}`);
     }
 
     const data = await resp.json();
@@ -167,7 +164,7 @@ export class AIAnalyzer {
       songloft.log.warn(`[AIAnalyzer] Finish reason: ${finishReason} (content may be truncated)`);
     }
 
-    songloft.log.info(`[AIAnalyzer] API response: ${content.slice(0, 200)}`);
+    songloft.log.info(`[AIAnalyzer] API response: ${redactForLog(content, 200)}`);
     return this.parseResponse(content);
   }
 

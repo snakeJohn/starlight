@@ -32,19 +32,43 @@ function header(req: HTTPRequest, name: string): string {
   return '';
 }
 
-/** Best-effort client identity for rate limiting (no trusted proxy required on LAN). */
+/**
+ * Client identity for /ah rate limiting.
+ * Prefer the transport peer address. Forwarded headers are only honored when
+ * the host sets a trusted-proxy flag (SDK/host specific); otherwise they are
+ * ignored so clients cannot rotate X-Forwarded-For to bypass the block.
+ */
 export function peerKeyFromRequest(req: HTTPRequest): string {
-  const xff = header(req, 'x-forwarded-for');
-  if (xff) {
-    const first = xff.split(',')[0]?.trim();
-    if (first) return first;
+  const anyReq = req as HTTPRequest & {
+    remoteAddress?: string;
+    ip?: string;
+    socket?: { remoteAddress?: string };
+    connection?: { remoteAddress?: string };
+    trustedProxy?: boolean;
+  };
+  const transport =
+    (typeof anyReq.remoteAddress === 'string' && anyReq.remoteAddress.trim())
+    || (typeof anyReq.ip === 'string' && anyReq.ip.trim())
+    || (typeof anyReq.socket?.remoteAddress === 'string' && anyReq.socket.remoteAddress.trim())
+    || (typeof anyReq.connection?.remoteAddress === 'string' && anyReq.connection.remoteAddress.trim())
+    || '';
+
+  const trustForwarded =
+    anyReq.trustedProxy === true
+    || header(req, 'x-starlight-trust-proxy').toLowerCase() === '1'
+    || header(req, 'x-starlight-trust-proxy').toLowerCase() === 'true';
+
+  if (trustForwarded) {
+    const xff = header(req, 'x-forwarded-for');
+    if (xff) {
+      const first = xff.split(',')[0]?.trim();
+      if (first) return first;
+    }
+    const realIp = header(req, 'x-real-ip');
+    if (realIp) return realIp;
   }
-  const realIp = header(req, 'x-real-ip');
-  if (realIp) return realIp;
-  const anyReq = req as HTTPRequest & { remoteAddress?: string; ip?: string };
-  if (anyReq.remoteAddress) return String(anyReq.remoteAddress);
-  if (anyReq.ip) return String(anyReq.ip);
-  return 'unknown';
+
+  return transport || 'unknown';
 }
 
 /**

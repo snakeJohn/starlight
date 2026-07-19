@@ -8,6 +8,7 @@ import { ConfigManager } from '../config/manager';
 import type { TaskSchedule, TaskLog } from '../types';
 import { TaskExecutor } from './executor';
 import { lookupHoliday } from '../utils/holiday';
+import { getZonedParts } from '../utils/timezone';
 
 /** tick 间隔 30 秒 */
 const TICK_INTERVAL_MS = 30000;
@@ -97,6 +98,7 @@ export class Scheduler {
 
   /**
    * 单次 tick：检查当前时间是否有任务需要执行
+   * Date/time/weekday/holiday use the configured IANA timezone.
    */
   private async tick(): Promise<void> {
     if (!this.enabled) {
@@ -104,7 +106,9 @@ export class Scheduler {
     }
 
     const now = new Date();
-    const currentMinute = this.formatMinute(now);
+    const config = await this.configManager.getConfig();
+    const zoned = getZonedParts(now, config.timezone);
+    const currentMinute = zoned.minuteKey;
 
     // 分钟级去重：同一分钟只处理一次
     if (currentMinute === this.lastExecutedMinute) {
@@ -112,10 +116,10 @@ export class Scheduler {
     }
     this.lastExecutedMinute = currentMinute;
 
-    // 获取当前时间信息
-    const timeStr = this.formatTime(now); // "HH:MM"
-    const weekday = now.getDay();          // 0=Sun, 1=Mon...6=Sat
-    const monthday = now.getDate();        // 1-31
+    const timeStr = zoned.timeStr; // "HH:MM"
+    const weekday = zoned.weekday; // 0=Sun, 1=Mon...6=Sat
+    const monthday = zoned.day; // 1-31
+    const dateStr = zoned.dateStr; // YYYY-MM-DD for holiday lookup
 
     // 获取所有已启用的定时任务
     const tasks = await this.configManager.getScheduledTasks();
@@ -126,12 +130,12 @@ export class Scheduler {
       if (task.schedule.time !== timeStr) {
         continue;
       }
-      if (!this.matchSchedule(task.schedule, weekday, monthday, now)) {
+      if (!this.matchSchedule(task.schedule, weekday, monthday, dateStr)) {
         continue;
       }
 
       songloft.log.info(
-        `[Scheduler] 定时任务触发 task_id=${task.id} name=${task.name} action=${task.action} time=${timeStr}`
+        `[Scheduler] 定时任务触发 task_id=${task.id} name=${task.name} action=${task.action} time=${timeStr} tz=${config.timezone || 'local'}`
       );
 
       // 执行任务
@@ -145,10 +149,10 @@ export class Scheduler {
   /**
    * 判断当前时间是否匹配调度配置
    */
-  private matchSchedule(schedule: TaskSchedule, weekday: number, monthday: number, now: Date): boolean {
+  private matchSchedule(schedule: TaskSchedule, weekday: number, monthday: number, dateStr: string): boolean {
     switch (schedule.type) {
       case 'weekly':
-        return this.matchWeekly(schedule, weekday, now);
+        return this.matchWeekly(schedule, weekday, dateStr);
       case 'monthly':
         return this.matchMonthly(schedule, monthday);
       default:
@@ -164,10 +168,10 @@ export class Scheduler {
    * - holiday_mode='exclude_holiday': 调休补班日强制触发(无视 weekday);
    *   法定假日跳过;普通日按 weekdays 判定
    */
-  private matchWeekly(schedule: TaskSchedule, weekday: number, now: Date): boolean {
+  private matchWeekly(schedule: TaskSchedule, weekday: number, dateStr: string): boolean {
     const inWeekday = !!schedule.weekdays && schedule.weekdays.includes(weekday);
     const mode = schedule.holiday_mode || 'ignore';
-    const holiday = mode === 'ignore' ? undefined : lookupHoliday(now);
+    const holiday = mode === 'ignore' ? undefined : lookupHoliday(dateStr);
 
     if (mode === 'only_holiday') {
       if (!holiday || !holiday.isOffDay) return false;
@@ -203,24 +207,4 @@ export class Scheduler {
     await this.configManager.addScheduleLog(log);
   }
 
-  /**
-   * 格式化为分钟标识 "YYYY-MM-DD HH:MM"（用于去重）
-   */
-  private formatMinute(date: Date): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    const h = String(date.getHours()).padStart(2, '0');
-    const min = String(date.getMinutes()).padStart(2, '0');
-    return `${y}-${m}-${d} ${h}:${min}`;
-  }
-
-  /**
-   * 格式化为时间 "HH:MM"（用于与 task.schedule.time 比较）
-   */
-  private formatTime(date: Date): string {
-    const h = String(date.getHours()).padStart(2, '0');
-    const min = String(date.getMinutes()).padStart(2, '0');
-    return `${h}:${min}`;
-  }
 }

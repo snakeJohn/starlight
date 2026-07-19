@@ -6,6 +6,13 @@ import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { ConfigManager } from '../config/manager';
 import { ConversationMonitor } from '../conversation/monitor';
 import { Scheduler } from '../schedule/scheduler';
+import {
+  migrateAISecrets,
+  migratePluginSecrets,
+  publicConfigSecretFlags,
+  resolveSecretUpdate,
+  toPublicAIConfig,
+} from '../security/credentials';
 import { VoiceEngine } from '../voicecmd/engine';
 import { getHostBaseUrl, setHostBaseUrl } from '../utils/http';
 import { setPollDebug } from '../utils/debug';
@@ -72,11 +79,12 @@ export function registerConfigHandlers(
   options: ConfigHandlerOptions = {},
 ): void {
 
-  // GET /config - 获取配置
+  // GET /config - 获取配置（密钥仅返回 has_* 标志）
   router.get('/config', async () => {
     try {
-      const config = await configManager.getConfig();
-      const aiConfig = await configManager.getAIConfig();
+      const config = migratePluginSecrets(await configManager.getConfig());
+      const aiConfig = migrateAISecrets(await configManager.getAIConfig());
+      const secretFlags = publicConfigSecretFlags(config, aiConfig);
       let suggestedAddresses: string[] = [];
       try {
         const plugin = songloft.plugin as unknown as { getNetworkAddresses?: () => Promise<string[]> };
@@ -98,7 +106,7 @@ export function registerConfigHandlers(
           force_mp3: !!config.force_mp3,
           external_search_enabled: !!config.external_search_enabled,
           external_search_url: config.external_search_url || '',
-          external_search_token: config.external_search_token || '',
+          has_external_search_token: secretFlags.has_external_search_token,
           external_search_playlist_id: config.external_search_playlist_id ?? '',
           external_search_timeout: config.external_search_timeout ?? 6,
           extra_music_api_models: config.extra_music_api_models || [],
@@ -113,7 +121,7 @@ export function registerConfigHandlers(
           max_song_index: config.max_song_index ?? 10000,
           server_host_status: getServerHostStatus(config.server_host),
           suggested_addresses: suggestedAddresses,
-          ai_config: aiConfig,
+          ai_config: toPublicAIConfig(aiConfig),
         },
       });
     } catch (e: any) {
@@ -175,9 +183,12 @@ export function registerConfigHandlers(
         config.external_search_url = typeof body.external_search_url === 'string' ? body.external_search_url.trim() : '';
       }
 
-      // 更新 external_search_token
+      // 更新 external_search_token（省略/空串保留；null 或 __CLEAR__ 清空）
       if (body.external_search_token !== undefined) {
-        config.external_search_token = typeof body.external_search_token === 'string' ? body.external_search_token.trim() : '';
+        config.external_search_token = resolveSecretUpdate(
+          body.external_search_token,
+          config.external_search_token || '',
+        );
       }
 
       // 更新 external_search_enabled
@@ -258,9 +269,9 @@ export function registerConfigHandlers(
           : [];
       }
 
-      // 更新 ai_config
+      // 更新 ai_config（api_key 省略/空串保留；null 或 __CLEAR__ 清空）
       if (body.ai_config !== undefined) {
-        const aiConfig = await configManager.getAIConfig();
+        const aiConfig = migrateAISecrets(await configManager.getAIConfig());
         const newAI = body.ai_config as Record<string, unknown>;
         if (typeof newAI.enabled === 'boolean') {
           aiConfig.enabled = newAI.enabled;
@@ -268,8 +279,8 @@ export function registerConfigHandlers(
         if (typeof newAI.api_url === 'string') {
           aiConfig.api_url = newAI.api_url;
         }
-        if (typeof newAI.api_key === 'string') {
-          aiConfig.api_key = newAI.api_key;
+        if (newAI.api_key !== undefined) {
+          aiConfig.api_key = resolveSecretUpdate(newAI.api_key, aiConfig.api_key || '');
         }
         if (typeof newAI.model === 'string') {
           aiConfig.model = newAI.model;

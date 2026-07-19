@@ -117,6 +117,8 @@ function cloneMeta(meta: unknown): MusicSourceMeta {
 
 export class SourceManager {
   private sources: MusicSourceMeta[] = [];
+  /** Serialize all index/script mutations (import, toggle, delete). */
+  private mutationChain: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly store: SourceStore) {}
 
@@ -128,7 +130,24 @@ export class SourceManager {
     return this.sources.map(cloneMeta);
   }
 
+  /**
+   * Run a full read-modify-write mutation exclusively.
+   * Failures do not break the queue for subsequent mutations.
+   */
+  private enqueueMutation<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.mutationChain.then(fn, fn);
+    this.mutationChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   async importFromJS(filename: string, script: string): Promise<MusicSourceMeta> {
+    return this.enqueueMutation(() => this.importFromJSUnlocked(filename, script));
+  }
+
+  private async importFromJSUnlocked(filename: string, script: string): Promise<MusicSourceMeta> {
     if (script.trim() === '') {
       throw new StarlightError('SOURCE_IMPORT_INVALID', 'Music source script is empty', false, { filename });
     }
@@ -165,69 +184,76 @@ export class SourceManager {
   }
 
   async importManyFromJS(files: SourceImportFile[]): Promise<SourceImportManyResult> {
-    const result: SourceImportManyResult = {
-      total: files.length,
-      imported: [],
-      skipped: [],
-      failed: [],
-    };
-    const importedNames = new Set(this.sources.map((source) => source.name.trim()).filter(Boolean));
+    return this.enqueueMutation(async () => {
+      const result: SourceImportManyResult = {
+        total: files.length,
+        imported: [],
+        skipped: [],
+        failed: [],
+      };
+      const importedNames = new Set(this.sources.map((source) => source.name.trim()).filter(Boolean));
 
-    for (const file of files) {
-      const filename = file.filename;
-      const content = file.content;
-      const tags = parseSourceMetadata(content);
-      const name = (tags.name || filenameStem(filename) || 'Imported Source').trim();
+      for (const file of files) {
+        const filename = file.filename;
+        const content = file.content;
+        const tags = parseSourceMetadata(content);
+        const name = (tags.name || filenameStem(filename) || 'Imported Source').trim();
 
-      if (importedNames.has(name)) {
-        result.skipped.push({
-          filename,
-          name,
-          existingName: name,
-          reason: 'duplicate',
-        });
-        continue;
+        if (importedNames.has(name)) {
+          result.skipped.push({
+            filename,
+            name,
+            existingName: name,
+            reason: 'duplicate',
+          });
+          continue;
+        }
+
+        try {
+          // Already inside the mutation queue — call unlocked path.
+          const meta = await this.importFromJSUnlocked(filename, content);
+          importedNames.add(meta.name.trim());
+          result.imported.push(meta);
+        } catch (error) {
+          result.failed.push({
+            filename,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
 
-      try {
-        const meta = await this.importFromJS(filename, content);
-        importedNames.add(meta.name.trim());
-        result.imported.push(meta);
-      } catch (error) {
-        result.failed.push({
-          filename,
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    return result;
+      return result;
+    });
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<void> {
-    const index = this.findSourceIndex(id);
-    const nextSources = this.sources.map((source, sourceIndex) =>
-      sourceIndex === index ? { ...cloneMeta(source), enabled } : cloneMeta(source),
-    );
+    return this.enqueueMutation(async () => {
+      const index = this.findSourceIndex(id);
+      const nextSources = this.sources.map((source, sourceIndex) =>
+        sourceIndex === index ? { ...cloneMeta(source), enabled } : cloneMeta(source),
+      );
 
-    await this.store.saveIndex(nextSources);
-    this.sources = nextSources;
+      await this.store.saveIndex(nextSources);
+      this.sources = nextSources;
+    });
   }
 
   async deleteSource(id: string): Promise<void> {
-    const index = this.findSourceIndex(id);
-    const previousSources = this.sources.map(cloneMeta);
-    const nextSources = this.sources.filter((_, sourceIndex) => sourceIndex !== index).map(cloneMeta);
+    return this.enqueueMutation(async () => {
+      const index = this.findSourceIndex(id);
+      const previousSources = this.sources.map(cloneMeta);
+      const nextSources = this.sources.filter((_, sourceIndex) => sourceIndex !== index).map(cloneMeta);
 
-    await this.store.saveIndex(nextSources);
-    try {
-      await this.store.deleteScript(id);
-    } catch (error) {
-      await this.rollbackIndex(previousSources);
-      throw error;
-    }
+      await this.store.saveIndex(nextSources);
+      try {
+        await this.store.deleteScript(id);
+      } catch (error) {
+        await this.rollbackIndex(previousSources);
+        throw error;
+      }
 
-    this.sources = nextSources;
+      this.sources = nextSources;
+    });
   }
 
   async getScript(id: string): Promise<string | null> {

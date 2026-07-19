@@ -89,6 +89,26 @@ describe('automation AI config module', () => {
     });
   });
 
+  it('omits api_key from payload when the field is left blank (preserve server secret)', async () => {
+    installDom();
+    const modulePath = '../../static/js/automation_modules/ai_config.js';
+    const { aiConfigFromForm, updateAiAnalysisAccess } = await import(modulePath) as AiConfigModule;
+    updateAiAnalysisAccess(true);
+
+    const payload = aiConfigFromForm({
+      elements: {
+        enabled: { checked: true },
+        api_url: { value: 'https://api.example/v1' },
+        api_key: { value: '   ' },
+        model: { value: 'qwen-plus' },
+        timeout: { value: '12' },
+      },
+    });
+
+    expect(payload).not.toHaveProperty('api_key');
+    expect(payload.api_url).toBe('https://api.example/v1');
+  });
+
   it('formats AI test results for display', async () => {
     installDom();
     const modulePath = '../../static/js/automation_modules/ai_config.js';

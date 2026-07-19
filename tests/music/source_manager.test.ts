@@ -82,6 +82,29 @@ describe('SourceManager', () => {
     expect(manager.listSources()).toEqual([]);
   });
 
+  test('serializes parallel imports so every source is retained', async () => {
+    const manager = await createInitializedManager();
+    const scripts = [
+      {
+        filename: 'a.js',
+        content: '/*!\n * @name Parallel A\n * @version 1.0.0\n */\nlx.send("inited",{status:true});',
+      },
+      {
+        filename: 'b.js',
+        content: '/*!\n * @name Parallel B\n * @version 1.0.0\n */\nlx.send("inited",{status:true});',
+      },
+      {
+        filename: 'c.js',
+        content: '/*!\n * @name Parallel C\n * @version 1.0.0\n */\nlx.send("inited",{status:true});',
+      },
+    ];
+
+    await Promise.all(scripts.map((s) => manager.importFromJS(s.filename, s.content)));
+
+    const names = manager.listSources().map((s) => s.name).sort();
+    expect(names).toEqual(['Parallel A', 'Parallel B', 'Parallel C']);
+  });
+
   test('imports JS source disabled by default and extracts metadata', async () => {
     const store = new SourceStore();
     const manager = await createInitializedManager(store);

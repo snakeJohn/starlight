@@ -162,6 +162,43 @@ describe('registerConfigHandlers', () => {
     expect(voiceEngine.setEnabled).toHaveBeenCalledWith(true);
   });
 
+  it('does not return raw secrets from GET /config', async () => {
+    const { router } = createHarness(pluginConfig({
+      external_search_token: 'tok-secret',
+      ai_config: {
+        enabled: true,
+        api_url: 'https://api.example/v1',
+        api_key: 'sk-secret',
+        model: 'qwen-flash',
+        timeout: 6,
+      },
+    }));
+
+    const response = await router.handle(request('GET', '/config'));
+    const data = parseResponseBody(response).data;
+    expect(data.external_search_token).toBeUndefined();
+    expect(data.has_external_search_token).toBe(true);
+    expect(data.ai_config.api_key).toBeUndefined();
+    expect(data.ai_config.has_api_key).toBe(true);
+    expect(JSON.stringify(data)).not.toContain('tok-secret');
+    expect(JSON.stringify(data)).not.toContain('sk-secret');
+  });
+
+  it('preserves external_search_token when update omits or blanks it', async () => {
+    const config = pluginConfig({ external_search_token: 'keep-me' });
+    const { router, configManager } = createHarness(config);
+
+    await router.handle(request('POST', '/config', {
+      external_search_token: '',
+      timezone: 'Asia/Tokyo',
+    }));
+
+    expect(configManager.saveConfig).toHaveBeenCalledWith(expect.objectContaining({
+      external_search_token: 'keep-me',
+      timezone: 'Asia/Tokyo',
+    }));
+  });
+
   it('returns runtime tuning fields in GET /config', async () => {
     const { router } = createHarness(pluginConfig({
       external_search_playlist_id: '12',
