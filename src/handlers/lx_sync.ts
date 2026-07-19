@@ -23,6 +23,13 @@ interface ImportSongloftBody {
   ids?: unknown;
 }
 
+interface ExportFromSongloftBody {
+  /** Songloft native playlist ids; omit / empty = export all host playlists. */
+  playlist_ids?: unknown;
+  playlistIds?: unknown;
+  ids?: unknown;
+}
+
 function handle(fn: () => unknown | Promise<unknown>, statusCode = 200): Promise<HTTPResponse> {
   return Promise.resolve()
     .then(fn)
@@ -83,5 +90,13 @@ export function registerLxSyncHandlers(router: Router, service: LxSyncService): 
         throw new StarlightError('BAD_REQUEST', 'playlist_ids is required');
       }
       return service.importToSongloft(ids);
+    }));
+
+  /** Songloft playlists → LX (tag as lx:user:songloft:* and push to live peers). */
+  router.post('/api/lx-sync/export-from-songloft', async (req) =>
+    handle(() => {
+      const body = parseJsonBody<ExportFromSongloftBody>(req);
+      const ids = parsePlaylistIds(body);
+      return service.exportSongloftPlaylistsToLx(ids.length ? ids : undefined);
     }));
 }

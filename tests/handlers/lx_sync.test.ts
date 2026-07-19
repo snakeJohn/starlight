@@ -146,6 +146,33 @@ describe('lx-sync handlers (server mode)', () => {
     const bad = await router.handle(request('POST', '/api/lx-sync/import-to-songloft', {}));
     expect(bad.statusCode).toBe(400);
   });
+
+  it('export-from-songloft mirrors host playlists into LX-exportable lists', async () => {
+    const exportSongloftPlaylistsToLx = vi.fn(async () => ({
+      total: 1,
+      pushed_to_peers: 0,
+      playlists: [{ id: 'p1', name: '收藏', songs: 2, sourceListId: 'lx:user:songloft:9' }],
+      errors: [],
+    }));
+    const service = {
+      getConfig: vi.fn(),
+      updateConfig: vi.fn(),
+      importToSongloft: vi.fn(),
+      exportSongloftPlaylistsToLx,
+    } as unknown as LxSyncService;
+    const router = createRouter();
+    registerLxSyncHandlers(router, service);
+
+    const res = await router.handle(request('POST', '/api/lx-sync/export-from-songloft', {}));
+    expect(res.statusCode).toBe(200);
+    expect(exportSongloftPlaylistsToLx).toHaveBeenCalledWith(undefined);
+
+    const withIds = await router.handle(
+      request('POST', '/api/lx-sync/export-from-songloft', { playlist_ids: ['12', 34] }),
+    );
+    expect(withIds.statusCode).toBe(200);
+    expect(exportSongloftPlaylistsToLx).toHaveBeenLastCalledWith(['12', '34']);
+  });
 });
 
 describe('lx crypto', () => {

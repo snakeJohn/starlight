@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
-  "name": "Starlight 音乐助手",
+  "name": "Starlight",
   "version": "2026.7.18-14.13",
   "description": "智能音箱控制与 LX Music 音源搜索、歌单、榜单、URL 播放桥接插件",
   "author": "Songloft Starlight",

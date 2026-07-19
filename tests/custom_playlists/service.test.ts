@@ -651,6 +651,41 @@ describe('CustomPlaylistService', () => {
     );
   });
 
+  it('mirrors Songloft playlists as lx:user:songloft:* for LX export', async () => {
+    const bridge = {
+      importSongs: vi.fn(async () => ({ total: 0, payloads: [], songs: [] })),
+      importSongsBestEffort: vi.fn(async () => ({ total: 0, skipped: 0, payloads: [], songs: [], errors: [] })),
+      resolveSearchSong: vi.fn(async () => null),
+    } as unknown as BridgeService;
+    const nativePlaylists = {
+      list: vi.fn(async () => [{ id: 77, name: '晚安' }]),
+      getSongs: vi.fn(async () => [
+        { id: 501, title: '为龙', artist: '河图', album: '', duration: 260, cover_url: 'https://img/x.jpg' },
+      ]),
+      create: vi.fn(),
+      addSongs: vi.fn(),
+    };
+    const store = new CustomPlaylistStore();
+    const service = new CustomPlaylistService(store, bridge, nativePlaylists);
+
+    const result = await service.mirrorSongloftPlaylistsForLx();
+    expect(result.total).toBe(1);
+    expect(result.errors).toEqual([]);
+    expect(result.playlists[0]).toMatchObject({
+      name: '晚安',
+      native_playlist_id: 77,
+      sourceListId: 'lx:user:songloft:77',
+    });
+    expect(result.playlists[0].songs[0]?.title).toBe('为龙');
+    expect(nativePlaylists.getSongs).toHaveBeenCalledWith(77, { limit: 100000 });
+
+    // Appears in LX list export.
+    const { LxSyncService } = await import('../../src/lx_sync/service');
+    const lx = new LxSyncService({ playlistStore: store });
+    const listData = await lx.getLocalListData();
+    expect(listData.userList.some((u) => u.id === 'songloft:77' && u.name === '晚安')).toBe(true);
+  });
+
   it('recreates Songloft playlist when stored native_playlist_id was deleted', async () => {
     const bridge = {
       importSongs: vi.fn(async () => ({ total: 0, payloads: [], songs: [] })),

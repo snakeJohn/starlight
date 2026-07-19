@@ -91,7 +91,9 @@ export type LxListSyncPeer = {
 
 export class LxSyncService {
   private readonly store: CustomPlaylistStore;
-  private readonly customPlaylists?: Pick<CustomPlaylistService, 'syncToSongloftPlaylist'>;
+  private readonly customPlaylists?: Partial<
+    Pick<CustomPlaylistService, 'syncToSongloftPlaylist' | 'mirrorSongloftPlaylistsForLx'>
+  >;
   private readonly devices = new LxDeviceStore();
   private connectedClientIds = new Set<string>();
   private listPeers = new Map<string, LxListSyncPeer>();
@@ -107,7 +109,9 @@ export class LxSyncService {
 
   constructor(options: {
     playlistStore?: CustomPlaylistStore;
-    customPlaylists?: Pick<CustomPlaylistService, 'syncToSongloftPlaylist'>;
+    customPlaylists?: Partial<
+      Pick<CustomPlaylistService, 'syncToSongloftPlaylist' | 'mirrorSongloftPlaylistsForLx'>
+    >;
     hostBaseUrl?: string;
   } = {}) {
     this.store = options.playlistStore || new CustomPlaylistStore();
@@ -381,7 +385,7 @@ export class LxSyncService {
       errors: Array<{ title: string; message: string }>;
     }>;
   }> {
-    if (!this.customPlaylists) {
+    if (!this.customPlaylists?.syncToSongloftPlaylist) {
       throw new StarlightError('INTERNAL_ERROR', 'CustomPlaylistService is not available');
     }
     const ids = playlistIds.map((id) => String(id || '').trim()).filter(Boolean);
@@ -400,6 +404,59 @@ export class LxSyncService {
       });
     }
     return { results };
+  }
+
+  /**
+   * Export Songloft host playlists into LX list data (user lists under
+   * `lx:user:songloft:{id}`). Live LX peers receive a full list overwrite so
+   * 洛雪 clients pick up the lists without reconnecting when possible.
+   *
+   * @param nativePlaylistIds Optional Songloft playlist ids; omit to export all.
+   */
+  async exportSongloftPlaylistsToLx(nativePlaylistIds?: Array<string | number>): Promise<{
+    total: number;
+    pushed_to_peers: number;
+    playlists: Array<{ id: string; name: string; songs: number; sourceListId?: string }>;
+    errors: Array<{ name: string; message: string }>;
+  }> {
+    if (!this.customPlaylists?.mirrorSongloftPlaylistsForLx) {
+      throw new StarlightError('INTERNAL_ERROR', 'CustomPlaylistService is not available');
+    }
+
+    const mirrored = await this.customPlaylists.mirrorSongloftPlaylistsForLx(nativePlaylistIds);
+    await this.markSynced();
+    const pushed = await this.pushLocalListSnapshotToPeers();
+
+    return {
+      total: mirrored.total,
+      pushed_to_peers: pushed,
+      playlists: mirrored.playlists.map((playlist) => ({
+        id: playlist.id,
+        name: playlist.name,
+        songs: playlist.songs?.length || 0,
+        sourceListId: playlist.sourceListId,
+      })),
+      errors: mirrored.errors,
+    };
+  }
+
+  /** Push current LX list snapshot to all ready peers (list_data_overwrite). */
+  async pushLocalListSnapshotToPeers(): Promise<number> {
+    const listData = await this.getLocalListData();
+    const action = { action: 'list_data_overwrite', data: listData } as const;
+    const targets = Array.from(this.listPeers.values()).filter((peer) => peer.isListReady());
+    await Promise.all(
+      targets.map(async (peer) => {
+        try {
+          await peer.notifyListAction(action);
+        } catch (err) {
+          songloft.log.warn(
+            `[LxSync] push list_data_overwrite failed client=${peer.clientId}: ${String(err)}`,
+          );
+        }
+      }),
+    );
+    return targets.length;
   }
 
   private async toPublic(config: LxSyncConfig): Promise<LxSyncConfigPublic> {
@@ -533,7 +590,7 @@ export class LxSyncService {
    * LX-managed playlists into Songloft under the same names.
    */
   private scheduleAutoImportToSongloft(): void {
-    if (!this.customPlaylists) return;
+    if (!this.customPlaylists?.syncToSongloftPlaylist) return;
     if (this.autoImportTimer) clearTimeout(this.autoImportTimer);
     this.autoImportTimer = setTimeout(() => {
       this.autoImportTimer = null;
@@ -542,7 +599,7 @@ export class LxSyncService {
   }
 
   private enqueueAutoImportNow(): void {
-    if (!this.customPlaylists) return;
+    if (!this.customPlaylists?.syncToSongloftPlaylist) return;
     this.autoImportChain = this.autoImportChain
       .then(() => this.runAutoImportToSongloft())
       .catch((error) => {
@@ -553,7 +610,7 @@ export class LxSyncService {
   }
 
   private async runAutoImportToSongloft(): Promise<void> {
-    if (!this.customPlaylists) return;
+    if (!this.customPlaylists?.syncToSongloftPlaylist) return;
     const playlists = await this.store.loadAll();
     const lxPlaylists = playlists.filter((playlist) => String(playlist.sourceListId || '').startsWith('lx:'));
     if (!lxPlaylists.length) return;

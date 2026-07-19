@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Starlight Songloft</title>
+    <title>Starlight</title>
     <link rel="icon" type="image/png" href="static/icon.png">
     <link rel="stylesheet" href="static/css/style.css">
 </head>
@@ -270,7 +270,14 @@
                             <h2>账号</h2>
                             <span data-role="auth-summary">未加载</span>
                         </div>
+                        <div class="auth-tabs" role="tablist" data-role="auth-tabs">
+                            <button class="auth-tab active" type="button" data-action="auth-tab" data-auth-tab="qrcode" role="tab" aria-selected="true">扫码登录</button>
+                            <button class="auth-tab" type="button" data-action="auth-tab" data-auth-tab="password" role="tab" aria-selected="false">账号密码</button>
+                            <button class="auth-tab" type="button" data-action="auth-tab" data-auth-tab="token" role="tab" aria-selected="false">手动 Token</button>
+                        </div>
+
                         <div class="auth-panel active" data-auth-panel="qrcode">
+                            <p class="field-help">使用米家 App 扫描二维码，系统将自动创建账号。</p>
                             <div class="inline-actions">
                                 <button class="primary-button" type="button" data-action="qr-start">获取二维码</button>
                                 <button class="ghost-button" type="button" data-action="qr-poll">轮询</button>
@@ -280,6 +287,51 @@
                                 <a data-role="qr-link" target="_blank" rel="noreferrer"></a>
                                 <span data-role="qr-status">等待生成</span>
                             </div>
+                        </div>
+
+                        <div class="auth-panel" data-auth-panel="password" data-auth-mode="password" hidden>
+                            <form class="form-stack auth-login-form" data-role="password-login-form">
+                                <label class="field-row">
+                                    <span class="field-label">用户名</span>
+                                    <input name="username" data-role="auth-username" type="text" placeholder="手机号 / 邮箱" autocomplete="username">
+                                </label>
+                                <label class="field-row">
+                                    <span class="field-label">密码</span>
+                                    <input name="password" data-role="auth-password" type="password" placeholder="密码" autocomplete="current-password">
+                                </label>
+                                <button class="primary-button" type="submit">账号密码登录</button>
+                            </form>
+                            <div class="auth-extra" data-role="captcha-panel" hidden>
+                                <p class="field-help">请输入图形验证码</p>
+                                <div class="auth-captcha-row">
+                                    <img data-role="captcha-image" alt="图形验证码">
+                                    <input data-role="captcha-input" type="text" placeholder="验证码" autocomplete="off">
+                                    <button class="primary-button" type="button" data-action="auth-captcha-submit">提交</button>
+                                </div>
+                            </div>
+                            <div class="auth-extra" data-role="verify-panel" hidden>
+                                <p class="field-help">请在浏览器中完成二次验证后输入验证码</p>
+                                <div class="inline-actions">
+                                    <button class="ghost-button" type="button" data-action="auth-verify-open">打开验证页</button>
+                                    <input data-role="verify-code-input" type="text" placeholder="短信 / 邮箱验证码" autocomplete="one-time-code">
+                                    <button class="primary-button" type="button" data-action="auth-verify-submit">提交</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="auth-panel" data-auth-panel="token" data-auth-mode="token" hidden>
+                            <p class="field-help">在浏览器登录小米账号后，从 Cookie 提取 <code>userId</code> 与 <code>passToken</code>。</p>
+                            <form class="form-stack auth-login-form" data-role="token-login-form">
+                                <label class="field-row">
+                                    <span class="field-label">User ID</span>
+                                    <input name="user_id" data-role="auth-token-user-id" type="text" placeholder="Cookie 中的 userId" autocomplete="off">
+                                </label>
+                                <label class="field-row">
+                                    <span class="field-label">Pass Token</span>
+                                    <input name="pass_token" data-role="auth-token-pass" type="password" placeholder="Cookie 中的 passToken" autocomplete="off">
+                                </label>
+                                <button class="primary-button" type="submit">Token 登录</button>
+                            </form>
                         </div>
 
                         <div class="list-stack tight" data-role="account-list"></div>
@@ -506,9 +558,10 @@
                         <div class="lx-sync-actions row-actions form-actions">
                             <button class="primary-button" type="button" data-action="lx-sync-save-config">保存设置</button>
                             <button class="ghost-button" type="button" data-action="lx-sync-refresh">刷新状态</button>
+                            <button class="ghost-button" type="button" data-action="lx-sync-export-from-songloft" title="将 Songloft 歌单镜像到洛雪同步列表">Songloft → 洛雪</button>
                         </div>
                     </form>
-                    <p class="field-help" data-role="lx-sync-message">在 LX Music 桌面/手机 → 设置 → 同步服务，填入上方地址与密钥即可连接。手机需与 Songloft 同一局域网。同步完成后会自动按同名写入 Songloft 歌单，并将歌曲导入歌曲库。</p>
+                    <p class="field-help" data-role="lx-sync-message">在 LX Music 桌面/手机 → 设置 → 同步服务，填入上方地址与密钥即可连接。手机需与 Songloft 同一局域网。洛雪→Songloft 会自动导入；也可点「Songloft → 洛雪」把宿主歌单推给已连接的洛雪客户端。状态约每 5 秒自动刷新。</p>
                     <div class="list-stack tight" data-role="lx-sync-device-list">
                         <div class="empty-state">尚未有设备连接。</div>
                     </div>
