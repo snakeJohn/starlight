@@ -189,15 +189,18 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('.input-with-actions');
   });
 
-  it('shows only QR code login in the speaker account panel', () => {
+  it('shows QR, password, and token login modes in the speaker account panel', () => {
     const html = indexHtml();
 
     expect(html).toContain('data-auth-panel="qrcode"');
     expect(html).toContain('data-action="qr-start"');
-    expect(html).not.toContain('data-auth-mode="password"');
-    expect(html).not.toContain('data-auth-mode="token"');
-    expect(html).not.toContain('data-role="password-login-form"');
-    expect(html).not.toContain('data-role="token-login-form"');
+    expect(html).toContain('data-auth-mode="password"');
+    expect(html).toContain('data-auth-mode="token"');
+    expect(html).toContain('data-role="password-login-form"');
+    expect(html).toContain('data-role="token-login-form"');
+    expect(html).toContain('data-action="auth-tab"');
+    expect(html).toContain('data-action="auth-captcha-submit"');
+    expect(html).toContain('data-action="auth-verify-submit"');
   });
 
   it('mounts pagination controls for every paged music surface', () => {

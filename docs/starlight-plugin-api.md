@@ -688,8 +688,10 @@ POST /api/songloft/player/song
 | `POST` | `/auth/qrcode/poll` | 轮询扫码状态 |
 | `POST` | `/auth/relogin` | 重新登录账号 |
 | `GET` | `/auth/status` | 查询登录状态 |
-| `POST` | `/auth/login` | 账密登录，当前 UI 默认隐藏 |
-| `POST` | `/auth/token` | 手动 token 登录，当前 UI 默认隐藏 |
+| `POST` | `/auth/login` | 账号密码登录 |
+| `POST` | `/auth/captcha` | 提交图形验证码（账密流程） |
+| `POST` | `/auth/verify` | 提交短信 / 邮箱验证码（账密流程） |
+| `POST` | `/auth/token` | 手动 passToken + userId 登录 |
 
 ### 设备与音箱控制
 

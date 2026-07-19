@@ -55,7 +55,7 @@ function renderNavigation() {
                 <div class="brand-mark" aria-hidden="true" title="Starlight"></div>
                 <div>
                     <strong>Starlight</strong>
-                    <span>Songloft 音乐助手</span>
+                    <span>Songloft 插件</span>
                 </div>
             </div>
             <nav class="rail-tabs" aria-label="主导航">
