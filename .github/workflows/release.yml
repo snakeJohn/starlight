@@ -84,7 +84,17 @@ jobs:
 
       - name: Ensure build did not rewrite tracked sources
         shell: pwsh
-        run: git diff --exit-code
+        run: |
+          # version:stamp intentionally dirties package/plugin metadata before release.
+          # Fail only if build rewrote other tracked sources (e.g. holiday data).
+          git diff --exit-code -- . `
+            ":(exclude)package.json" `
+            ":(exclude)package-lock.json" `
+            ":(exclude)plugin.json"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Build modified tracked source files outside release metadata."
+            exit 1
+          }
 
       - name: Validate plugin
         run: npm run validate
