@@ -42,15 +42,16 @@ describe('peerKeyFromRequest', () => {
     expect(key).toBe('1.2.3.4');
   });
 
-  it('honors x-starlight-trust-proxy header for host adapters', () => {
+  it('ignores client-supplied x-starlight-trust-proxy header', () => {
     const key = peerKeyFromRequest(req({
       remoteAddress: '10.0.0.5',
       headers: {
         'x-starlight-trust-proxy': '1',
         'x-real-ip': '9.9.9.9',
+        'x-forwarded-for': '1.2.3.4',
       },
     }));
-    expect(key).toBe('9.9.9.9');
+    expect(key).toBe('10.0.0.5');
   });
 });
 
@@ -100,6 +101,48 @@ describe('LX /ah rate limit bypass protection', () => {
     );
     expect(blocked!.statusCode).toBe(403);
     expect(String(blocked!.body)).toBe('Blocked IP');
+  });
+
+  it('blocks after eight failures even when clients rotate trust-proxy + XFF', async () => {
+    const service = {
+      async getServerMeta() {
+        return { enabled: true, serverId: 'sid', password: 'real-secret' };
+      },
+      async getAuthPasswordKey() {
+        return Buffer.from('0123456789abcdef').toString('base64');
+      },
+      async getDevice() {
+        return null;
+      },
+    } as unknown as LxSyncService;
+
+    for (let i = 0; i < 8; i++) {
+      const response = await handleLxProtocolHttp(
+        req({
+          path: '/ah',
+          remoteAddress: '203.0.113.20',
+          headers: {
+            'x-starlight-trust-proxy': 'true',
+            'x-forwarded-for': `198.51.100.${i}`,
+          },
+        }),
+        service,
+      );
+      expect(response!.statusCode).toBe(401);
+    }
+
+    const blocked = await handleLxProtocolHttp(
+      req({
+        path: '/ah',
+        remoteAddress: '203.0.113.20',
+        headers: {
+          'x-starlight-trust-proxy': '1',
+          'x-forwarded-for': '198.51.100.99',
+        },
+      }),
+      service,
+    );
+    expect(blocked!.statusCode).toBe(403);
   });
 });
 

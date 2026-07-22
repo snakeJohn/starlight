@@ -35,8 +35,9 @@ function header(req: HTTPRequest, name: string): string {
 /**
  * Client identity for /ah rate limiting.
  * Prefer the transport peer address. Forwarded headers are only honored when
- * the host sets a trusted-proxy flag (SDK/host specific); otherwise they are
- * ignored so clients cannot rotate X-Forwarded-For to bypass the block.
+ * the host sets req.trustedProxy = true (host/SDK-injected, never client-writable).
+ * Client-supplied headers such as x-starlight-trust-proxy are intentionally ignored
+ * so callers cannot rotate X-Forwarded-For to bypass the block.
  */
 export function peerKeyFromRequest(req: HTTPRequest): string {
   const anyReq = req as HTTPRequest & {
@@ -53,12 +54,8 @@ export function peerKeyFromRequest(req: HTTPRequest): string {
     || (typeof anyReq.connection?.remoteAddress === 'string' && anyReq.connection.remoteAddress.trim())
     || '';
 
-  const trustForwarded =
-    anyReq.trustedProxy === true
-    || header(req, 'x-starlight-trust-proxy').toLowerCase() === '1'
-    || header(req, 'x-starlight-trust-proxy').toLowerCase() === 'true';
-
-  if (trustForwarded) {
+  // Only host-injected trustedProxy is authoritative. Never trust a client header.
+  if (anyReq.trustedProxy === true) {
     const xff = header(req, 'x-forwarded-for');
     if (xff) {
       const first = xff.split(',')[0]?.trim();

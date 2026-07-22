@@ -339,7 +339,7 @@ export class ConversationMonitor {
       return;
     }
 
-    // 打印返回的消息数量和内容摘要
+    // Quiet when empty — default poll is 1s; do not emit info spam for zero results.
     const msgCount = askMessages ? askMessages.length : 0;
     if (msgCount > 0) {
       const summary = askMessages.map(m => {
@@ -347,8 +347,6 @@ export class ConversationMonitor {
         return `[ts=${m.timestamp_ms} q="${q.substring(0, 50)}"]`;
       }).join(', ');
       songloft.log.info(`[ConversationMonitor] pollDevice device=${dm.deviceId} returned ${msgCount} messages: ${summary}`);
-    } else {
-      songloft.log.info(`[ConversationMonitor] pollDevice device=${dm.deviceId} returned 0 messages`);
     }
 
     if (!askMessages || askMessages.length === 0) {
@@ -375,12 +373,13 @@ export class ConversationMonitor {
       }
     }
 
-    // 打印过滤结果
-    songloft.log.info(`[ConversationMonitor] pollDevice device=${dm.deviceId} after filter: ${newMessages.length} new (lastTimestampMs=${dm.lastTimestampMs})`);
-
+    // Only log when there is something new to process.
     if (newMessages.length === 0) {
       return;
     }
+    songloft.log.info(
+      `[ConversationMonitor] pollDevice device=${dm.deviceId} after filter: ${newMessages.length} new (lastTimestampMs=${dm.lastTimestampMs})`,
+    );
 
     // 更新最后时间戳
     dm.lastTimestampMs = maxTimestamp;

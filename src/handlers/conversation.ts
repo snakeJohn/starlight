@@ -5,16 +5,16 @@ import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { ConversationMonitor } from '../conversation/monitor';
 import { ConfigManager } from '../config/manager';
+import { parseJsonBody } from '../system/body';
+import { StarlightError } from '../system/errors';
+import { validateOutboundWebhookUrl } from '../utils/url_safety';
 
 /** 解析请求体（兼容 Uint8Array 和 string） */
 function parseBody(req: HTTPRequest): any {
-  if (!req.body) return {};
   try {
-    const str = typeof req.body === 'string'
-      ? req.body
-      : String.fromCharCode.apply(null, Array.from(req.body as Uint8Array));
-    return JSON.parse(str);
-  } catch {
+    return parseJsonBody(req);
+  } catch (e) {
+    if (e instanceof StarlightError) return {};
     return {};
   }
 }
@@ -73,13 +73,14 @@ export function registerConversationHandlers(
     try {
       const body = parseBody(req);
       const { url, name } = body;
-      if (!url) {
-        return jsonResponse({ success: false, error: 'url is required' });
+      const validated = validateOutboundWebhookUrl(url);
+      if (!validated.ok) {
+        return jsonResponse({ success: false, error: validated.error });
       }
 
       const webhook = {
         id: 'wh_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-        url,
+        url: validated.url,
         name: name || '',
       };
 

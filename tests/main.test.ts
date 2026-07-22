@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 interface MainGlobals {
   onInit(): Promise<void>;
+  onDeinit(): Promise<void>;
   onHTTPRequest(req: { method: string; path: string; query: string; headers: Record<string, string>; body?: string | null }): Promise<HTTPResponse>;
 }
 
@@ -72,5 +73,12 @@ describe('plugin main lifecycle', () => {
       initPromise.then(() => 'resolved'),
       new Promise((resolve) => setTimeout(() => resolve('pending'), 10)),
     ])).resolves.toBe('resolved');
+  });
+
+  test('onDeinit disables voice and drops LX peers without hanging when no sources load', async () => {
+    vi.resetModules();
+    await import('../src/main');
+    await mainGlobals().onInit();
+    await expect(mainGlobals().onDeinit()).resolves.toBeUndefined();
   });
 });

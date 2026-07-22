@@ -181,15 +181,24 @@ function md5Pure(input: string): string {
   return (wordToHex(a) + wordToHex(b) + wordToHex(c) + wordToHex(d)).toLowerCase();
 }
 
+/**
+ * Cryptographically secure random bytes for secrets (LX password, serverId, device ids).
+ * Prefer Web Crypto getRandomValues; never fall back to Math.random for security-sensitive use.
+ */
 function randomBytesPure(size: number): Uint8Array {
   const out = new Uint8Array(size);
-  const g = globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } };
+  const g = globalThis as {
+    crypto?: {
+      getRandomValues?: (a: Uint8Array) => Uint8Array;
+    };
+  };
   if (typeof g.crypto?.getRandomValues === 'function') {
     g.crypto.getRandomValues(out);
     return out;
   }
-  for (let i = 0; i < size; i++) out[i] = Math.floor(Math.random() * 256);
-  return out;
+  throw new Error(
+    'CSPRNG unavailable: crypto.getRandomValues is required for secret generation',
+  );
 }
 
 function bytesToHex(bytes: Uint8Array): string {

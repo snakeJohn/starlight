@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Security
+
+- LX `/ah` rate limiting no longer trusts client-supplied `x-starlight-trust-proxy`; only host-injected `req.trustedProxy` honors forwarded client IPs.
+- Conversation webhooks reject non-http(s) URLs and loopback/private/link-local IP literals (SSRF reduction).
+- Secret generation (`randomHex` / LX passwords) fails closed when no CSPRNG is available instead of falling back to `Math.random`.
+
+### Fixed
+
+- Plugin `onDeinit` now disables the voice engine and drops live LX sync WebSocket peers so hot-reload does not leave orphan connections.
+- Conversation monitor no longer emits per-second `info` logs when devices return zero messages.
+
 ### Changed
 
 - Disabled simulated speaker seek for MIoT URL playback until a real device-level seek command is verified.

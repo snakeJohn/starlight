@@ -213,6 +213,9 @@ async function onDeinit(): Promise<void> {
   songloft.log.info('Starlight 插件停止...');
   scheduler?.stop();
   conversationMonitor?.stop();
+  voiceEngine?.setEnabled(false);
+  // Tear down live LX sync sockets so hot-reload does not leave orphan peers.
+  lxSyncService?.dropAllConnections();
   playlistManagerMap?.cleanup();
   authService?.cleanup();
   await runtimeManager?.close();
