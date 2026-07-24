@@ -544,6 +544,80 @@ export async function encodeData(data: string): Promise<string> {
   return `cg_${bytesToBase64(compressed)}`;
 }
 
+/**
+ * Streaming ungzip that aborts once inflated output exceeds maxBytes.
+ * Avoids allocating a full bomb payload before the size check (post-ungzip
+ * byteLength check alone is too late under a gzip bomb).
+ */
+function ungzipBounded(raw: Uint8Array, maxBytes: number): Uint8Array {
+  const InflateCtor = (pako as { Inflate?: new (opts?: object) => {
+    err: number;
+    msg: string;
+    result: Uint8Array | string | undefined;
+    onData: ((chunk: Uint8Array) => void) | null;
+    push: (data: Uint8Array, mode?: boolean | number) => boolean;
+  } }).Inflate;
+
+  if (typeof InflateCtor === 'function') {
+    const inflator = new InflateCtor({ windowBits: 15 + 32 });
+    let total = 0;
+    const chunks: Uint8Array[] = [];
+    inflator.onData = (chunk: Uint8Array) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        throw new Error('inflated frame too large');
+      }
+      chunks.push(chunk);
+    };
+
+    // Feed in slices so onData can abort without waiting for the full stream.
+    const step = 512;
+    for (let offset = 0; offset < raw.byteLength; offset += step) {
+      const end = Math.min(offset + step, raw.byteLength);
+      const finished = end >= raw.byteLength;
+      try {
+        inflator.push(raw.subarray(offset, end), finished);
+      } catch (e) {
+        if (e instanceof Error && e.message === 'inflated frame too large') {
+          throw e;
+        }
+        throw e;
+      }
+      if (inflator.err) {
+        throw new Error(inflator.msg || 'gzip decode failed');
+      }
+    }
+
+    if (total === 0 && inflator.result) {
+      const result = inflator.result instanceof Uint8Array
+        ? inflator.result
+        : utf8ToBytes(String(inflator.result));
+      if (result.byteLength > maxBytes) {
+        throw new Error('inflated frame too large');
+      }
+      return result;
+    }
+
+    if (chunks.length === 1) return chunks[0];
+    const out = new Uint8Array(total);
+    let cursor = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, cursor);
+      cursor += chunk.length;
+    }
+    return out;
+  }
+
+  // Fallback when streaming Inflate is unavailable: still enforce the cap after.
+  const ungzipFn = typeof pako.ungzip === 'function' ? pako.ungzip : null;
+  if (!ungzipFn) throw new Error('gzip decode unavailable');
+  const inflated = ungzipFn(raw) as Uint8Array;
+  if (inflated.byteLength > maxBytes) {
+    throw new Error('inflated frame too large');
+  }
+  return inflated instanceof Uint8Array ? inflated : new Uint8Array(inflated as ArrayLike<number>);
+}
+
 export async function decodeData(enData: string): Promise<string> {
   if (typeof enData !== 'string') {
     throw new Error('invalid frame');
@@ -564,12 +638,7 @@ export async function decodeData(enData: string): Promise<string> {
   if (raw.byteLength > LX_WS_MAX_COMPRESSED_BYTES) {
     throw new Error('compressed frame too large');
   }
-  const ungzipFn = typeof pako.ungzip === 'function' ? pako.ungzip : null;
-  if (!ungzipFn) throw new Error('gzip decode unavailable');
-  const inflated = ungzipFn(raw) as Uint8Array;
-  if (inflated.byteLength > LX_WS_MAX_INFLATED_BYTES) {
-    throw new Error('inflated frame too large');
-  }
+  const inflated = ungzipBounded(raw, LX_WS_MAX_INFLATED_BYTES);
   return bytesToUtf8(new Uint8Array(inflated));
 }
 

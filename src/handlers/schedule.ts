@@ -206,7 +206,7 @@ export function registerScheduleHandlers(
     }
   });
 
-  // POST /schedules/update - 更新定时任务
+  // POST /schedules/update - 更新定时任务（真正 patch：未提交的字段保留旧值）
   router.post('/schedules/update', async (req: HTTPRequest) => {
     try {
       const body = parseBody(req);
@@ -215,38 +215,53 @@ export function registerScheduleHandlers(
       if (!id) {
         return jsonResponse({ success: false, error: '任务 ID 不能为空' });
       }
-      if (!name) {
+
+      const tasks = await configManager.getScheduledTasks();
+      const existing = tasks.find(t => t.id === id);
+      if (!existing) {
+        return jsonResponse({ success: false, error: '任务不存在: ' + id });
+      }
+
+      // 合并为完整任务后再校验，避免客户端只改名称/时间时把 action/params 清掉
+      const nextName = name !== undefined ? name : existing.name;
+      if (!nextName) {
         return jsonResponse({ success: false, error: '任务名称不能为空' });
       }
 
-      // 验证调度配置
-      const scheduleErr = validateSchedule(schedule);
+      const nextSchedule = schedule !== undefined ? schedule : existing.schedule;
+      const scheduleErr = validateSchedule(nextSchedule);
       if (scheduleErr) {
         return jsonResponse({ success: false, error: scheduleErr });
       }
 
-      // 验证动作参数
-      if (action) {
-        const paramsErr = validateTaskParams(action, params || {});
-        if (paramsErr) {
-          return jsonResponse({ success: false, error: paramsErr });
-        }
+      const nextAction = (action !== undefined && action !== null && action !== '')
+        ? action
+        : existing.action;
+      const nextParams = params !== undefined ? (params || {}) : (existing.params || {});
+      const paramsErr = validateTaskParams(nextAction, nextParams);
+      if (paramsErr) {
+        return jsonResponse({ success: false, error: paramsErr });
       }
 
-      // 验证目标设备
-      const normalizedTarget = normalizeTaskTarget(action, target);
-      const targetErr = isGlobalTaskAction(action) ? null : validateTaskTarget(normalizedTarget);
+      const nextTarget = target !== undefined
+        ? normalizeTaskTarget(nextAction, target)
+        : (isGlobalTaskAction(nextAction)
+          ? normalizeTaskTarget(nextAction, existing.target)
+          : (existing.target || normalizeTaskTarget(nextAction, target)));
+      const targetErr = isGlobalTaskAction(nextAction) ? null : validateTaskTarget(nextTarget);
       if (targetErr) {
         return jsonResponse({ success: false, error: targetErr });
       }
 
+      const nextEnabled = enabled !== undefined ? enabled !== false : existing.enabled !== false;
+
       await configManager.updateScheduledTask(id, {
-        name,
-        enabled: enabled !== false,
-        action,
-        schedule,
-        target: normalizedTarget,
-        params: params || {},
+        name: nextName,
+        enabled: nextEnabled,
+        action: nextAction,
+        schedule: nextSchedule,
+        target: nextTarget,
+        params: nextParams,
       });
       return jsonResponse({ success: true, data: { message: 'task updated' } });
     } catch (e: any) {

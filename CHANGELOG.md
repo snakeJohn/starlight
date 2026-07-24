@@ -12,6 +12,15 @@
 
 - Plugin `onDeinit` now disables the voice engine and drops live LX sync WebSocket peers so hot-reload does not leave orphan connections.
 - Conversation monitor no longer emits per-second `info` logs when devices return zero messages.
+- Voice “播放歌单” no longer fails silently on Music API devices (LX05/LX06/L15A 等): `player_play_music` now falls back to `player_play_url`, playlist load retries once, stale playlist IDs re-match after index refresh, and failures speak TTS feedback.
+- Built-in “暂停/停止” keywords always match even when saved voice commands omit them, avoiding smart-resume replaying the current song.
+- Auto-next retries the current song then skips on device timeout; status polling no longer delays auto-next near the end of a track.
+- `validateToken` now checks `device_list code===0` instead of treating an empty array from failed requests as valid (token false-positive).
+- Cover URL auth only attaches `access_token` to same-origin Songloft cover paths (blocks foreign-origin path spoofing).
+- Pause freezes elapsed progress so resume after a long pause no longer burns remaining auto-next time.
+- Schedule update is a real patch: omitting `action`/`params` no longer clears the stored action.
+- Config storage updates are serialized per key to reduce lost concurrent writes.
+- LX WebSocket gzip decode streams with an inflated-size cap to limit gzip-bomb memory use.
 
 ### Changed
 

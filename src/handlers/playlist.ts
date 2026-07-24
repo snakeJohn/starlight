@@ -438,13 +438,17 @@ export function registerPlaylistHandlers(
             }
           } else if (localStatus.state === 'paused' && cached.state === 'playing') {
             // 本地显示暂停但设备在播放，同步设备状态
-            manager.resetAutoNextTimer(cached.position);
+            if (manager.canCalibrateAutoNextTimer(cached.position)) {
+              manager.resetAutoNextTimer(cached.position);
+            }
           }
         }
 
         // 设备和本地都是 playing 但定时器被挂起时，重启定时器
         if (localStatus.state === 'playing' && cached.state === 'playing' && manager.isVoiceSuspended()) {
-          manager.resetAutoNextTimer(cached.position);
+          if (manager.canCalibrateAutoNextTimer(cached.position)) {
+            manager.resetAutoNextTimer(cached.position);
+          }
         }
 
         // 本地已 stop 时，不让设备残留的播放状态覆盖，避免前端进度条跳动
@@ -506,13 +510,17 @@ export function registerPlaylistHandlers(
           }
         } else if (localStatus.state === 'paused' && realState === 'playing') {
           // 本地显示暂停但设备在播放，同步设备状态
-          manager.resetAutoNextTimer(realPosition);
+          if (manager.canCalibrateAutoNextTimer(realPosition)) {
+            manager.resetAutoNextTimer(realPosition);
+          }
         }
       }
 
       // 设备和本地都是 playing 但定时器被挂起时，重启定时器
       if (localStatus.state === 'playing' && realState === 'playing' && manager.isVoiceSuspended()) {
-        manager.resetAutoNextTimer(realPosition);
+        if (manager.canCalibrateAutoNextTimer(realPosition)) {
+          manager.resetAutoNextTimer(realPosition);
+        }
       }
 
       // 本地已 stop 时，不让设备残留的播放状态覆盖

@@ -393,9 +393,12 @@ export function getDefaultVoiceCommands(): VoiceCommand[] {
     { type: 'set_volume', keywords: ['小声一点', '声音小一点', '音量小一点'], param: 'down', enabled: true },
     { type: 'next', keywords: ['下一首', '切歌', '换一首', '下一曲'], enabled: true },
     { type: 'previous', keywords: ['上一首', '上一曲'], enabled: true },
-    { type: 'stop', keywords: ['停止播放', '停止', '别播了', '关掉音乐', '关机', '闭嘴'], enabled: true },
+    { type: 'stop', keywords: ['暂停播放', '停止播放', '暂停音乐', '停一下', 'pause', 'stop', '停止', '别播了', '关掉音乐', '关机', '关闭', '暂停', '闭嘴'], enabled: true },
   ];
 }
+
+/** 内置停止/暂停关键词：即使用户自定义口令未含这些词，也始终识别 */
+const BUILTIN_STOP_KEYWORDS = ['暂停播放', '停止播放', '暂停音乐', '停一下', 'pause', 'stop', '暂停', '闭嘴', '停止', '别播了', '关掉音乐', '关机', '关闭'];
 
 // ===== VoiceEngine =====
 
@@ -479,6 +482,14 @@ export class VoiceEngine {
       return;
     }
 
+    // 固定控制优先于 AI：暂停/停止不能被 AI 误判或用户自定义缺词影响。
+    const builtinStop = this.matchBuiltinStopCommand(query);
+    if (builtinStop) {
+      songloft.log.info(`[VoiceEngine] [Rule] → Matched builtin stop: keyword="${builtinStop.keyword}"`);
+      await this.executeCommand(builtinStop, accountId, msg.device_id);
+      return;
+    }
+
     // 尝试 AI 分析（如果启用）
     const aiConfig = await this.configManager.getAIConfig();
     if (aiConfig.enabled) {
@@ -536,6 +547,23 @@ export class VoiceEngine {
   }
 
   // ===== 私有方法 - 口令匹配 =====
+
+  /**
+   * 内置暂停/停止匹配（不依赖用户是否保存了默认关键词）
+   */
+  private matchBuiltinStopCommand(query: string): MatchResult | null {
+    const normalizedQuery = query.toLowerCase();
+    const keyword = BUILTIN_STOP_KEYWORDS
+      .filter(item => normalizedQuery.includes(item.toLowerCase()))
+      .sort((a, b) => Array.from(b).length - Array.from(a).length)[0];
+    if (!keyword) return null;
+
+    return {
+      command: { type: 'stop', keywords: BUILTIN_STOP_KEYWORDS, enabled: true },
+      keyword,
+      argument: '',
+    };
+  }
 
   /**
    * 匹配语音口令
@@ -1113,6 +1141,7 @@ export class VoiceEngine {
           songloft.log.info(`[VoiceEngine] Play custom playlist success: ${customPlaylist.name} index=${startIndex} mode=${playMode}`);
         } else {
           songloft.log.error(`[VoiceEngine] Play custom playlist failed: ${customPlaylist.name}`);
+          await this.minaService.textToSpeech(accountId, deviceId, `播放歌单失败：${customPlaylist.name}`);
         }
         return;
       }
@@ -1125,6 +1154,7 @@ export class VoiceEngine {
           songloft.log.info(`[VoiceEngine] Play Songloft playlist success: ${songloftPlaylist.name} index=${startIndex} mode=${playMode}`);
         } else {
           songloft.log.error(`[VoiceEngine] Play Songloft playlist failed: ${songloftPlaylist.name}`);
+          await this.minaService.textToSpeech(accountId, deviceId, `播放歌单失败：${songloftPlaylist.name}`);
         }
         return;
       }
@@ -1170,9 +1200,29 @@ export class VoiceEngine {
     const ok = await pm.play(matchedPlaylist.id, startIndex, playMode);
     if (ok) {
       songloft.log.info(`[VoiceEngine] Play playlist success: ${matchedPlaylist.name} index=${startIndex} mode=${playMode}`);
-    } else {
-      songloft.log.error(`[VoiceEngine] Play playlist failed: ${matchedPlaylist.name}`);
+      return;
     }
+
+    // 播放失败且因歌单 ID 已失效：刷新索引后按名字重新查找并重试一次
+    if (pm.isLastPlayNotFound()) {
+      songloft.log.warn(`[VoiceEngine] Stale playlist ID ${matchedPlaylist.id} in playPlaylist, refreshing index and retrying`);
+      await this.indexingManager.refresh();
+      const newPlaylist = this.indexingManager.findPlaylistByName(matchedPlaylist.name);
+      if (newPlaylist) {
+        songloft.log.info(`[VoiceEngine] Re-matched playlist after refresh: ${newPlaylist.name} (id=${newPlaylist.id})`);
+        const retryOk = await pm.play(newPlaylist.id, 0, playMode);
+        if (retryOk) {
+          songloft.log.info(`[VoiceEngine] Retry play playlist success: ${newPlaylist.name}`);
+          return;
+        }
+      }
+      songloft.log.error(`[VoiceEngine] Retry play playlist failed after index refresh: ${playlistName}`);
+      await this.minaService.textToSpeech(accountId, deviceId, `播放歌单失败：${matchedPlaylist.name}`);
+      return;
+    }
+
+    songloft.log.error(`[VoiceEngine] Play playlist failed: ${matchedPlaylist.name}`);
+    await this.minaService.textToSpeech(accountId, deviceId, `播放歌单失败：${matchedPlaylist.name}`);
   }
 
   /**
@@ -1306,9 +1356,23 @@ export class VoiceEngine {
     const ok = await pm.play(loc.playlistId, loc.songIndex, playMode);
     if (ok) {
       songloft.log.info(`[VoiceEngine] Play song success: ${loc.songTitle} playlist="${loc.playlistName}" index=${loc.songIndex} mode=${playMode}`);
-    } else {
-      songloft.log.error(`[VoiceEngine] Play song failed: ${loc.songTitle}`);
+      return;
     }
+
+    if (pm.isLastPlayNotFound()) {
+      songloft.log.warn(`[VoiceEngine] Stale playlist ID ${loc.playlistId}, refreshing index and retrying`);
+      await this.indexingManager.refresh();
+      const newLoc = await this.indexingManager.findSongByName(songName);
+      if (newLoc) {
+        const retryOk = await pm.play(newLoc.playlistId, newLoc.songIndex, playMode);
+        if (retryOk) {
+          songloft.log.info(`[VoiceEngine] Retry play song success: ${newLoc.songTitle}`);
+          return;
+        }
+      }
+    }
+
+    songloft.log.error(`[VoiceEngine] Play song failed: ${loc.songTitle}`);
   }
 
   /**
@@ -1538,11 +1602,19 @@ export class VoiceEngine {
       return;
     }
 
+    // 优先从当前位置继续，避免语音唤醒打断后整曲重播
+    const resumed = await pm.resumePlayback();
+    if (resumed) {
+      songloft.log.info('[VoiceEngine] Playback restored via resume after voice interaction');
+      return;
+    }
+
     const ok = await pm.replayCurrent();
     if (ok) {
       songloft.log.info('[VoiceEngine] Playback restored via replay after voice interaction');
     } else {
-      songloft.log.warn('[VoiceEngine] Failed to restore playback after voice interaction');
+      songloft.log.warn('[VoiceEngine] Failed to restore playback after voice interaction, cleaning state');
+      await pm.stop();
     }
   }
 

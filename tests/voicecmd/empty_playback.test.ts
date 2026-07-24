@@ -26,6 +26,7 @@ function createEngine(commands: VoiceCommand[]) {
     getAIConfig: vi.fn(async () => ({ enabled: false, api_url: '', api_key: '', model: '', timeout: 6 })),
     getVoiceCommands: vi.fn(async () => commands),
     getDevices: vi.fn(async () => [{ device_id: 'speaker-1', play_mode: 'order' }]),
+    getConfig: vi.fn(async () => ({ interrupt_tts_hint_enabled: false })),
   } as unknown as ConfigManager;
   const accountManager = {
     getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
@@ -38,6 +39,8 @@ function createEngine(commands: VoiceCommand[]) {
     hasPlaylist: vi.fn(() => true),
     isPlaying: vi.fn(() => true),
     next: vi.fn(async () => true),
+    play: vi.fn(async () => true),
+    isLastPlayNotFound: vi.fn(() => false),
     prepareForNewPlayback: vi.fn(),
     resumePlayback: vi.fn(async () => true),
     replayCurrent: vi.fn(async () => true),
@@ -52,6 +55,7 @@ function createEngine(commands: VoiceCommand[]) {
     searchPlaylist: vi.fn(() => []),
     findPlaylistByName: vi.fn(() => null),
     findSongByName: vi.fn(async () => null),
+    refresh: vi.fn(async () => ({ success: true, playlistCount: 0, songCount: 0 })),
   } as unknown as IndexingManager;
 
   const engine = new VoiceEngine(
@@ -104,5 +108,45 @@ describe('VoiceEngine empty playback commands', () => {
 
     expect(playlistManager.stop).toHaveBeenCalledTimes(1);
     expect(playlistManager.replayCurrent).not.toHaveBeenCalled();
+  });
+
+  it('treats "暂停" as stop even when user commands omit it', async () => {
+    // 用户已保存旧版 stop 口令（不含「暂停」），仍应内置识别
+    const { engine, playlistManager } = createEngine([
+      { type: 'stop', keywords: ['停止播放', '停止'], enabled: true },
+      { type: 'play_playlist', keywords: ['播放歌单'], enabled: true },
+    ]);
+
+    await engine.handleMessage(message('暂停'));
+
+    expect(playlistManager.stop).toHaveBeenCalledTimes(1);
+    expect(playlistManager.replayCurrent).not.toHaveBeenCalled();
+  });
+
+  it('retries play playlist when playlist id is stale', async () => {
+    const { engine, playlistManager, indexingManager, minaService } = createEngine([
+      { type: 'play_playlist', keywords: ['播放歌单'], enabled: true },
+    ]);
+
+    playlistManager.hasPlaylist = vi.fn(() => false);
+    playlistManager.isPlaying = vi.fn(() => false);
+    playlistManager.play = vi.fn(async () => false);
+    playlistManager.isLastPlayNotFound = vi.fn(() => true);
+    indexingManager.findPlaylistByName = vi.fn()
+      .mockReturnValueOnce({ id: 1, name: '喜欢' })
+      .mockReturnValueOnce({ id: 99, name: '喜欢' });
+    indexingManager.refresh = vi.fn(async () => ({ success: true, playlistCount: 1, songCount: 10 }));
+    indexingManager.isIndexReady = vi.fn(() => true);
+
+    // 第二次 play 成功
+    (playlistManager.play as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    await engine.handleMessage(message('播放歌单喜欢'));
+
+    expect(playlistManager.play).toHaveBeenCalledTimes(2);
+    expect(indexingManager.refresh).toHaveBeenCalled();
+    expect(minaService.textToSpeech).not.toHaveBeenCalled();
   });
 });

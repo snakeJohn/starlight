@@ -204,7 +204,9 @@ export class PlaylistManager {
   private songs: PlayerSong[] = [];
   private currentIndex: number = 0;
   private checkTimer: any = null;       // 定时器ID（基于歌曲时长的切歌定时器）
-  private playStartTimeMs: number = 0;  // 当前歌曲开始播放的时间戳(ms)
+  private playStartTimeMs: number = 0;  // 当前歌曲开始播放的时间戳(ms)（playing 时相对墙钟）
+  /** 暂停时冻结的已播秒数；>0 表示处于暂停且恢复时以此为进度基准 */
+  private pausedElapsedSec: number = 0;
   private randomPlayed: Set<number> = new Set(); // 随机模式已播放索引
   private voiceSuspendedAt: number = 0; // suspendForVoiceInteraction 首次调用时间戳
   private autoAdvance = true;
@@ -325,19 +327,30 @@ export class PlaylistManager {
 
   /**
    * 暂停播放（保持状态，可恢复）
+   * 冻结已播秒数，恢复时用它重建时间基准，避免把暂停墙钟时间算进进度。
    */
   async pause(): Promise<void> {
     this.stopCheckTimer();
     this.clearVoiceSuspend();
+
+    if (this.state === 'playing' && this.playStartTimeMs > 0) {
+      const elapsed = (Date.now() - this.playStartTimeMs) / 1000;
+      const song = this.getCurrentSong();
+      const capped = song && song.duration > 0 ? Math.min(elapsed, song.duration) : Math.max(0, elapsed);
+      this.pausedElapsedSec = Math.max(0, capped);
+    } else if (this.state !== 'paused') {
+      this.pausedElapsedSec = 0;
+    }
+
     this.state = 'paused';
-    // 不重置 playStartTimeMs，保持当前播放进度
+    // playStartTimeMs 在暂停期间不参与进度计算；恢复时按 pausedElapsedSec 重置
 
     // 调用设备暂停
     if (this.accountId && this.deviceId) {
       await this.minaService.pausePlay(this.accountId, this.deviceId);
     }
 
-    songloft.log.info('[PlaylistManager] Playback paused');
+    songloft.log.info(`[PlaylistManager] Playback paused at ${this.pausedElapsedSec.toFixed(1)}s`);
   }
 
   /**
@@ -348,6 +361,7 @@ export class PlaylistManager {
     this.clearVoiceSuspend();
     this.state = 'stopped';
     this.playStartTimeMs = 0;
+    this.pausedElapsedSec = 0;
 
     if (this.accountId && this.deviceId) {
       await this.minaService.stopPlay(this.accountId, this.deviceId);
@@ -498,15 +512,26 @@ export class PlaylistManager {
       return false;
     }
 
+    const song = this.getCurrentSong();
+    // 从暂停恢复：用冻结的已播秒数重建时间基准，避免暂停墙钟时间吞掉 remaining
+    if (this.state === 'paused') {
+      const elapsedSec = Math.max(0, this.pausedElapsedSec);
+      this.playStartTimeMs = Date.now() - elapsedSec * 1000;
+      this.pausedElapsedSec = 0;
+    }
+
     this.state = 'playing';
 
-    const song = this.getCurrentSong();
     if (this.autoAdvance && song && song.duration > 0 && this.playStartTimeMs > 0) {
       const elapsedSec = (Date.now() - this.playStartTimeMs) / 1000;
       const remaining = song.duration - elapsedSec;
       if (remaining > 0) {
         this.startCheckTimer(remaining);
         songloft.log.info(`[PlaylistManager] Timer reset after resume: remaining=${remaining.toFixed(1)}s`);
+      } else {
+        // 已到/超过曲尾：立即触发切歌
+        songloft.log.info(`[PlaylistManager] Resume at/after end (remaining=${remaining.toFixed(1)}s), advancing now`);
+        this.startCheckTimer(0.1);
       }
     }
 
@@ -517,15 +542,19 @@ export class PlaylistManager {
    * 获取当前播放位置（秒）
    */
   getPosition(): number {
+    const song = this.getCurrentSong();
+    const cap = (sec: number): number => {
+      if (song && song.duration > 0 && sec > song.duration) return song.duration;
+      return Math.max(0, sec);
+    };
+
+    if (this.state === 'paused') {
+      return cap(this.pausedElapsedSec);
+    }
     if (this.state !== 'playing' || this.playStartTimeMs === 0) {
       return 0;
     }
-    const elapsed = (Date.now() - this.playStartTimeMs) / 1000;
-    const song = this.getCurrentSong();
-    if (song && song.duration > 0 && elapsed > song.duration) {
-      return song.duration;
-    }
-    return elapsed;
+    return cap((Date.now() - this.playStartTimeMs) / 1000);
   }
 
   /**
@@ -545,6 +574,7 @@ export class PlaylistManager {
     this.clearVoiceSuspend();
     this.state = 'idle';
     this.playStartTimeMs = 0;
+    this.pausedElapsedSec = 0;
   }
 
   /**
@@ -576,6 +606,31 @@ export class PlaylistManager {
    * 用于设备已自动恢复播放的场景，避免多余的 play 命令导致歌曲从头播放
    * @param devicePositionSec - 设备实际播放位置（秒），优先使用；未提供时回退到挂钟时间
    */
+  /**
+   * 是否仍允许用设备进度校准本地自动切歌定时器。
+   * 仅用于播放刚开始的缓冲修正；接近曲尾时不允许设备端小进度回拨定时器，
+   * 否则部分音箱循环拉同一 URL 时会把自动下一首无限推迟。
+   */
+  canCalibrateAutoNextTimer(devicePositionSec: number): boolean {
+    const song = this.getCurrentSong();
+    if (this.state !== 'playing' || !song || song.duration <= 0 || this.playStartTimeMs <= 0) {
+      return false;
+    }
+
+    const elapsedSec = (Date.now() - this.playStartTimeMs) / 1000;
+    const remainingSec = song.duration - elapsedSec;
+    if (remainingSec <= 15 || elapsedSec >= Math.max(45, song.duration * 0.5)) {
+      return false;
+    }
+
+    // 播放一段时间后设备又回到开头，通常表示音箱在重拉同一首，不应用它重置自动切歌。
+    if (elapsedSec > 15 && devicePositionSec < 3) {
+      return false;
+    }
+
+    return true;
+  }
+
   resetAutoNextTimer(devicePositionSec?: number): void {
     this.stopCheckTimer();
     this.clearVoiceSuspend();
@@ -597,6 +652,10 @@ export class PlaylistManager {
     if (remaining > 0) {
       this.startCheckTimer(remaining);
       songloft.log.info(`[PlaylistManager] Timer reset: remaining=${remaining.toFixed(1)}s`);
+    } else {
+      // 校准后已到/超过曲尾：立即触发切歌，避免定时器被清掉后卡死
+      songloft.log.info(`[PlaylistManager] Timer reset with remaining<=0 (${remaining.toFixed(1)}s), advancing now`);
+      this.startCheckTimer(0.1);
     }
   }
 
@@ -635,42 +694,58 @@ export class PlaylistManager {
 
   /**
    * 加载歌单歌曲（通过宿主API桥接）
+   * 首次失败会短暂重试一次，缓解宿主桥接瞬时抖动导致的「口令已识别但歌单打不开」。
    */
   private async loadPlaylistSongs(playlistId: number): Promise<boolean> {
-    try {
-      if (playlistId < 0 && this.dynamicOptions.dynamicPlaylistLoader) {
-        const songs = await this.dynamicOptions.dynamicPlaylistLoader(playlistId);
-        if (!songs || !Array.isArray(songs)) {
-          songloft.log.error('[PlaylistManager] Dynamic playlist loader returned invalid songs: ' + playlistId);
+    const attempt = async (retry: boolean): Promise<boolean> => {
+      try {
+        if (playlistId < 0 && this.dynamicOptions.dynamicPlaylistLoader) {
+          const songs = await this.dynamicOptions.dynamicPlaylistLoader(playlistId);
+          if (!songs || !Array.isArray(songs)) {
+            songloft.log.error(`[PlaylistManager] Dynamic playlist loader returned invalid songs: ${playlistId}${retry ? ' (retry)' : ''}`);
+            return false;
+          }
+          this.songs = songs;
+          return songs.length > 0;
+        }
+
+        // 使用 songloft.playlists.getSongs 桥接调用（与 Go WASM 版本的 hostFunctions.CallRouter 等价）
+        // 这样不需要 hostBaseUrl 和 pluginToken，直接通过内部桥接访问数据库
+        const songs = normalizePlayerSongs(await songloft.playlists.getSongs(playlistId, { limit: 100000 }));
+        songloft.log.info(`[PlaylistManager] loadPlaylistSongs playlistId=${playlistId} returned=${songs.length}${retry ? ' (retry)' : ''}`);
+        if (songs.length === 0) {
           return false;
         }
         this.songs = songs;
-        return songs.length > 0;
-      }
-
-      // 使用 songloft.playlists.getSongs 桥接调用（与 Go WASM 版本的 hostFunctions.CallRouter 等价）
-      // 这样不需要 hostBaseUrl 和 pluginToken，直接通过内部桥接访问数据库
-      const songs = normalizePlayerSongs(await songloft.playlists.getSongs(playlistId, { limit: 100000 }));
-      if (songs.length === 0) {
-        // 区分「空歌单」与「歌单 ID 已失效」
-        try {
-          const pl = await songloft.playlists.getById(playlistId);
-          if (!pl) {
-            this._lastLoadNotFound = true;
-            songloft.log.warn(`[PlaylistManager] playlist ${playlistId} not found (stale ID), signaling caller to refresh index`);
-          }
-        } catch (e) {
-          songloft.log.warn(`[PlaylistManager] getById check failed playlistId=${playlistId}: ${String(e)}`);
-        }
-        songloft.log.error('[PlaylistManager] Bridge returned invalid songs data for playlist: ' + playlistId);
+        return true;
+      } catch (e) {
+        songloft.log.error(`[PlaylistManager] Failed to load playlist songs playlistId=${playlistId}${retry ? ' (retry)' : ''}: ${String(e)}`);
         return false;
       }
-      this.songs = songs;
-      return songs.length > 0;
-    } catch (e) {
-      songloft.log.error('[PlaylistManager] Failed to load playlist songs: ' + String(e));
-      return false;
+    };
+
+    if (await attempt(false)) {
+      return true;
     }
+
+    songloft.log.warn(`[PlaylistManager] loadPlaylistSongs empty or failed, retrying in 500ms playlistId=${playlistId}`);
+    await new Promise(r => setTimeout(r, 500));
+    if (await attempt(true)) {
+      return true;
+    }
+
+    // retry 后仍为空/失败：区分「歌单不存在(ID 过期)」与「歌单存在但为空」
+    try {
+      const pl = await songloft.playlists.getById(playlistId);
+      if (!pl) {
+        this._lastLoadNotFound = true;
+        songloft.log.warn(`[PlaylistManager] playlist ${playlistId} not found (stale ID), signaling caller to refresh index`);
+      }
+    } catch (e) {
+      songloft.log.warn(`[PlaylistManager] getById check failed playlistId=${playlistId}: ${String(e)}`);
+    }
+    songloft.log.error('[PlaylistManager] Bridge returned invalid songs data for playlist: ' + playlistId);
+    return false;
   }
 
   /**
@@ -776,6 +851,7 @@ export class PlaylistManager {
     this.clearVoiceSuspend();
     this.state = 'playing';
     this.playStartTimeMs = Date.now();
+    this.pausedElapsedSec = 0;
 
     // 如果歌曲时长有效，注册定时器播放下一首
     if (this.autoAdvance && song.duration > 0) {
@@ -914,6 +990,7 @@ export class PlaylistManager {
 
   /**
    * 歌曲播放结束回调
+   * 设备超时(code=3012) 等瞬时失败时：重试当前曲 → 仍失败则跳下一首 → 再失败才停止。
    */
   private async onSongFinished(): Promise<void> {
     if (this.state !== 'playing') {
@@ -948,11 +1025,38 @@ export class PlaylistManager {
     const ok = await this.playCurrent();
     if (ok) {
       await this.persistState();
-    } else {
-      songloft.log.error('[PlaylistManager] Auto-next failed, stopping');
-      this.state = 'stopped';
-      this.playStartTimeMs = 0;
+      return;
     }
+
+    // 第一次失败（常见于设备超时 code=3012），等 3 秒重试当前歌曲
+    const retryIndex = this.currentIndex;
+    songloft.log.warn('[PlaylistManager] Auto-next play failed, retrying in 3s');
+    await new Promise(r => setTimeout(r, 3000));
+    if (this.state !== 'playing' || this.currentIndex !== retryIndex) {
+      return;
+    }
+
+    const retryOk = await this.playCurrent();
+    if (retryOk) {
+      await this.persistState();
+      return;
+    }
+
+    // 重试仍失败，尝试跳到下一首
+    const skipIdx = this.getNextIndex();
+    if (skipIdx >= 0 && skipIdx !== this.currentIndex) {
+      songloft.log.warn('[PlaylistManager] Retry failed, skipping to next song');
+      this.currentIndex = skipIdx;
+      const skipOk = await this.playCurrent();
+      if (skipOk) {
+        await this.persistState();
+        return;
+      }
+    }
+
+    songloft.log.error('[PlaylistManager] Auto-next failed after retry, stopping');
+    this.state = 'stopped';
+    this.playStartTimeMs = 0;
   }
 
   /**

@@ -64,12 +64,17 @@ function createHarness() {
     addScheduledTask: vi.fn(async (task: ScheduledTask) => {
       tasks.push(task);
     }),
-    updateScheduledTask: vi.fn(async () => {}),
+    updateScheduledTask: vi.fn(async (id: string, updates: Partial<ScheduledTask>) => {
+      const idx = tasks.findIndex(t => t.id === id);
+      if (idx >= 0) {
+        tasks[idx] = { ...tasks[idx], ...updates } as ScheduledTask;
+      }
+    }),
     removeScheduledTask: vi.fn(async () => {}),
   } as unknown as ConfigManager;
 
   registerScheduleHandlers(router, scheduler, configManager);
-  return { router, configManager };
+  return { router, configManager, tasks };
 }
 
 const validSchedule = {
@@ -152,5 +157,35 @@ describe('registerScheduleHandlers validation', () => {
 
     expect(parseResponseBody(invalidMode).success).toBe(false);
     expect(parseResponseBody(invalidVolume).success).toBe(false);
+  });
+
+  it('patches schedule fields without clearing action when action is omitted', async () => {
+    const { router, configManager, tasks } = createHarness();
+    tasks.push({
+      id: 'task-1',
+      name: '晨间播放',
+      enabled: true,
+      action: 'play_playlist',
+      schedule: { type: 'weekly', time: '08:30', weekdays: [1] },
+      target: validTarget,
+      params: { playlist_name: '喜欢' },
+      created_at: '2026-07-01T00:00:00.000Z',
+      updated_at: '2026-07-01T00:00:00.000Z',
+    } as ScheduledTask);
+
+    const response = await router.handle(request('POST', '/schedules/update', {
+      id: 'task-1',
+      name: '晨间播放（改名）',
+      schedule: { type: 'weekly', time: '09:00', weekdays: [1, 2] },
+      // intentionally omit action / params / target
+    }));
+
+    expect(parseResponseBody(response).success).toBe(true);
+    expect(configManager.updateScheduledTask).toHaveBeenCalledWith('task-1', expect.objectContaining({
+      name: '晨间播放（改名）',
+      action: 'play_playlist',
+      params: { playlist_name: '喜欢' },
+      schedule: expect.objectContaining({ time: '09:00' }),
+    }));
   });
 });

@@ -211,11 +211,18 @@ export class MinaHTTPClient {
           return true;
         }
 
-        songloft.log.warn('[MinaClient] normal Music API fallback failed, trying player_play_url');
+        songloft.log.warn(`[MinaClient] Music API fallback failed hardware=${hardware || 'unknown'}, trying player_play_url`);
         return this.playURL(deviceId, url, keepLight);
       }
 
-      return this.playByMusicURL(deviceId, url, keepLight, fallbackAudioId, 'play-music');
+      // 兼容型号（LX05/LX06/L15A 等）优先 player_play_music；部分固件/格式下会失败，
+      // 必须回退 player_play_url，否则表现为「口令已识别但音箱完全无反应」。
+      const musicOK = await this.playByMusicURL(deviceId, url, keepLight, fallbackAudioId, 'play-music');
+      if (musicOK) {
+        return true;
+      }
+      songloft.log.warn(`[MinaClient] player_play_music failed hardware=${hardware || 'unknown'}, falling back to player_play_url`);
+      return this.playURL(deviceId, url, keepLight);
     }
     return this.playURL(deviceId, url, keepLight);
   }
@@ -538,11 +545,20 @@ export class MinaHTTPClient {
 
   /**
    * 验证 Token 有效性（通过调用 API）
+   *
+   * 直接判定底层响应：token 有效时 device_list 返回 code=0（即使账号名下没有
+   * 任何设备也是 code=0，返回 true）；token 失效时 doGetRequest 遇 401 返回 null，
+   * 返回 false。
+   *
+   * 不能复用 getDeviceList()：它把 401/网络失败兜底成空数组 []，而 `[] !== null`
+   * 恒为 true，会让失效 token 被误判为有效——token 过期后刷新链条持续「假成功」、
+   * 既不提示重登又持续 401（参考 songloft-plugin-miot #57）。
    */
   async validateToken(): Promise<boolean> {
     try {
-      const devices = await this.getDeviceList();
-      return devices !== null;
+      const apiUrl = `${MINA_API_BASE_URL}/admin/v2/device_list?master=1`;
+      const result = await this.doGetRequest<DeviceListResponse>(apiUrl);
+      return result !== null && result.code === 0;
     } catch {
       return false;
     }

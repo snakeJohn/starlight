@@ -154,6 +154,7 @@ describe('music media rendering', () => {
 
   it('adds the Songloft access token to protected song cover resources', async () => {
     vi.stubGlobal('window', {
+      location: { origin: 'http://192.168.31.63:18191' },
       SongloftPlugin: {
         getAuthToken: () => 'ui-token',
       },
@@ -174,6 +175,10 @@ describe('music media rendering', () => {
     }, 0);
 
     expect(html).toContain('http://192.168.31.63:18191/api/v1/songs/484/cover?access_token=ui-token');
+
+    // Foreign origin with a spoofed cover path must not receive the token.
+    expect(mediaCoverUrl({ cover_url: 'https://evil.example/api/v1/songs/x/cover' }))
+      .toBe('https://evil.example/api/v1/songs/x/cover');
   });
 
   it('ignores bare numeric cover fields that would navigate inside the plugin route', async () => {
