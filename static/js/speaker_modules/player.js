@@ -743,9 +743,9 @@ export async function runPlayerAction(action, options = {}) {
                 const result = await togglePlayerPlayback();
                 if (result?.state === 'playing' || result?.is_playing === true) {
                     pauseBrowserPlayback();
+                    setActivePlayingTarget('speaker');
                 }
                 clearPendingTargetHint();
-                setActivePlayingTarget('speaker');
                 return result;
             }
             const result = await api.post(endpoint, selectedPayload());

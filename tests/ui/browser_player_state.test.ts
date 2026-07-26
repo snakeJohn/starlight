@@ -272,4 +272,34 @@ describe('browser player state transitions', () => {
 
     expect(FakeAudio.instances[0].paused).toBe(true);
   });
+
+  it('keeps the browser active when speaker toggle returns paused', async () => {
+    installBrowserGlobals();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse({
+      state: 'paused',
+      is_playing: false,
+      current_index: 1,
+      queue: [{ title: 'Speaker song' }],
+    })));
+    const browser = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+    };
+    await browser.playBrowserQueue([{ title: 'A', url: 'https://media.test/a.mp3' }]);
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'account-1';
+    state.deviceId = 'speaker-1';
+    const player = await import('../../static/js/speaker_modules/player.js') as {
+      runPlayerAction(action: string): Promise<unknown>;
+    };
+    const target = await import('../../static/js/speaker_modules/playback_target.js') as {
+      getActivePlayingTarget(): 'browser' | 'speaker' | null;
+    };
+
+    await player.runPlayerAction('toggle');
+
+    expect(FakeAudio.instances[0].paused).toBe(false);
+    expect(target.getActivePlayingTarget()).toBe('browser');
+  });
 });
