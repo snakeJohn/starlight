@@ -1,9 +1,15 @@
-import type { HTTPResponse, Router } from '@songloft/plugin-sdk';
+import type { Router } from '@songloft/plugin-sdk';
 import { BridgeService } from '../bridge/service';
 import type { SearchResultSong } from '../music/types';
 import { parseJsonBody } from '../system/body';
 import { StarlightError } from '../system/errors';
-import { apiError, apiOk } from '../system/response';
+import {
+  objectField,
+  requireString,
+  stringField,
+  stringishField,
+} from '../system/fields';
+import { runApi } from '../system/response';
 
 interface SongBody {
   song?: unknown;
@@ -28,61 +34,6 @@ interface ResolvedPlayBody {
   device_id?: unknown;
   title?: unknown;
   artist?: unknown;
-}
-
-function handle(fn: () => unknown | Promise<unknown>): Promise<HTTPResponse> {
-  return Promise.resolve()
-    .then(fn)
-    .then((data) => apiOk(data))
-    .catch((error) => apiError(error, statusFor(error)));
-}
-
-function statusFor(error: unknown): number {
-  if (!(error instanceof StarlightError)) {
-    return 500;
-  }
-
-  if (error.code === 'BAD_REQUEST') {
-    return 400;
-  }
-  if (error.code === 'PLAY_URL_RESOLVE_FAILED') {
-    return 404;
-  }
-  if (error.code === 'DEVICE_OFFLINE') {
-    return 503;
-  }
-  if (error.code === 'INTERNAL_ERROR' && error.details.upstream === 'songloft_remote_import') {
-    return 502;
-  }
-
-  return 500;
-}
-
-function stringField(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function stringishField(value: unknown): string {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  return '';
-}
-
-function objectField(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function requireString(value: unknown, name: string): string {
-  const text = stringField(value);
-  if (!text) {
-    throw new StarlightError('BAD_REQUEST', `${name} is required`);
-  }
-
-  return text;
 }
 
 function requireSong(value: unknown): SearchResultSong {
@@ -137,26 +88,24 @@ function requireSongs(value: unknown): SearchResultSong[] {
   if (!Array.isArray(value)) {
     throw new StarlightError('BAD_REQUEST', 'songs must be an array');
   }
-
   return value.map((entry) => requireSong(entry));
 }
 
 export function registerBridgeHandlers(router: Router, bridge: BridgeService): void {
   router.post('/api/bridge/preview-url', async (req) =>
-    handle(async () => {
+    runApi(async () => {
       const body = parseJsonBody<SongBody>(req);
       return { url: await bridge.previewUrl(requireSong(body.song)) };
     }));
 
   router.post('/api/bridge/songs/import', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<SongsBody>(req);
-      const songs = requireSongs(body.songs);
-      return bridge.importSongs(songs);
+      return bridge.importSongs(requireSongs(body.songs));
     }));
 
   router.post('/api/bridge/play-url', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<PlayBody>(req);
       return bridge.playOnSpeaker(
         requireString(body.account_id, 'account_id'),
@@ -166,7 +115,7 @@ export function registerBridgeHandlers(router: Router, bridge: BridgeService): v
     }));
 
   router.post('/api/bridge/play-songlist', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<PlayBody & SongsBody>(req);
       return bridge.playSonglistOnSpeaker(
         requireString(body.account_id, 'account_id'),
@@ -176,7 +125,7 @@ export function registerBridgeHandlers(router: Router, bridge: BridgeService): v
     }));
 
   router.post('/api/bridge/play-resolved-url', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<ResolvedPlayBody>(req);
       return bridge.playResolvedOnSpeaker(
         requireString(body.account_id, 'account_id'),
@@ -187,7 +136,7 @@ export function registerBridgeHandlers(router: Router, bridge: BridgeService): v
     }));
 
   router.post('/api/bridge/external-search', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<ExternalSearchBody>(req);
       return bridge.externalSearch(requireString(body.keyword, 'keyword'));
     }));

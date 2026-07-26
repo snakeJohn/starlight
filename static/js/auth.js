@@ -10,31 +10,30 @@ function pageOrigin() {
     }
 }
 
+const SONGLOFT_SONG_MEDIA_PATH = /^\/api\/v1\/songs\/[^/]+\/(play|cover|lyric|lyrics)\/?$/i;
+
 /**
- * Only attach host access tokens to same-origin Songloft cover paths.
- * Absolute URLs to other origins (even if path looks like /api/v1/songs/.../cover)
- * must never receive the token.
+ * Same-origin Songloft song media paths (play/cover/lyrics) may receive the host access token.
+ * Absolute URLs to other origins must never receive the token.
  */
-function isTrustedSongloftSongCoverResource(value) {
+function isTrustedSongloftSongMediaResource(value) {
     try {
         const raw = String(value || '').trim();
         if (!raw) return false;
 
         // Relative path: always treated as current host.
         if (raw.startsWith('/') && !raw.startsWith('//')) {
-            return /^\/api\/v1\/songs\/[^/]+\/cover\/?$/i.test(raw.split(/[?#]/, 1)[0]);
+            return SONGLOFT_SONG_MEDIA_PATH.test(raw.split(/[?#]/, 1)[0]);
         }
 
         const base = pageOrigin() || 'http://starlight.local';
         const url = new URL(raw, base);
-        if (!/^\/api\/v1\/songs\/[^/]+\/cover\/?$/i.test(url.pathname)) {
+        if (!SONGLOFT_SONG_MEDIA_PATH.test(url.pathname)) {
             return false;
         }
 
-        // Absolute URL: only same origin as the plugin page may receive the token.
         const origin = pageOrigin();
         if (!origin) {
-            // No page context (tests / non-browser): only allow relative forms above.
             return false;
         }
         return url.origin === origin;
@@ -43,9 +42,14 @@ function isTrustedSongloftSongCoverResource(value) {
     }
 }
 
+/** @deprecated name kept for existing cover callers — now covers play/cover/lyrics */
+function isTrustedSongloftSongCoverResource(value) {
+    return isTrustedSongloftSongMediaResource(value);
+}
+
 export function authenticateSongloftResourceUrl(value) {
     const url = String(value || '').trim();
-    if (!url || !isTrustedSongloftSongCoverResource(url) || /[?&]access_token=/.test(url)) return url;
+    if (!url || !isTrustedSongloftSongMediaResource(url) || /[?&]access_token=/.test(url)) return url;
 
     const token = getAuthToken();
     if (!token) return url;
@@ -56,3 +60,6 @@ export function authenticateSongloftResourceUrl(value) {
     const separator = beforeHash.includes('?') ? '&' : '?';
     return `${beforeHash}${separator}access_token=${encodeURIComponent(token)}${hash}`;
 }
+
+// Re-export helper used by older tests that probe cover-only trust.
+export { isTrustedSongloftSongCoverResource };

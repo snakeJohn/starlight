@@ -26,3 +26,11 @@ export function setField(form, name, value) {
         field.value = value ?? '';
     }
 }
+
+/** Parse comma-separated positive integers (schedule weekdays / monthdays). */
+export function csvNumbers(value) {
+    return String(value || '')
+        .split(/[,，\s]+/)
+        .map(item => Number(item.trim()))
+        .filter(item => Number.isInteger(item) && item > 0);
+}

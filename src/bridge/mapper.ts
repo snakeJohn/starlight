@@ -1,4 +1,7 @@
 import type { SearchResultSong } from '../music/types';
+import { remoteSongDedupKey } from '../utils/song_match';
+
+export { remoteSongDedupKey };
 
 export interface RemoteSongPayload {
   title: string;
@@ -17,21 +20,6 @@ export interface RemoteSongOptions {
   includeSourceData?: boolean;
   sourceData?: unknown;
   dedupKey?: string;
-}
-
-export function remoteSongDedupKey(song: SearchResultSong): string {
-  const info = song.source_data.songInfo;
-  const id = info.musicId
-    || info.songmid
-    || info.songId
-    || info.rid
-    || info.id
-    || info.mid
-    || info.hash
-    || info.copyrightId
-    || info.strMediaMid
-    || '';
-  return id ? `${song.source_data.platform}:${id}` : '';
 }
 
 export function toRemoteSong(song: SearchResultSong, url: string, options: RemoteSongOptions = {}): RemoteSongPayload {

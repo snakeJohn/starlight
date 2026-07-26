@@ -4,6 +4,8 @@
 import type { CustomPlaylistService } from '../custom_playlists/service';
 import type { CustomPlaylist, CustomPlaylistSong } from '../custom_playlists/types';
 import { syntheticPlaylistId, syntheticSongId } from '../custom_playlists/synthetic';
+import { AsyncLockRegistry } from '../system/locks';
+import { StarlightError } from '../system/errors';
 
 // ===== 类型定义 =====
 
@@ -250,6 +252,7 @@ export class IndexingManager {
   private lastRefreshTime: number = 0;
   private isRefreshing: boolean = false;
   private indexReady: boolean = false;
+  private readonly locks = new AsyncLockRegistry();
 
   constructor(private customPlaylists?: CustomPlaylistReader) {}
 
@@ -262,8 +265,14 @@ export class IndexingManager {
    * @returns 刷新结果
    */
   async refresh(): Promise<{ success: boolean; songCount: number; playlistCount: number }> {
-    if (this.isRefreshing) {
-      return { success: false, songCount: this.songs.length, playlistCount: this.playlists.length };
+    let release: (() => void) | null = null;
+    try {
+      release = this.locks.acquire('index-refresh', 'INDEX_REFRESH_RUNNING');
+    } catch (error) {
+      if (error instanceof StarlightError && error.code === 'INDEX_REFRESH_RUNNING') {
+        return { success: false, songCount: this.songs.length, playlistCount: this.playlists.length };
+      }
+      throw error;
     }
 
     this.isRefreshing = true;
@@ -327,6 +336,7 @@ export class IndexingManager {
       return { success: false, songCount: this.songs.length, playlistCount: this.playlists.length };
     } finally {
       this.isRefreshing = false;
+      release?.();
     }
   }
 

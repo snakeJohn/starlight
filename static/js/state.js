@@ -109,18 +109,6 @@ export function toast(message, type = 'success') {
     window.setTimeout(() => node.remove(), 3600);
 }
 
-export function setBusy(element, busy, label = '处理中') {
-    if (!element) return;
-    if (busy) {
-        element.dataset.originalText = element.textContent;
-        element.textContent = label;
-        element.disabled = true;
-    } else {
-        element.textContent = element.dataset.originalText || element.textContent;
-        element.disabled = false;
-    }
-}
-
 export function selectedDevicePayload() {
     return {
         account_id: state.accountId,

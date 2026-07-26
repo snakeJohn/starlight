@@ -113,7 +113,7 @@ describe('static UI layout copy', () => {
     expect(html).not.toContain('>Stop</button>');
     expect(html).not.toContain('>Next</button>');
     expect(html).toContain('aria-label="上一首"');
-    expect(html).toContain('aria-label="暂停播放"');
+    expect(html).toContain('aria-label="播放"');
     expect(html).toContain('aria-label="停止"');
     expect(html).toContain('aria-label="下一首"');
     expect(speaker).toContain('speaker-player');
@@ -316,6 +316,32 @@ describe('static UI layout copy', () => {
     expect(sourcesModule).toContain('/download/sources/batch-toggle');
   });
 
+  it('exposes online HTTPS .js source import controls and dialog', () => {
+    const html = indexHtml();
+    const sourcesModule = musicSourcesJs();
+    const sourcesHtml = settingsSection(html, 'sources');
+    const stylesheet = css();
+
+    expect(sourcesHtml).toContain('data-role="online-source-input"');
+    expect(sourcesHtml).toContain('data-action="open-online-source-import"');
+    expect(html).toContain('data-role="online-source-dialog"');
+    expect(html).toContain('data-role="online-source-url"');
+    expect(html).toContain('data-role="online-source-existing"');
+    expect(html).toContain('data-action="online-import-playback"');
+    expect(html).toContain('data-action="online-import-download"');
+    expect(html).toContain('data-action="online-import-both"');
+    expect(html).toContain('data-action="online-import-cancel"');
+    expect(html).toContain('在线音源会作为脚本运行，请仅导入可信来源');
+    expect(html).toContain('将更新现有在线音源');
+    expect(sourcesModule).toContain('normalizeOnlineSourceInput');
+    expect(sourcesModule).toContain('openOnlineSourceImportDialog');
+    expect(sourcesModule).toContain('submitOnlineSourceImport');
+    expect(sourcesModule).toContain("api.post('/music/sources/import-url'");
+    expect(sourcesModule).toContain('bindOnlineSourceImport');
+    expect(stylesheet).toContain('.online-source-dialog');
+    expect(stylesheet).toContain('.online-source-import');
+  });
+
   it('imports zip packages by extracting contained JavaScript source files', () => {
     const sourcesModule = musicSourcesJs();
 
@@ -365,7 +391,7 @@ describe('static UI layout copy', () => {
 
     expect(speakerHtml).not.toContain('<h2>音箱控制</h2>');
     expect(speakerHtml).toContain('speaker-player-panel');
-    expect(speakerHtml).toContain('<h2>音箱播放</h2>');
+    expect(speakerHtml).toContain('<h2>播放控制</h2>');
     expect(speakerHtml).toContain('<h2>索引</h2>');
     expect(speakerHtml).toContain('data-action="refresh-index"');
     expect(automationHtml).not.toContain('<h2>音箱控制</h2>');
@@ -576,7 +602,7 @@ describe('static UI layout copy', () => {
       .map((match) => match[1].replace(/<[^>]+>/g, '').trim())
       .filter(Boolean);
 
-    expect(html).toContain('aria-label="暂停播放"');
+    expect(html).toContain('aria-label="播放"');
     expect(staticButtonLabels).not.toContain('播放');
     expect(music).not.toContain('>播放</button>');
   });
@@ -612,7 +638,7 @@ describe('static UI layout copy', () => {
     expect(music).toContain("from './music_modules/songloft_library.js'");
     expect(songloftLibrary).toContain("api.get('/songloft/songs')");
     expect(songloftLibrary).toContain("api.get('/songloft/local-songs')");
-    expect(songloftLibrary).toContain("api.get('/songloft/playlists')");
+    expect(songloftLibrary).toContain('fetchSongloftPlaylists');
     expect(songloftLibrary).toContain("[data-action=\"view-songloft-playlist\"]");
     expect(songloftLibrary).toContain("api.post('/custom-playlists/import-songloft'");
     expect(songloftLibrary).toContain('import-songloft-playlist-to-custom');

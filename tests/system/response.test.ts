@@ -61,14 +61,14 @@ describe('api response helpers', () => {
     });
   });
 
-  test('apiHandler converts thrown errors to error responses', async () => {
+  test('apiHandler converts thrown errors to error responses with mapped status', async () => {
     const handler = apiHandler(async () => {
       throw new StarlightError('BAD_REQUEST', 'bad request');
     });
 
     const response = await handler();
 
-    expect(response.statusCode).toBe(500);
+    expect(response.statusCode).toBe(400);
     expect(parseResponseBody(response)).toMatchObject({
       success: false,
       data: null,
@@ -79,6 +79,14 @@ describe('api response helpers', () => {
         details: {},
       },
     });
+  });
+
+  test('apiHandler maps PLAY_URL_RESOLVE_FAILED to 404', async () => {
+    const handler = apiHandler(async () => {
+      throw new StarlightError('PLAY_URL_RESOLVE_FAILED', 'no url', true);
+    });
+    const response = await handler();
+    expect(response.statusCode).toBe(404);
   });
 });
 

@@ -66,7 +66,7 @@ function createProvider(): MusicPlatformProvider {
   };
 }
 
-function createHarness() {
+function createHarness(options: { withOnlineImport?: boolean } = {}) {
   const router = createRouter();
   const provider = createProvider();
   let sourcesList = [sourceMeta()];
@@ -108,9 +108,31 @@ function createHarness() {
     get: vi.fn((id: string) => (id === 'kw' ? provider : null)),
   } as unknown as PlatformRegistry;
 
-  registerMusicHandlers(router, sources, runtimes, platforms, { downloadRuntimes });
+  const onlineImport = {
+    importUrl: vi.fn(async (url: string, enableMode: string) => ({
+      operation: 'imported',
+      source: sourceMeta({
+        id: 'online-1',
+        name: 'Online',
+        filename: 'source.js',
+        sourceUrl: url,
+      }),
+      playbackEnabled: enableMode === 'playback' || enableMode === 'both',
+      downloadEnabled: enableMode === 'download' || enableMode === 'both',
+      contentChanged: true,
+    })),
+  };
 
-  return { router, sources, runtimes, downloadRuntimes, platforms, provider };
+  registerMusicHandlers(router, sources, runtimes, platforms, {
+    downloadRuntimes,
+    onlineSourceImport: options.withOnlineImport === false ? undefined : onlineImport as any,
+  });
+
+  return { router, sources, runtimes, downloadRuntimes, platforms, provider, onlineImport };
+}
+
+function createHarnessWithOnlineImport() {
+  return createHarness({ withOnlineImport: true });
 }
 
 describe('registerMusicHandlers', () => {
@@ -168,6 +190,48 @@ describe('registerMusicHandlers', () => {
       skipped: [expect.objectContaining({ filename: 'duplicate.js', reason: 'duplicate' })],
       failed: [],
     });
+  });
+
+  test('imports an online source through the unified endpoint', async () => {
+    const { router, onlineImport } = createHarnessWithOnlineImport();
+    const response = await router.handle(request('POST', '/api/music/sources/import-url', {
+      url: 'https://example.test/source.js',
+      enable_mode: 'playback',
+    }));
+    expect(response.statusCode).toBe(201);
+    expect(onlineImport.importUrl).toHaveBeenCalledWith('https://example.test/source.js', 'playback');
+    expect(parseResponseBody(response).data).toMatchObject({
+      operation: 'imported',
+      playbackEnabled: true,
+      downloadEnabled: false,
+    });
+  });
+
+  test('does not accept client-provided script content', async () => {
+    const { router, onlineImport } = createHarnessWithOnlineImport();
+    const response = await router.handle(request('POST', '/api/music/sources/import-url', {
+      url: 'https://example.test/source.js',
+      enable_mode: 'both',
+      content: 'lx.send()',
+    }));
+    expect(response.statusCode).toBe(400);
+    expect(onlineImport.importUrl).not.toHaveBeenCalled();
+  });
+
+  test('rejects missing url or invalid enable_mode for online import', async () => {
+    const { router, onlineImport } = createHarnessWithOnlineImport();
+    const missingUrl = await router.handle(request('POST', '/api/music/sources/import-url', {
+      enable_mode: 'both',
+    }));
+    expect(missingUrl.statusCode).toBe(400);
+    expect(onlineImport.importUrl).not.toHaveBeenCalled();
+
+    const badMode = await router.handle(request('POST', '/api/music/sources/import-url', {
+      url: 'https://example.test/source.js',
+      enable_mode: 'all',
+    }));
+    expect(badMode.statusCode).toBe(400);
+    expect(onlineImport.importUrl).not.toHaveBeenCalled();
   });
 
   test('toggles source, reloads runtimes, and returns updated source data', async () => {

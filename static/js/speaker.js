@@ -23,6 +23,7 @@ import {
     updatePlayerToggleButton,
     bindProgressInteraction,
 } from './speaker_modules/player.js';
+import { bindPlaybackTargetSelector } from './speaker_modules/playback_target.js';
 import { bindSpeakerPlaylists, loadSpeakerPlaylists, openSpeakerSongListDrawer } from './speaker_modules/playlists.js';
 import { bindPasswordTokenLogin } from './speaker_modules/auth_login.js';
 import { bindQrLogin } from './speaker_modules/qrcode.js';
@@ -89,6 +90,7 @@ function startVoiceRecordPolling() {
 }
 
 function bindSpeakerPlayer() {
+    bindPlaybackTargetSelector();
     for (const action of ['speaker-player-previous', 'speaker-player-toggle', 'speaker-player-stop', 'speaker-player-next', 'speaker-player-refresh']) {
         const buttons = $$(`[data-action="${action}"]`);
         const fallback = buttons.length ? buttons : [$(`[data-action="${action}"]`)].filter(Boolean);
@@ -149,7 +151,19 @@ function bindSpeakerPlayer() {
         button.addEventListener('click', openFullscreenPlayer);
     });
     $$('[data-action="close-fullscreen-player"]').forEach(button => {
-        button.addEventListener('click', closeFullscreenPlayer);
+        button.addEventListener('click', event => {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            closeFullscreenPlayer();
+        });
+    });
+    document.addEventListener?.('keydown', event => {
+        if (event.key === 'Escape' || event.key === 'Esc') {
+            const player = document.querySelector?.('[data-role="fullscreen-player"]');
+            if (player?.classList?.contains?.('open')) {
+                closeFullscreenPlayer();
+            }
+        }
     });
     bindProgressInteraction();
 }

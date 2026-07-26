@@ -1,14 +1,17 @@
 import { parseQuery } from '@songloft/plugin-sdk';
-import type { HTTPRequest, HTTPResponse, Router } from '@songloft/plugin-sdk';
+import type { HTTPRequest, Router } from '@songloft/plugin-sdk';
 import { parseJsonBody } from '../system/body';
 import { StarlightError } from '../system/errors';
-import { apiError, apiOk } from '../system/response';
+import { paginationInt, requireId, stringField } from '../system/fields';
+import { runApi, runRawJson } from '../system/response';
 import type { PlatformRegistry } from '../music/platforms/registry';
 import type { MusicPlatformProvider } from '../music/platforms/types';
 import { resolveMusicLyric } from '../music/platforms/lyrics';
 import type { RuntimeManager } from '../music/runtime_manager';
-import type { SourceImportFile, SourceManager } from '../music/source_manager';
+import type { OnlineSourceImportService, OnlineSourceEnableMode } from '../music/online_source_import_service';
+import type { SourceManager } from '../music/source_manager';
 import type { LxSongInfo, MusicPlatform } from '../music/types';
+import { registerSourceCrudRoutes } from './sources_crud';
 
 interface SearchBody {
   keyword?: unknown;
@@ -16,22 +19,6 @@ interface SearchBody {
   quality?: unknown;
   page?: unknown;
   page_size?: unknown;
-}
-
-interface SourceImportBody {
-  filename?: unknown;
-  content?: unknown;
-  files?: unknown;
-}
-
-interface SourceToggleBody {
-  id?: unknown;
-  enabled?: unknown;
-}
-
-interface SourceBatchToggleBody {
-  ids?: unknown;
-  enabled?: unknown;
 }
 
 interface UrlBody {
@@ -50,63 +37,22 @@ interface LyricBody {
   };
 }
 
+interface SourceImportUrlBody {
+  url?: unknown;
+  enable_mode?: unknown;
+  content?: unknown;
+  filename?: unknown;
+  script?: unknown;
+  resolvedUrl?: unknown;
+  sourceUrl?: unknown;
+}
+
 interface MusicHandlerOptions {
   downloadRuntimes?: RuntimeManager;
+  onlineSourceImport?: OnlineSourceImportService;
 }
 
-function statusFor(error: unknown): number {
-  if (error instanceof StarlightError) {
-    if (error.code === 'BAD_REQUEST' || error.code === 'MUSIC_PLATFORM_UNSUPPORTED') {
-      return 400;
-    }
-    if (error.code === 'PLAY_URL_RESOLVE_FAILED') {
-      return 404;
-    }
-  }
-
-  return 500;
-}
-
-async function handle(fn: () => unknown | Promise<unknown>, statusCode = 200): Promise<HTTPResponse> {
-  try {
-    return apiOk(await fn(), statusCode);
-  } catch (error) {
-    return apiError(error, statusFor(error));
-  }
-}
-
-async function handleRawJson(fn: () => unknown | Promise<unknown>, statusCode = 200): Promise<HTTPResponse> {
-  try {
-    return {
-      statusCode,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(await fn()),
-    };
-  } catch (error) {
-    return apiError(error, statusFor(error));
-  }
-}
-
-function stringField(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function boolField(value: unknown): boolean {
-  return value === true || value === 'true';
-}
-
-function paginationInt(value: unknown, name: 'page' | 'page_size', fallback: number, max?: number): number {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const numeric = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
-  if (typeof numeric !== 'number' || !Number.isInteger(numeric) || numeric <= 0 || (max !== undefined && numeric > max)) {
-    throw new StarlightError('BAD_REQUEST', `${name} must be an integer between 1 and ${max ?? 'unlimited'}`);
-  }
-
-  return numeric;
-}
+const ONLINE_ENABLE_MODES = new Set<OnlineSourceEnableMode>(['playback', 'download', 'both']);
 
 function page(value: unknown): number {
   return paginationInt(value, 'page', 1);
@@ -139,53 +85,7 @@ function requireKeyword(value: unknown): string {
   if (!keyword) {
     throw new StarlightError('BAD_REQUEST', 'keyword is required');
   }
-
   return keyword;
-}
-
-function requireId(value: unknown, name = 'id'): string {
-  const id = stringField(value);
-  if (!id) {
-    throw new StarlightError('BAD_REQUEST', `${name} is required`);
-  }
-
-  return id;
-}
-
-function sourceImportFiles(value: unknown): SourceImportFile[] {
-  if (!Array.isArray(value)) {
-    throw new StarlightError('BAD_REQUEST', 'files must be an array');
-  }
-
-  return value.map((entry) => {
-    if (!entry || typeof entry !== 'object') {
-      throw new StarlightError('BAD_REQUEST', 'files entries must be objects');
-    }
-    const record = entry as Record<string, unknown>;
-    const filename = requireId(record.filename, 'filename');
-    const content = typeof record.content === 'string' ? record.content : '';
-    if (!content) {
-      throw new StarlightError('BAD_REQUEST', 'content is required');
-    }
-    return { filename, content };
-  });
-}
-
-function sourceIds(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    throw new StarlightError('BAD_REQUEST', 'ids must be an array');
-  }
-  const ids = value.map((entry) => requireId(entry));
-  if (ids.length === 0) {
-    throw new StarlightError('BAD_REQUEST', 'ids must not be empty');
-  }
-  return ids;
-}
-
-function reloadRuntimesInBackground(runtimes: RuntimeManager): void {
-  runtimes.loadEnabledSources().catch((error) => {
-    songloft.log.warn('Failed to reload music source runtimes: ' + String(error));
-  });
 }
 
 function applyRequestedQuality<T>(result: T, quality: string): T {
@@ -212,6 +112,27 @@ function applyRequestedQuality<T>(result: T, quality: string): T {
   return result;
 }
 
+function musicUrlResolveFailureMessage(
+  operation: 'playback' | 'download',
+  attemptedCount: number,
+  lastFailure: string | null,
+): string {
+  const label = operation === 'download' ? '下载' : '播放';
+  if (attemptedCount > 0 || lastFailure) {
+    return `${label}地址解析失败，已尝试 ${attemptedCount} 个${label}音源；最后失败原因：${lastFailure || '未找到可用音源'}`;
+  }
+  return `${label}地址解析失败`;
+}
+
+function isDownloadMusicUrlSource(sourceData: { starlight?: unknown }): boolean {
+  const marker = sourceData.starlight;
+  return Boolean(
+    marker
+    && typeof marker === 'object'
+    && (marker as { purpose?: unknown }).purpose === 'download',
+  );
+}
+
 export function registerMusicHandlers(
   router: Router,
   sources: SourceManager,
@@ -219,60 +140,47 @@ export function registerMusicHandlers(
   platforms: PlatformRegistry,
   options: MusicHandlerOptions = {},
 ): void {
-  router.get('/api/music/platforms', async () => handle(() => platforms.all()));
+  registerSourceCrudRoutes(router, {
+    prefix: '/api/music/sources',
+    sources,
+    runtimes,
+    runtimeLabel: 'music',
+  });
 
-  router.get('/api/music/sources', async () => handle(() => sources.listSources()));
+  router.get('/api/music/platforms', async () => runApi(() => platforms.all()));
 
-  router.post('/api/music/sources/import', async (req) =>
-    handle(() => {
-      const body = parseJsonBody<SourceImportBody>(req);
-      if (body.files !== undefined) {
-        return sources.importManyFromJS(sourceImportFiles(body.files));
+  router.post('/api/music/sources/import-url', async (req) =>
+    runApi(async () => {
+      if (!options.onlineSourceImport) {
+        throw new StarlightError('INTERNAL_ERROR', 'Online source import is not configured');
       }
 
-      const filename = requireId(body.filename, 'filename');
-      const content = typeof body.content === 'string' ? body.content : '';
-      if (!content) {
-        throw new StarlightError('BAD_REQUEST', 'content is required');
+      const body = parseJsonBody<SourceImportUrlBody>(req);
+      if (
+        body.content !== undefined
+        || body.filename !== undefined
+        || body.script !== undefined
+        || body.resolvedUrl !== undefined
+        || body.sourceUrl !== undefined
+      ) {
+        throw new StarlightError('BAD_REQUEST', 'only url and enable_mode are accepted');
       }
 
-      return sources.importFromJS(filename, content);
+      const url = stringField(body.url);
+      if (!url) {
+        throw new StarlightError('BAD_REQUEST', 'url is required');
+      }
+
+      const mode = stringField(body.enable_mode) as OnlineSourceEnableMode;
+      if (!ONLINE_ENABLE_MODES.has(mode)) {
+        throw new StarlightError('BAD_REQUEST', 'enable_mode must be playback, download, or both');
+      }
+
+      return options.onlineSourceImport.importUrl(url, mode);
     }, 201));
 
-  router.post('/api/music/sources/toggle', async (req) =>
-    handle(async () => {
-      const body = parseJsonBody<SourceToggleBody>(req);
-      const id = requireId(body.id);
-      const enabled = boolField(body.enabled);
-      await sources.setEnabled(id, enabled);
-      reloadRuntimesInBackground(runtimes);
-
-      return sources.listSources().find((source) => source.id === id) || { id, enabled };
-    }));
-
-  router.post('/api/music/sources/batch-toggle', async (req) =>
-    handle(async () => {
-      const body = parseJsonBody<SourceBatchToggleBody>(req);
-      const ids = sourceIds(body.ids);
-      const enabled = boolField(body.enabled);
-      for (const id of ids) {
-        await sources.setEnabled(id, enabled);
-      }
-      reloadRuntimesInBackground(runtimes);
-
-      return { ids, enabled };
-    }));
-
-  router.delete('/api/music/sources/:id', async (_req, params) =>
-    handle(async () => {
-      const id = requireId(params.id);
-      await sources.deleteSource(id);
-      reloadRuntimesInBackground(runtimes);
-      return { id };
-    }));
-
   router.post('/api/music/search', async (req) =>
-    handle(async () => {
+    runApi(async () => {
       const body = parseJsonBody<SearchBody>(req);
       const provider = providerFor(platforms, body.source_id);
       const quality = stringField(body.quality);
@@ -281,7 +189,7 @@ export function registerMusicHandlers(
     }));
 
   router.post('/api/music/url', async (req) =>
-    handleRawJson(async () => {
+    runRawJson(async () => {
       const body = parseJsonBody<UrlBody>(req);
       const sourceData = body.source_data;
       if (!sourceData || typeof sourceData !== 'object' || !sourceData.songInfo) {
@@ -326,52 +234,46 @@ export function registerMusicHandlers(
     }));
 
   router.get('/api/music/songlist/list', async (req) =>
-    handle(() => {
+    runApi(() => {
       const params = query(req);
       const provider = providerFor(platforms, params.source_id);
       return provider.recommendedSongLists(page(params.page), pageSize(params.page_size));
     }));
 
   router.post('/api/music/songlist/search', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<SearchBody>(req);
       const provider = providerFor(platforms, body.source_id);
       return provider.songListSearch(requireKeyword(body.keyword), page(body.page), pageSize(body.page_size));
     }));
 
   router.get('/api/music/songlist/detail', async (req) =>
-    handle(async () => {
+    runApi(async () => {
       const params = query(req);
       const provider = providerFor(platforms, params.source_id);
       const quality = stringField(params.quality);
       const result = await provider.songListDetail(requireId(params.id), page(params.page), pageSize(params.page_size));
-      return applyRequestedQuality(
-        result,
-        quality,
-      );
+      return applyRequestedQuality(result, quality);
     }));
 
   router.get('/api/music/leaderboard/boards', async (req) =>
-    handle(() => {
+    runApi(() => {
       const params = query(req);
       const provider = providerFor(platforms, params.source_id);
       return provider.leaderboardBoards();
     }));
 
   router.get('/api/music/leaderboard/list', async (req) =>
-    handle(async () => {
+    runApi(async () => {
       const params = query(req);
       const provider = providerFor(platforms, params.source_id);
       const quality = stringField(params.quality);
       const result = await provider.leaderboardList(requireId(params.id), page(params.page), pageSize(params.page_size));
-      return applyRequestedQuality(
-        result,
-        quality,
-      );
+      return applyRequestedQuality(result, quality);
     }));
 
   router.post('/api/music/lyric', async (req) =>
-    handle(async () => {
+    runApi(async () => {
       const body = parseJsonBody<LyricBody>(req);
       const sourceData = body.source_data;
       if (!sourceData || typeof sourceData !== 'object') {
@@ -390,21 +292,4 @@ export function registerMusicHandlers(
       }
       return resolveMusicLyric(platform as MusicPlatform, songInfo as LxSongInfo);
     }));
-}
-
-function musicUrlResolveFailureMessage(operation: 'playback' | 'download', attemptedCount: number, lastFailure: string | null): string {
-  const label = operation === 'download' ? '下载' : '播放';
-  if (attemptedCount > 0 || lastFailure) {
-    return `${label}地址解析失败，已尝试 ${attemptedCount} 个${label}音源；最后失败原因：${lastFailure || '未找到可用音源'}`;
-  }
-  return `${label}地址解析失败`;
-}
-
-function isDownloadMusicUrlSource(sourceData: { starlight?: unknown }): boolean {
-  const marker = sourceData.starlight;
-  return Boolean(
-    marker
-    && typeof marker === 'object'
-    && (marker as { purpose?: unknown }).purpose === 'download',
-  );
 }

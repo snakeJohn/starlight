@@ -15,6 +15,8 @@ import { IndexingManager } from './indexing/manager';
 import { SourceStore } from './music/source_store';
 import { SourceManager } from './music/source_manager';
 import { RuntimeManager } from './music/runtime_manager';
+import { OnlineSourceFetcher } from './music/online_source_fetcher';
+import { OnlineSourceImportService } from './music/online_source_import_service';
 import { PlatformRegistry } from './music/platforms/registry';
 import { BridgeService } from './bridge/service';
 import { DownloadService } from './download/service';
@@ -47,7 +49,7 @@ import { registerLxSyncHandlers } from './handlers/lx_sync';
 import { registerHealthHandlers } from './handlers/health';
 import { registerSongloftLibraryHandlers } from './handlers/songloft_library';
 import { registerDiagnosticsHandlers } from './handlers/diagnostics';
-import { setHostBaseUrl } from './utils/http';
+import { setHostBaseUrl, resolveHostBaseUrl, isUsableHostBaseUrl, getHostBaseUrl } from './utils/http';
 import { setPollDebug } from './utils/debug';
 import { SongloftPlaylistService } from './songloft/playlist_service';
 
@@ -94,7 +96,13 @@ async function onInit(): Promise<void> {
     setHostBaseUrl(pluginConfig.server_host);
     songloft.log.info('宿主 API 基础 URL 已设置: ' + pluginConfig.server_host);
   } else {
-    songloft.log.warn('Songloft 访问地址未配置，MIoT 智能音箱无法播放相对歌曲地址');
+    // 与 MIOT 一致：未配置时尝试 SDK 自动获取（过滤 localhost:0 等无效地址）
+    await resolveHostBaseUrl();
+    if (isUsableHostBaseUrl(getHostBaseUrl())) {
+      songloft.log.info('宿主 API 基础 URL 已由 SDK 自动获取: ' + getHostBaseUrl());
+    } else {
+      songloft.log.warn('Songloft 访问地址未配置，且 SDK 未返回有效地址；MIoT 智能音箱可能无法播放相对歌曲地址');
+    }
   }
 
   sourceManager = new SourceManager(new SourceStore());
@@ -106,6 +114,13 @@ async function onInit(): Promise<void> {
   }));
   await downloadSourceManager.init();
   downloadRuntimeManager = new RuntimeManager(downloadSourceManager, { runtimeNamespace: 'download' });
+  const onlineSourceImport = new OnlineSourceImportService({
+    fetcher: new OnlineSourceFetcher(),
+    playbackSources: sourceManager,
+    downloadSources: downloadSourceManager,
+    playbackRuntimes: runtimeManager,
+    downloadRuntimes: downloadRuntimeManager,
+  });
   platformRegistry = new PlatformRegistry();
   bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService, playlistManagerMap);
   songloftPlaylistService = new SongloftPlaylistService(bridgeService, platformRegistry);
@@ -163,7 +178,10 @@ async function onInit(): Promise<void> {
   registerScheduleHandlers(miotRouter, scheduler, configManager);
   registerVoiceCommandHandlers(miotRouter, configManager);
   registerIndexingHandlers(miotRouter, indexingManager);
-  registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry, { downloadRuntimes: downloadRuntimeManager });
+  registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry, {
+    downloadRuntimes: downloadRuntimeManager,
+    onlineSourceImport,
+  });
   registerBridgeHandlers(router, bridgeService);
   registerDownloadHandlers(router, downloadSourceManager, downloadRuntimeManager, downloadService);
   registerCustomPlaylistHandlers(router, customPlaylistService, platformRegistry);

@@ -2,22 +2,10 @@
 // 翻译自 Go 源码: plugins/songloft-plugin-xiaomi/handlers/voice_command_handler.go
 
 import { jsonResponse } from '@songloft/plugin-sdk';
+import { parseJsonBody } from '../system/body';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { ConfigManager } from '../config/manager';
 import { AIAnalyzer } from '../voicecmd/ai_analyzer';
-
-/** 解析请求体（兼容 Uint8Array 和 string） */
-function parseBody(req: HTTPRequest): any {
-  if (!req.body) return {};
-  try {
-    const str = typeof req.body === 'string'
-      ? req.body
-      : String.fromCharCode.apply(null, Array.from(req.body as Uint8Array));
-    return JSON.parse(str);
-  } catch {
-    return {};
-  }
-}
 
 /**
  * 注册语音口令相关路由
@@ -47,7 +35,7 @@ export function registerVoiceCommandHandlers(
   // POST /voice-commands - 设置语音口令配置
   router.post('/voice-commands', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { commands } = body;
 
       if (!commands || !Array.isArray(commands)) {
@@ -64,7 +52,7 @@ export function registerVoiceCommandHandlers(
   // POST /voice-commands/ai-test - 测试 AI 口令分析
   router.post('/voice-commands/ai-test', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const query = body.query as string | undefined;
 
       if (!query || typeof query !== 'string' || !query.trim()) {

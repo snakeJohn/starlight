@@ -2,6 +2,7 @@
 // 翻译自 Go 源码: plugins/songloft-plugin-xiaomi/handlers/config_handler.go
 
 import { jsonResponse } from '@songloft/plugin-sdk';
+import { parseJsonBody } from '../system/body';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { ConfigManager } from '../config/manager';
 import { ConversationMonitor } from '../conversation/monitor';
@@ -16,19 +17,6 @@ import {
 import { VoiceEngine } from '../voicecmd/engine';
 import { getHostBaseUrl, setHostBaseUrl } from '../utils/http';
 import { setPollDebug } from '../utils/debug';
-
-/** 解析请求体（兼容 Uint8Array 和 string） */
-function parseBody(req: HTTPRequest): any {
-  if (!req.body) return {};
-  try {
-    const str = typeof req.body === 'string'
-      ? req.body
-      : String.fromCharCode.apply(null, Array.from(req.body as Uint8Array));
-    return JSON.parse(str);
-  } catch {
-    return {};
-  }
-}
 
 /** 判断是否为本地回环地址 */
 function isLoopbackAddress(host: string): boolean {
@@ -132,7 +120,7 @@ export function registerConfigHandlers(
   // POST/PUT /config - 更新配置
   const updateConfig = async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const config = await configManager.getConfig();
       let shouldRestartConversationMonitor = false;
       let shouldStopConversationMonitor = false;

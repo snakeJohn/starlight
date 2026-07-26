@@ -2,24 +2,12 @@
 // 翻译自 Go 源码: plugins/songloft-plugin-xiaomi/handlers/schedule_handler.go
 
 import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
+import { parseJsonBody } from '../system/body';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { Scheduler } from '../schedule/scheduler';
 import { ConfigManager } from '../config/manager';
 import { isPlayMode } from '../player/modes';
 import type { ScheduledTask, TaskAction, TaskSchedule, TaskTarget, TaskParams } from '../types';
-
-/** 解析请求体（兼容 Uint8Array 和 string） */
-function parseBody(req: HTTPRequest): any {
-  if (!req.body) return {};
-  try {
-    const str = typeof req.body === 'string'
-      ? req.body
-      : String.fromCharCode.apply(null, Array.from(req.body as Uint8Array));
-    return JSON.parse(str);
-  } catch {
-    return {};
-  }
-}
 
 /** 验证调度配置 */
 function validateSchedule(schedule: TaskSchedule): string | null {
@@ -156,7 +144,7 @@ export function registerScheduleHandlers(
   // POST /schedules - 添加定时任务
   router.post('/schedules', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { name, action, schedule, target, params, enabled } = body;
 
       // 验证必填字段
@@ -209,7 +197,7 @@ export function registerScheduleHandlers(
   // POST /schedules/update - 更新定时任务（真正 patch：未提交的字段保留旧值）
   router.post('/schedules/update', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { id, name, action, schedule, target, params, enabled } = body;
 
       if (!id) {
@@ -287,7 +275,7 @@ export function registerScheduleHandlers(
   // POST /schedules/toggle - 切换定时任务启用状态
   router.post('/schedules/toggle', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { id, enabled } = body;
       if (!id) {
         return jsonResponse({ success: false, error: '缺少任务 ID' });

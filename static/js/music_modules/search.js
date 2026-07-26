@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { asArray, resultCount } from '../shared/arrays.js';
+import { bindSelectableBatchActions } from '../shared/selectable_list.js';
 import { $, $$, escapeHtml, setState, state, toast } from '../state.js';
 import { bindPagination, clearPagination, pageSizes, renderPaginationInto } from './pagination.js';
 import { renderListScroller, renderSongRow } from './renderers.js';
@@ -92,35 +93,28 @@ export function bindSearch() {
         clearPagination('search-pagination');
     });
 
-    $('[data-role="search-batch-actions"]')?.addEventListener('click', async event => {
-        const button = event.target.closest('button[data-action]');
-        if (!button) return;
-        const action = button.dataset.action;
-        const checks = $$('[data-role="search-song-check"]', list);
-        if (action === 'select-search-page') {
-            checks.forEach(input => { input.checked = true; });
-            return;
-        }
-        if (action === 'clear-search-selection') {
-            checks.forEach(input => { input.checked = false; });
-            return;
-        }
-        if (!['import-selected-search', 'add-selected-search-to-playlist', 'download-selected-search', 'speaker-selected-search'].includes(action)) {
-            return;
-        }
-        const selectedSongs = selectedSongsFromChecks(list, 'search-song-check', state.searchResults);
-        button.disabled = true;
-        try {
-            if (!selectedSongs.length) throw new Error('请先选择歌曲');
-            if (action === 'import-selected-search') await importSongs(selectedSongs);
-            if (action === 'add-selected-search-to-playlist') await openSongloftPlaylistTarget(selectedSongs);
-            if (action === 'download-selected-search') await downloadSongs(selectedSongs);
-            if (action === 'speaker-selected-search') await playSonglistOnSpeaker(selectedSongs);
-        } catch (error) {
-            toast(error.message, 'error');
-        } finally {
-            button.disabled = false;
-        }
+    bindSelectableBatchActions({
+        root: '[data-role="search-batch-actions"]',
+        list,
+        checkboxRole: 'search-song-check',
+        actions: {
+            selectAll: 'select-search-page',
+            clear: 'clear-search-selection',
+            'import-selected-search': 'import',
+            'add-selected-search-to-playlist': 'addToPlaylist',
+            'download-selected-search': 'download',
+            'speaker-selected-search': 'speaker',
+        },
+        getSelected: (listEl, role) => selectedSongsFromChecks(listEl, role, state.searchResults),
+        handlers: {
+            import: songs => importSongs(songs),
+            addToPlaylist: songs => openSongloftPlaylistTarget(songs),
+            download: songs => downloadSongs(songs),
+            speaker: songs => playSonglistOnSpeaker(songs),
+        },
+        toast,
+        $,
+        $$,
     });
 
     bindPagination('search-pagination', loadSearchPage);

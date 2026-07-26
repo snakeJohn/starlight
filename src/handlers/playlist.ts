@@ -2,24 +2,12 @@
 // 翻译自 Go 源码: plugins/songloft-plugin-xiaomi/handlers/playlist_handler.go
 
 import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
+import { parseJsonBody } from '../system/body';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { PlaylistManagerMap } from '../player/manager';
 import { MinaService } from '../service/service';
 import { isPlayMode } from '../player/modes';
 import type { PlayMode } from '../types';
-
-/** 解析请求体（兼容 Uint8Array 和 string） */
-function parseBody(req: HTTPRequest): any {
-  if (!req.body) return {};
-  try {
-    const str = typeof req.body === 'string'
-      ? req.body
-      : String.fromCharCode.apply(null, Array.from(req.body as Uint8Array));
-    return JSON.parse(str);
-  } catch {
-    return {};
-  }
-}
 
 /** 设备播放状态缓存（避免多调用方重复查询设备） */
 export interface DeviceStatusCache {
@@ -118,7 +106,7 @@ export function registerPlaylistHandlers(
   // POST /player/play - 播放歌单
   router.post('/player/play', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { account_id, device_id, playlist_id, start_index, play_mode } = body;
 
       if (!account_id) {
@@ -167,7 +155,7 @@ export function registerPlaylistHandlers(
   // POST /player/stop - 停止播放
   router.post('/player/stop', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const query = parseQuery(req.query);
       const account_id = body.account_id || query.account_id;
       const device_id = body.device_id || query.device_id;
@@ -192,7 +180,7 @@ export function registerPlaylistHandlers(
   // POST /player/toggle - 切换播放/暂停状态
   router.post('/player/toggle', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const query = parseQuery(req.query);
       const account_id = body.account_id || query.account_id;
       const device_id = body.device_id || query.device_id;
@@ -271,7 +259,7 @@ export function registerPlaylistHandlers(
   // POST /player/previous - 上一首
   router.post('/player/previous', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const query = parseQuery(req.query);
       const account_id = body.account_id || query.account_id;
       const device_id = body.device_id || query.device_id;
@@ -298,7 +286,7 @@ export function registerPlaylistHandlers(
   // POST /player/next - 下一首
   router.post('/player/next', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const query = parseQuery(req.query);
       const account_id = body.account_id || query.account_id;
       const device_id = body.device_id || query.device_id;
@@ -325,7 +313,7 @@ export function registerPlaylistHandlers(
   // POST /player/mode - 设置播放模式
   router.post('/player/mode', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const query = parseQuery(req.query);
       const account_id = body.account_id || query.account_id;
       const device_id = body.device_id || query.device_id;
@@ -356,7 +344,7 @@ export function registerPlaylistHandlers(
   // POST /player/seek - 跳转播放进度
   router.post('/player/seek', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const query = parseQuery(req.query);
       const account_id = body.account_id || query.account_id;
       const device_id = body.device_id || query.device_id;

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveMusicLyric } from '../../src/music/platforms/lyrics';
+import { decodeLyricBytes, resolveMusicLyric } from '../../src/music/platforms/lyrics';
 
 const originalCrypto = globalThis.crypto;
 
@@ -15,6 +15,47 @@ describe('resolveMusicLyric', () => {
       configurable: true,
       value: originalCrypto,
     });
+  });
+
+  it('decodes GBK lyric bytes instead of treating them as UTF-8', () => {
+    const text = '[00:00.00]风起天阑\n[00:05.00]第二句';
+    // Pre-encoded GBK bytes for the string above (no iconv-lite dependency in plugin build).
+    const gbk = Uint8Array.from([
+      91, 48, 48, 58, 48, 48, 46, 48, 48, 93, 183, 231, 198, 240, 204, 236, 192, 187, 10,
+      91, 48, 48, 58, 48, 53, 46, 48, 48, 93, 181, 218, 182, 254, 190, 228,
+    ]);
+    // UTF-8 mis-decode would produce mojibake; our helper must recover Chinese.
+    const asUtf8 = new TextDecoder('utf-8', { fatal: false }).decode(gbk);
+    expect(asUtf8).not.toContain('风起天阑');
+    expect(decodeLyricBytes(gbk, 'gbk')).toContain('风起天阑');
+    expect(decodeLyricBytes(gbk, 'gbk')).toContain('第二句');
+    expect(decodeLyricBytes(new TextEncoder().encode(text))).toContain('风起天阑');
+  });
+
+  it('still decodes GBK when TextDecoder only supports utf-8 (Songloft JSC)', () => {
+    const gbk = Uint8Array.from([
+      91, 48, 48, 58, 48, 48, 46, 48, 48, 93, 183, 231, 198, 240, 204, 236, 192, 187,
+    ]);
+    const RealTD = globalThis.TextDecoder;
+    class Utf8OnlyDecoder {
+      encoding: string;
+      constructor(label = 'utf-8') {
+        const normalized = String(label || 'utf-8').toLowerCase();
+        if (normalized !== 'utf-8' && normalized !== 'utf8') {
+          throw new RangeError(`unknown encoding: ${label}`);
+        }
+        this.encoding = 'utf-8';
+      }
+      decode(input: BufferSource) {
+        return new RealTD('utf-8', { fatal: false }).decode(input);
+      }
+    }
+    vi.stubGlobal('TextDecoder', Utf8OnlyDecoder as unknown as typeof TextDecoder);
+    try {
+      expect(decodeLyricBytes(gbk, 'gb18030')).toContain('风起天阑');
+    } finally {
+      vi.stubGlobal('TextDecoder', RealTD);
+    }
   });
 
   it('decodes QQ lyrics and translated lyrics', async () => {

@@ -384,10 +384,21 @@
                 <div class="two-column speaker-operations-layout">
                     <section class="surface-section speaker-player-panel">
                         <div class="section-bar">
-                            <h2>音箱播放</h2>
+                            <h2>播放控制</h2>
                             <span data-role="speaker-player-state">未选择设备</span>
                         </div>
-                        <label>
+                        <div class="playback-target-bar" role="group" aria-label="播放目标">
+                            <div class="playback-target-segment">
+                                <button type="button" class="playback-target-option" data-action="playback-target-select" data-role="playback-target-option" data-target="browser" aria-pressed="false">浏览器</button>
+                                <button type="button" class="playback-target-option active" data-action="playback-target-select" data-role="playback-target-option" data-target="speaker" aria-pressed="true">智能音箱</button>
+                            </div>
+                            <!-- Selection is shown by the segment itself; only live playback + switch hint below -->
+                            <div class="playback-target-meta">
+                                <span data-role="playback-active-target" hidden></span>
+                            </div>
+                            <p class="playback-target-hint" data-role="playback-target-hint" hidden></p>
+                        </div>
+                        <label class="speaker-device-field">
                             <span>控制设备</span>
                             <select data-role="speaker-player-device" aria-label="音箱播放控制设备"></select>
                         </label>
@@ -426,7 +437,7 @@
                             <button class="lx-player-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">
                                 <i class="fas fa-step-backward" aria-hidden="true"></i>
                             </button>
-                            <button class="lx-player-button lx-player-main-button speaker-player-toggle" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">
+                            <button class="lx-player-button lx-player-main-button speaker-player-toggle" type="button" data-action="speaker-player-toggle" title="播放" aria-label="播放">
                                 <i class="fas fa-play" data-role="speaker-player-play-icon" aria-hidden="true"></i>
                             </button>
                             <button class="lx-player-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">
@@ -568,10 +579,22 @@
                 </section>
                 </div>
                 <div class="settings-section" data-settings-panel="sources" hidden>
-                    <label class="file-button">
-                        <input type="file" data-role="source-file" accept=".js,.zip,application/javascript,application/zip">
-                        <span>导入文件</span>
-                    </label>
+                    <div class="source-import-toolbar">
+                        <label class="file-button">
+                            <input type="file" data-role="source-file" accept=".js,.zip,application/javascript,application/zip">
+                            <span>导入文件</span>
+                        </label>
+                        <div class="online-source-import">
+                            <input
+                                type="url"
+                                data-role="online-source-input"
+                                placeholder="输入 HTTPS .js 地址"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                            <button class="primary-button" type="button" data-action="open-online-source-import">在线导入</button>
+                        </div>
+                    </div>
                 <section class="surface-section">
                     <div class="section-bar">
                         <div>
@@ -842,6 +865,10 @@
             <span data-role="global-player-total-time">--:--</span>
         </div>
         <div class="global-player-controls">
+            <div class="playback-target-segment compact" role="group" aria-label="播放目标">
+                <button type="button" class="playback-target-option" data-action="playback-target-select" data-role="playback-target-option" data-target="browser" aria-pressed="false">浏览器</button>
+                <button type="button" class="playback-target-option active" data-action="playback-target-select" data-role="playback-target-option" data-target="speaker" aria-pressed="true">音箱</button>
+            </div>
             <span class="global-player-state" data-role="global-player-state">未选择设备</span>
             <div class="lx-play-mode-control">
                 <button class="lx-player-button" type="button" data-action="speaker-player-mode-menu" title="播放模式" aria-label="播放模式" aria-expanded="false">
@@ -858,7 +885,7 @@
             <button class="lx-player-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">
                 <i class="fas fa-step-backward" aria-hidden="true"></i>
             </button>
-            <button class="lx-player-button lx-player-main-button global-player-toggle" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">
+            <button class="lx-player-button lx-player-main-button global-player-toggle" type="button" data-action="speaker-player-toggle" title="播放" aria-label="播放">
                 <i class="fas fa-play" data-role="global-player-play-icon" aria-hidden="true"></i>
             </button>
             <button class="lx-player-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">
@@ -880,11 +907,12 @@
         <div class="fullscreen-player-overlay"></div>
         <div class="fullscreen-player-content">
             <div class="fullscreen-player-topbar">
-                <button class="fullscreen-player-icon-button lx-player-button" type="button" data-action="close-fullscreen-player" title="收起播放器" aria-label="收起播放器">
-                    <i class="fas fa-chevron-down" aria-hidden="true"></i>
+                <button class="fullscreen-player-close" type="button" data-action="close-fullscreen-player" title="收起全屏播放器" aria-label="收起全屏播放器">
+                    <span class="fullscreen-player-close-chevron" aria-hidden="true"></span>
+                    <span class="fullscreen-player-close-label">收起</span>
                 </button>
-                <span>正在播放</span>
-                <span class="fullscreen-player-spacer"></span>
+                <span class="fullscreen-player-top-title">正在播放</span>
+                <span class="fullscreen-player-spacer" aria-hidden="true"></span>
             </div>
             <div class="fullscreen-player-main">
                 <section class="fullscreen-player-cover-page">
@@ -927,7 +955,7 @@
                 <button class="lx-player-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">
                     <i class="fas fa-step-backward" aria-hidden="true"></i>
                 </button>
-                <button class="lx-player-button lx-player-main-button fullscreen-player-toggle" type="button" data-action="speaker-player-toggle" title="暂停播放" aria-label="暂停播放">
+                <button class="lx-player-button lx-player-main-button fullscreen-player-toggle" type="button" data-action="speaker-player-toggle" title="播放" aria-label="播放">
                     <i class="fas fa-play" data-role="fullscreen-player-play-icon" aria-hidden="true"></i>
                 </button>
                 <button class="lx-player-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">
@@ -996,6 +1024,24 @@
                 <button class="primary-button" type="submit" data-action="confirm-songloft-target">确认加入</button>
             </div>
         </form>
+    </div>
+    <div class="online-source-dialog" data-role="online-source-dialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="onlineSourceImportTitle" hidden>
+        <div class="online-source-panel">
+            <div class="section-bar">
+                <div>
+                    <h2 id="onlineSourceImportTitle">在线导入音源</h2>
+                    <span class="section-caption">在线音源会作为脚本运行，请仅导入可信来源。</span>
+                </div>
+                <button class="ghost-button" type="button" data-action="online-import-cancel">取消</button>
+            </div>
+            <p class="online-source-url" data-role="online-source-url"></p>
+            <p class="online-source-existing" data-role="online-source-existing" hidden>将更新现有在线音源</p>
+            <div class="inline-actions online-source-actions">
+                <button class="primary-button" type="button" data-action="online-import-playback">仅播放</button>
+                <button class="primary-button" type="button" data-action="online-import-download">仅下载</button>
+                <button class="primary-button" type="button" data-action="online-import-both">播放及下载</button>
+            </div>
+        </div>
     </div>
     <script type="module" src="static/js/app.js"></script>
 </body>

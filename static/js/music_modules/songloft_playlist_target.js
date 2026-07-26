@@ -1,18 +1,14 @@
 import { api } from '../api.js';
 import { asArray } from '../shared/arrays.js';
+import {
+    fetchSongloftPlaylists,
+    songloftPlaylistId as playlistId,
+    songloftPlaylistName as playlistName,
+} from '../shared/songloft_playlists.js';
 import { $, escapeHtml, setState, state, toast } from '../state.js';
 
 const IMPORT_JOB_POLL_INTERVAL_MS = 1200;
 const IMPORT_JOB_MAX_POLLS = 300;
-
-function playlistId(playlist) {
-    const id = playlist?.id ?? playlist?.playlist_id;
-    return id === undefined || id === null ? '' : String(id);
-}
-
-function playlistName(playlist) {
-    return playlist?.name || playlist?.title || '未命名歌单';
-}
 
 function targetNodes() {
     return {
@@ -59,7 +55,7 @@ function renderTargetPlaylists(filterText = '') {
 }
 
 export async function loadSongloftTargetPlaylists() {
-    const data = await api.get('/songloft/playlists');
+    const data = await fetchSongloftPlaylists();
     const playlists = asArray(data);
     setState({ songloftTargetPlaylists: playlists });
     renderTargetPlaylists(targetNodes().filter?.value || '');

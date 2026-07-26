@@ -1,17 +1,10 @@
 import { api } from '../api.js';
 import { asArray as sharedAsArray } from '../shared/arrays.js';
-import { boolValue, numberValue, textValue } from '../shared/forms.js';
+import { boolValue, csvNumbers, numberValue, textValue } from '../shared/forms.js';
 import { $, escapeHtml, toast } from '../state.js';
 
 function asArray(value) {
     return sharedAsArray(value, ['commands', 'tasks', 'logs']);
-}
-
-function csvNumbers(value) {
-    return String(value || '')
-        .split(',')
-        .map(item => Number(item.trim()))
-        .filter(item => Number.isInteger(item) && item > 0);
 }
 
 function scheduleLabel(task) {

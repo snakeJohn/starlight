@@ -207,22 +207,6 @@ function bytesToHex(bytes: Uint8Array): string {
   return out;
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  if (typeof Buffer !== 'undefined') return Buffer.from(Array.from(bytes)).toString('base64');
-  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    const a = bytes[i];
-    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
-    out += B64[a >> 2];
-    out += B64[((a & 3) << 4) | (b >> 4)];
-    out += i + 1 < bytes.length ? B64[((b & 15) << 2) | (c >> 6)] : '=';
-    out += i + 2 < bytes.length ? B64[c & 63] : '=';
-  }
-  return out;
-}
-
 /**
  * MD5哈希（小写 hex）
  */
@@ -251,32 +235,10 @@ export function randomHex(size: number): string {
 }
 
 /**
- * 生成随机 Base64 字符串
- */
-export function randomBase64(size: number): string {
-  const c = polyfill();
-  if (typeof c.randomBytes === 'function') {
-    return c.randomBytes(size).toString('base64');
-  }
-  return bytesToBase64(randomBytesPure(size));
-}
-
-/**
- * AES-CBC 加密 → Base64（依赖 host polyfill；生产环境由 Songloft 提供）
- */
-export function aesEncryptCBC(data: string, key: string, iv: string): string {
-  const c = polyfill();
-  if (typeof c.aesEncrypt === 'function') {
-    return c.aesEncrypt(data, 'cbc', key, iv).toString('base64');
-  }
-  throw new Error('aesEncryptCBC unavailable (Songloft crypto polyfill required)');
-}
-
-/**
- * 生成简单唯一 ID
+ * 生成简单唯一 ID（prefix_timestamp_randomHex）
  */
 export function generateId(prefix?: string): string {
-  const timestamp = Date.now().toString();
+  const timestamp = Date.now().toString(36);
   const random = randomHex(4);
   if (prefix) return `${prefix}_${timestamp}_${random}`;
   return `${timestamp}_${random}`;

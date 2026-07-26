@@ -9,16 +9,6 @@ import { parseJsonBody } from '../system/body';
 import { StarlightError } from '../system/errors';
 import { validateOutboundWebhookUrl } from '../utils/url_safety';
 
-/** 解析请求体（兼容 Uint8Array 和 string） */
-function parseBody(req: HTTPRequest): any {
-  try {
-    return parseJsonBody(req);
-  } catch (e) {
-    if (e instanceof StarlightError) return {};
-    return {};
-  }
-}
-
 /**
  * 注册对话监听相关路由
  * GET    /conversation/messages  → 获取对话记录
@@ -71,7 +61,7 @@ export function registerConversationHandlers(
   // POST /conversation/webhooks - 注册Webhook
   router.post('/conversation/webhooks', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { url, name } = body;
       const validated = validateOutboundWebhookUrl(url);
       if (!validated.ok) {

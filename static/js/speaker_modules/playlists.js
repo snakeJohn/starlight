@@ -1,15 +1,18 @@
 import { api } from '../api.js';
 import { asArray, resultCount } from '../shared/arrays.js';
+import {
+    fetchSongloftPlaylistSongs,
+    fetchSongloftPlaylists,
+    isNormalSongloftPlaylist as isSpeakerNormalPlaylist,
+    playableSongloftPlaylistId,
+    songloftPlaylistCount,
+    songloftPlaylistId as playlistId,
+} from '../shared/songloft_playlists.js';
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from '../state.js';
 import { renderArtwork, songArtist, songTitle, songloftPlaylistTitle } from '../music_modules/renderers.js';
 
-function playlistId(playlist) {
-    const id = playlist?.id ?? playlist?.playlist_id ?? playlist?.playlistId;
-    return id === undefined || id === null ? '' : String(id);
-}
-
 function playlistCount(playlist) {
-    return playlist?.song_count ?? playlist?.songCount ?? playlist?.count ?? playlist?.total ?? 0;
+    return songloftPlaylistCount(playlist);
 }
 
 function speakerPlaylistSummary(playlist) {
@@ -17,13 +20,7 @@ function speakerPlaylistSummary(playlist) {
 }
 
 function playablePlaylistId(id) {
-    const parsed = Number(id);
-    if (!Number.isFinite(parsed)) throw new Error('Songloft 歌单 ID 无效');
-    return parsed;
-}
-
-function isSpeakerNormalPlaylist(playlist) {
-    return String(playlist?.type || '').trim().toLowerCase() !== 'radio';
+    return playableSongloftPlaylistId(id);
 }
 
 function setSummary(text) {
@@ -74,8 +71,7 @@ async function loadDrawerPlaylists() {
     const container = $('[data-role="speaker-song-list-playlists"]');
     if (!container) return;
     try {
-        const data = await api.get('/songloft/playlists');
-        const playlists = asArray(data).filter(isSpeakerNormalPlaylist);
+        const playlists = await fetchSongloftPlaylists({ normalOnly: true });
         setState({ speakerPlaylists: playlists });
         const currentId = state.speakerPlaylistId;
         container.innerHTML = playlists.length
@@ -104,8 +100,7 @@ async function loadDrawerSongs(plId) {
     }
     try {
         container.innerHTML = '<div class="empty-state">加载歌曲中...</div>';
-        const data = await api.get(`/songloft/playlists/${encodeURIComponent(plId)}/songs`);
-        const songs = asArray(data);
+        const songs = await fetchSongloftPlaylistSongs(plId);
         setState({ speakerPlaylistSongs: songs, speakerPlaylistId: String(plId) });
         const currentIndex = String(state.speakerPlayerPlaylistId || '') === String(plId)
             ? Number(state.speakerPlayerCurrentIndex)
@@ -287,11 +282,10 @@ export async function loadSpeakerPlaylistSongs(id = state.speakerPlaylistId) {
         return [];
     }
     list.innerHTML = '<div class="empty-state">正在加载歌单歌曲...</div>';
-    const data = await api.get(`/songloft/playlists/${encodeURIComponent(id)}/songs`);
-    const songs = asArray(data);
+    const songs = await fetchSongloftPlaylistSongs(id);
     setState({ speakerPlaylistSongs: songs, speakerPlaylistId: String(id) });
     renderSongList(songs);
-    setSummary(`${resultCount(data)} 首`);
+    setSummary(`${songs.length} 首`);
     return songs;
 }
 
@@ -301,15 +295,14 @@ export async function loadSpeakerPlaylists() {
     if (!select && !list) return [];
     setSummary('加载中');
     if (list) list.innerHTML = '<div class="empty-state">正在加载 Songloft 歌单...</div>';
-    const data = await api.get('/songloft/playlists');
-    const playlists = asArray(data);
-    const normalPlaylists = playlists.filter(isSpeakerNormalPlaylist);
+    const allPlaylists = await fetchSongloftPlaylists();
+    const normalPlaylists = await fetchSongloftPlaylists({ normalOnly: true });
     const currentId = state.speakerPlaylistId;
     const nextId = normalPlaylists.some(p => playlistId(p) === currentId) ? currentId : playlistId(normalPlaylists[0]);
     setState({ speakerPlaylists: normalPlaylists, speakerPlaylistId: nextId || '' });
-    renderPlaylistOptions(playlists);
-    renderPlaylistList(playlists);
-    setSummary(`${resultCount(data)} 个歌单`);
+    renderPlaylistOptions(allPlaylists);
+    renderPlaylistList(allPlaylists);
+    setSummary(`${allPlaylists.length} 个歌单`);
     if (nextId) await loadSpeakerPlaylistSongs(nextId);
     else await loadSpeakerPlaylistSongs('');
     return normalPlaylists;

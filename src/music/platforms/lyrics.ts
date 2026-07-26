@@ -3,6 +3,7 @@ import { fetchBytes, fetchJson, fetchText } from './http';
 import type { LxSongInfo, MusicPlatform } from '../types';
 import { stringValue } from './types';
 import { neteaseEapiRequest } from './netease_eapi';
+import { decodeGbkBytes } from './gbk_decode';
 
 export interface MusicLyricResult {
   lyric: string;
@@ -21,17 +22,119 @@ function decodeHtml(value: string): string {
     .replace(/&apos;/g, "'");
 }
 
+/** Score decoded lyric text — prefer CJK + LRC markers, penalize replacement/mojibake. */
+function scoreDecodedLyric(text: string): number {
+  if (!text) return -1e9;
+  let score = 0;
+  let cjk = 0;
+  let replacement = 0;
+  let control = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code === 0xfffd) {
+      replacement += 1;
+      continue;
+    }
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+      control += 1;
+      continue;
+    }
+    // CJK Unified Ideographs + common fullwidth
+    if ((code >= 0x4e00 && code <= 0x9fff) || (code >= 0x3400 && code <= 0x4dbf) || (code >= 0xff00 && code <= 0xffef)) {
+      cjk += 1;
+    }
+  }
+  score += cjk * 4;
+  score += (text.match(/\[\d{1,2}:\d{2}/g) || []).length * 6;
+  score += (text.match(/\[(ti|ar|al|by|offset):/gi) || []).length * 3;
+  score -= replacement * 40;
+  score -= control * 20;
+  // Classic UTF-8-as-latin1 mojibake markers for Chinese
+  if (/Ã.|Â.|ä.|å.|æ.|ç.|è.|é./.test(text) && cjk < 3) {
+    score -= 80;
+  }
+  return score;
+}
+
+function decodeWithEncoding(bytes: Uint8Array, encoding: string): string {
+  const normalized = encoding === 'utf8' ? 'utf-8' : encoding;
+
+  // 1) Native TextDecoder when the runtime supports the label (Node/Chromium).
+  if (typeof TextDecoder !== 'undefined') {
+    const labels = normalized === 'gbk' || normalized === 'gb18030' || normalized === 'gb2312'
+      ? [normalized, 'gbk', 'gb18030', 'gb2312']
+      : [normalized];
+    for (const label of labels) {
+      try {
+        const text = new TextDecoder(label, { fatal: false }).decode(bytes);
+        // Some runtimes silently fall back / produce garbage; scoring picks the best later.
+        if (text) return text;
+      } catch {
+        // try next label / pure decoder
+      }
+    }
+  }
+
+  // 2) Pure-JS GBK for Songloft QuickJS (often only has utf-8 TextDecoder).
+  if (normalized === 'gbk' || normalized === 'gb18030' || normalized === 'gb2312') {
+    return decodeGbkBytes(bytes);
+  }
+
+  if (normalized === 'utf-8' && typeof TextDecoder !== 'undefined') {
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  }
+
+  throw new Error(`decode failed: ${normalized}`);
+}
+
+/**
+ * Decode lyric bytes trying UTF-8 and Chinese encodings.
+ * Kuwo newlyric and some legacy LRC payloads are GBK/GB18030; others are UTF-8.
+ * Always returns a Unicode string suitable for JSON storage.
+ */
+export function decodeLyricBytes(bytes: Uint8Array, preferred?: string): string {
+  if (!bytes || bytes.length === 0) return '';
+
+  const encodings = preferred
+    ? [preferred, 'utf-8', 'gb18030', 'gbk']
+    : ['utf-8', 'gb18030', 'gbk'];
+
+  let best = '';
+  let bestScore = -1e12;
+
+  for (const encoding of encodings) {
+    try {
+      let text = decodeWithEncoding(bytes, encoding);
+      // Strip UTF-8 BOM if present
+      if (text.charCodeAt(0) === 0xfeff) {
+        text = text.slice(1);
+      }
+      const score = scoreDecodedLyric(text) + (encoding === preferred ? 8 : 0);
+      if (score > bestScore) {
+        bestScore = score;
+        best = text;
+      }
+    } catch {
+      // try next encoding
+    }
+  }
+
+  if (best) return best;
+  // Last resort
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  }
+  return '';
+}
+
 function base64ToUtf8(value: string): string {
   if (!value) return '';
-  if (typeof atob === 'function') {
-    const binary = atob(value);
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    return new TextDecoder('utf-8').decode(bytes);
-  }
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(value, 'base64').toString('utf8');
-  }
-  return value;
+  return decodeLyricBytes(base64ToBytes(value), 'utf-8');
+}
+
+function base64ToLyricText(value: string, preferred = 'utf-8'): string {
+  if (!value) return '';
+  return decodeLyricBytes(base64ToBytes(value), preferred);
 }
 
 function lyricResult(lyric = '', tlyric = '', rlyric = '', lxlyric = ''): MusicLyricResult {
@@ -57,17 +160,15 @@ function optionalSongField(songInfo: LxSongInfo, keys: Array<keyof LxSongInfo>):
 }
 
 function bytesToString(bytes: Uint8Array, encoding = 'utf-8'): string {
-  if (typeof TextDecoder !== 'undefined') {
-    try {
-      return new TextDecoder(encoding).decode(bytes);
-    } catch {
-      return new TextDecoder().decode(bytes);
-    }
+  // Prefer multi-encoding lyric decode for Chinese platform payloads.
+  if (encoding === 'gb18030' || encoding === 'gbk' || encoding === 'utf-8' || encoding === 'utf8') {
+    return decodeLyricBytes(bytes, encoding === 'utf8' ? 'utf-8' : encoding);
   }
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(Array.from(bytes)).toString();
+  try {
+    return decodeWithEncoding(bytes, encoding);
+  } catch {
+    return decodeLyricBytes(bytes);
   }
-  return String(bytes);
 }
 
 function base64ToBytes(value: string): Uint8Array {
@@ -704,7 +805,8 @@ async function resolveKgLyric(songInfo: LxSongInfo): Promise<MusicLyricResult> {
   if (body.fmt === 'krc') {
     return decodeKugouKrc(stringValue(body.content));
   }
-  const lyric = base64ToUtf8(stringValue(body.content));
+  // Kugou lrc content is base64; usually UTF-8, sometimes legacy GBK.
+  const lyric = base64ToLyricText(stringValue(body.content), 'utf-8');
   if (!lyric) {
     throw new Error('酷狗音乐歌词获取失败');
   }

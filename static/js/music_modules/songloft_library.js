@@ -1,5 +1,10 @@
 import { api } from '../api.js';
 import { asArray, resultCount } from '../shared/arrays.js';
+import {
+    fetchSongloftPlaylistSongs,
+    fetchSongloftPlaylists,
+    songloftPlaylistId,
+} from '../shared/songloft_playlists.js';
 import { $, escapeHtml, setState, state, toast } from '../state.js';
 import {
     renderListScroller,
@@ -103,28 +108,26 @@ async function loadSongloftLocalSongs() {
 async function loadSongloftPlaylists() {
     const node = $('[data-role="songloft-playlists"]');
     if (node) node.innerHTML = '<div class="empty-state">正在加载 Songloft 歌单...</div>';
-    const data = await api.get('/songloft/playlists');
-    const playlists = asArray(data);
+    const playlists = await fetchSongloftPlaylists();
     setState({ songloftPlaylists: playlists });
-    $('[data-role="songloft-playlists-total"]').textContent = String(resultCount(data));
+    $('[data-role="songloft-playlists-total"]').textContent = String(playlists.length);
     renderSongloftPlaylists(playlists);
     return playlists;
 }
 
 async function loadSongloftPlaylistSongs(playlist, index) {
-    const id = playlist?.id ?? playlist?.playlist_id ?? playlist?.playlistId;
+    const id = songloftPlaylistId(playlist);
     if (!id) throw new Error('Songloft 歌单缺少 ID');
     const node = $('[data-role="songloft-playlist-songs"]');
     if (node) node.innerHTML = '<div class="empty-state">正在加载歌单歌曲...</div>';
-    const data = await api.get(`/songloft/playlists/${encodeURIComponent(id)}/songs`);
-    const songs = asArray(data);
+    const songs = await fetchSongloftPlaylistSongs(id);
     setState({
         songloftPlaylistSongs: songs,
         songloftPlaylistTitle: songloftPlaylistTitle(playlist),
         songloftPlaylistIndex: index,
     });
     $('[data-role="songloft-playlist-title"]').textContent = songloftPlaylistTitle(playlist);
-    $('[data-role="songloft-playlist-songs-total"]').textContent = String(resultCount(data));
+    $('[data-role="songloft-playlist-songs-total"]').textContent = String(songs.length);
     renderSongloftSongList('songloft-playlist-songs', songs, '这个 Songloft 歌单没有歌曲。');
     return songs;
 }

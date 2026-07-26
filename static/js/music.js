@@ -1,6 +1,9 @@
 import { api } from './api.js';
 import { asArray } from './shared/arrays.js';
 import { $, $$, escapeHtml, selectedDevicePayload, setState, state, toast } from './state.js';
+import { getBrowserPlaybackStatus, playBrowserQueue } from './speaker_modules/browser_player.js';
+import { clearPendingTargetHint, getSelectedPlaybackTarget } from './speaker_modules/playback_target.js';
+import { renderPlayerStatus } from './speaker_modules/player.js';
 import {
     bindCustomPlaylists,
     favoriteSongListFromSource,
@@ -140,6 +143,13 @@ async function importSongs(songs, options = {}) {
 }
 
 async function playOnSpeaker(song) {
+    if (getSelectedPlaybackTarget() === 'browser') {
+        clearPendingTargetHint();
+        await playBrowserQueue([song]);
+        renderPlayerStatus(getBrowserPlaybackStatus());
+        toast('已在浏览器播放');
+        return { target: 'browser' };
+    }
     const payload = selectedDevicePayload();
     if (!payload.account_id || !payload.device_id) {
         throw new Error('请先在音箱页选择账号和设备');
@@ -167,6 +177,13 @@ export async function playSonglistOnSpeaker(songs) {
     if (!songs?.length) {
         throw new Error('歌单没有可播放歌曲');
     }
+    if (getSelectedPlaybackTarget() === 'browser') {
+        clearPendingTargetHint();
+        await playBrowserQueue(songs);
+        renderPlayerStatus(getBrowserPlaybackStatus());
+        toast('已在浏览器播放歌单');
+        return { target: 'browser' };
+    }
     await importSongs(songs);
     const payload = selectedDevicePayload();
     if (!payload.account_id || !payload.device_id) {
@@ -178,6 +195,13 @@ export async function playSonglistOnSpeaker(songs) {
 }
 
 export async function playSongloftSongOnSpeaker(song) {
+    if (getSelectedPlaybackTarget() === 'browser') {
+        clearPendingTargetHint();
+        await playBrowserQueue([song]);
+        renderPlayerStatus(getBrowserPlaybackStatus());
+        toast('已在浏览器播放');
+        return { target: 'browser' };
+    }
     const payload = selectedDevicePayload();
     if (!payload.account_id || !payload.device_id) {
         throw new Error('请先在音箱页选择账号和设备');

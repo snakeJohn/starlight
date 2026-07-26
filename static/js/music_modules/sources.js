@@ -8,8 +8,195 @@ import { readJavaScriptSourceFiles } from '../zip_sources.js';
 const sourcePageSize = 10;
 const selectedSourceKeys = new Set();
 
+/** Pending online-import dialog state (client-side only until submit). */
+let onlineImportState = {
+    url: '',
+    busy: false,
+};
+
 function sourceIdentity(item) {
     return String(item?.name || item?.filename || item?.id || '').trim();
+}
+
+/**
+ * Normalize a user-entered online source URL for local validation and identity compare.
+ * Mirrors backend identity rules: HTTPS only, drop fragment/default 443, keep query, require .js pathname.
+ * @returns {{ sourceUrl: string, pathname: string } | null}
+ */
+export function normalizeOnlineSourceInput(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return null;
+    let parsed;
+    try {
+        parsed = new URL(trimmed);
+    } catch {
+        return null;
+    }
+    if (parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password) return null;
+    if (!parsed.hostname) return null;
+    if (!parsed.pathname.toLowerCase().endsWith('.js')) return null;
+    parsed.hash = '';
+    if (parsed.port === '443') parsed.port = '';
+    return {
+        sourceUrl: parsed.toString(),
+        pathname: parsed.pathname,
+    };
+}
+
+function hasExistingOnlineSource(sourceUrl) {
+    const pools = [state.sources, state.downloadSources];
+    for (const pool of pools) {
+        for (const source of asArray(pool)) {
+            if (String(source?.sourceUrl || '').trim() === sourceUrl) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+function onlineImportNodes() {
+    return {
+        dialog: $('[data-role="online-source-dialog"]'),
+        urlLabel: $('[data-role="online-source-url"]'),
+        existingHint: $('[data-role="online-source-existing"]'),
+        input: $('[data-role="online-source-input"]'),
+        openButton: $('[data-action="open-online-source-import"]'),
+        modeButtons: $$('[data-action^="online-import-"]'),
+    };
+}
+
+function setOnlineImportBusy(busy) {
+    onlineImportState.busy = busy;
+    const { input, openButton, modeButtons } = onlineImportNodes();
+    if (input) input.disabled = busy;
+    if (openButton) openButton.disabled = busy;
+    modeButtons.forEach((button) => {
+        button.disabled = busy;
+    });
+}
+
+function closeOnlineSourceImportDialog() {
+    const { dialog } = onlineImportNodes();
+    if (dialog) {
+        dialog.hidden = true;
+        dialog.setAttribute?.('aria-hidden', 'true');
+    }
+    onlineImportState = { url: '', busy: false };
+    setOnlineImportBusy(false);
+}
+
+/**
+ * Open confirmation dialog after local format checks. Does not download.
+ * @returns {Promise<boolean>} true when dialog opened
+ */
+export async function openOnlineSourceImportDialog(url) {
+    const normalized = normalizeOnlineSourceInput(url);
+    if (!normalized) {
+        toast('请输入有效的 HTTPS .js 音源地址', 'error');
+        return false;
+    }
+
+    const { dialog, urlLabel, existingHint } = onlineImportNodes();
+    if (!dialog) return false;
+
+    onlineImportState = { url: normalized.sourceUrl, busy: false };
+    if (urlLabel) urlLabel.textContent = normalized.sourceUrl;
+    if (existingHint) {
+        const exists = hasExistingOnlineSource(normalized.sourceUrl);
+        existingHint.hidden = !exists;
+    }
+    dialog.hidden = false;
+    dialog.setAttribute?.('aria-hidden', 'false');
+    setOnlineImportBusy(false);
+    return true;
+}
+
+function onlineImportSummary(result) {
+    if (!result) return '音源已导入，启用状态已应用';
+    if (result.operation === 'updated' && result.contentChanged === false) {
+        return '音源内容没有变化，启用状态已更新';
+    }
+    if (result.operation === 'updated') {
+        return '音源已更新，启用状态已应用';
+    }
+    return '音源已导入，启用状态已应用';
+}
+
+/**
+ * Submit the pending online import with an enable mode.
+ * @param {'playback'|'download'|'both'} mode
+ */
+export async function submitOnlineSourceImport(mode) {
+    if (onlineImportState.busy) return;
+    const url = onlineImportState.url;
+    if (!url) {
+        toast('请先输入在线音源地址', 'error');
+        return;
+    }
+    if (mode !== 'playback' && mode !== 'download' && mode !== 'both') {
+        toast('无效的启用模式', 'error');
+        return;
+    }
+
+    setOnlineImportBusy(true);
+    try {
+        const result = await api.post('/music/sources/import-url', {
+            url,
+            enable_mode: mode,
+        });
+        closeOnlineSourceImportDialog();
+        await loadSources(1);
+        toast(onlineImportSummary(result));
+    } catch (error) {
+        setOnlineImportBusy(false);
+        toast(error.message || '在线导入失败', 'error');
+    }
+}
+
+export function bindOnlineSourceImport() {
+    $('[data-action="open-online-source-import"]')?.addEventListener('click', async () => {
+        if (onlineImportState.busy) return;
+        const input = $('[data-role="online-source-input"]');
+        const value = input?.value || '';
+        await openOnlineSourceImportDialog(value);
+    });
+
+    $('[data-role="online-source-input"]')?.addEventListener('keydown', async (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        if (onlineImportState.busy) return;
+        await openOnlineSourceImportDialog(event.currentTarget?.value || '');
+    });
+
+    $('[data-role="online-source-dialog"]')?.addEventListener('click', async (event) => {
+        const button = event.target.closest?.('button[data-action]');
+        if (!button) {
+            // Click on backdrop (dialog root) closes without submitting.
+            if (event.target === event.currentTarget && !onlineImportState.busy) {
+                closeOnlineSourceImportDialog();
+            }
+            return;
+        }
+
+        const action = button.dataset.action;
+        if (action === 'online-import-cancel') {
+            if (!onlineImportState.busy) closeOnlineSourceImportDialog();
+            return;
+        }
+        if (action === 'online-import-playback') {
+            await submitOnlineSourceImport('playback');
+            return;
+        }
+        if (action === 'online-import-download') {
+            await submitOnlineSourceImport('download');
+            return;
+        }
+        if (action === 'online-import-both') {
+            await submitOnlineSourceImport('both');
+        }
+    });
 }
 
 function sourceMergeKey(item) {
@@ -171,6 +358,8 @@ export function bindSources() {
             }
         });
     }
+
+    bindOnlineSourceImport();
 
     $('[data-action="refresh-sources"]')?.addEventListener('click', () => {
         loadSources().catch(error => toast(error.message, 'error'));

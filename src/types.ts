@@ -259,6 +259,18 @@ export type PlayState = 'idle' | 'playing' | 'paused' | 'stopped';
 /** 播放模式枚举 */
 export type PlayMode = 'order' | 'random' | 'once' | 'single' | 'loop';
 
+/** Slim queue item for UI handoff (e.g. speaker → browser). */
+export interface PlayerQueueSong {
+  id: number;
+  title: string;
+  artist: string;
+  album?: string;
+  duration?: number;
+  url?: string;
+  cover_url?: string;
+  lyric_url?: string;
+}
+
 /** 播放器状态 */
 export interface PlayerStatus {
   state: PlayState;
@@ -266,6 +278,8 @@ export interface PlayerStatus {
   playlist_id: number;
   current_index: number;
   current_song?: { id: number; title: string; artist: string; cover_url?: string; lyric_url?: string };
+  /** Full in-memory queue for target handoff (may be truncated if huge). */
+  queue?: PlayerQueueSong[];
   position: number;
   duration: number;
   is_playing: boolean;

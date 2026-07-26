@@ -4,11 +4,9 @@ import type { BridgeService, SongloftRemoteSong } from '../bridge/service';
 import type { PlatformRegistry } from '../music/platforms/registry';
 import type { MusicPlatform, MusicQuality, SearchResultSong } from '../music/types';
 import type { MusicPlatformProvider } from '../music/platforms/types';
+import { loadFullSonglist } from '../music/songlist_loader';
 import { StarlightError } from '../system/errors';
-import { normalizeHostBaseUrl } from '../utils/http';
-
-const IMPORT_PAGE_SIZE = 100;
-const MAX_IMPORT_PAGES = 100;
+import { requireHostBaseUrl } from '../utils/http';
 
 type NativePlaylists = Record<string, unknown>;
 
@@ -179,7 +177,7 @@ export class SongloftPlaylistService {
   }
 
   private async hostRequest(method: string, path: string, body?: unknown): Promise<unknown> {
-    const host = normalizeHostBaseUrl(await songloft.plugin.getHostUrl());
+    const host = await requireHostBaseUrl();
     const token = await songloft.plugin.getToken();
     const response = await fetch(`${host}${path}`, {
       method,
@@ -283,40 +281,12 @@ function addedCountFromResult(result: unknown, fallback: number): number {
 }
 
 async function loadSonglist(provider: MusicPlatformProvider, id: string): Promise<{ name: string; total: number; songs: SearchResultSong[] }> {
-  const first = await provider.songListDetail(id, 1, IMPORT_PAGE_SIZE);
-  const songs = Array.isArray(first.songs) ? [...first.songs] : [];
-  const total = positiveTotal(first.total);
-  let page = 2;
-
-  while (
-    page <= MAX_IMPORT_PAGES
-    && (
-      (total > 0 && songs.length < total)
-      || (total === 0 && songs.length > 0 && songs.length % IMPORT_PAGE_SIZE === 0)
-    )
-  ) {
-    const detail = await provider.songListDetail(id, page, IMPORT_PAGE_SIZE);
-    const pageSongs = Array.isArray(detail.songs) ? detail.songs : [];
-    if (pageSongs.length === 0) {
-      break;
-    }
-    songs.push(...pageSongs);
-    if (pageSongs.length < IMPORT_PAGE_SIZE) {
-      break;
-    }
-    page += 1;
-  }
-
+  const detail = await loadFullSonglist(provider, id);
   return {
-    name: first.name || id,
-    total: total || songs.length,
-    songs: total > 0 ? songs.slice(0, total) : songs,
+    name: detail.name,
+    total: detail.total,
+    songs: detail.songs,
   };
-}
-
-function positiveTotal(value: unknown): number {
-  const numeric = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
-  return typeof numeric === 'number' && Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
 }
 
 function normalizeQuality(value: unknown): MusicQuality | null {

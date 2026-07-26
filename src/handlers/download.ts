@@ -1,27 +1,13 @@
-import type { HTTPResponse, Router } from '@songloft/plugin-sdk';
+import type { Router } from '@songloft/plugin-sdk';
 import { DownloadService, type DownloadSettingsPatch } from '../download/service';
 import type { RuntimeManager } from '../music/runtime_manager';
-import type { SourceImportFile, SourceManager } from '../music/source_manager';
+import type { SourceManager } from '../music/source_manager';
 import type { SearchResultSong } from '../music/types';
 import { parseJsonBody } from '../system/body';
 import { StarlightError } from '../system/errors';
-import { apiError, apiOk } from '../system/response';
-
-interface SourceImportBody {
-  filename?: unknown;
-  content?: unknown;
-  files?: unknown;
-}
-
-interface SourceToggleBody {
-  id?: unknown;
-  enabled?: unknown;
-}
-
-interface SourceBatchToggleBody {
-  ids?: unknown;
-  enabled?: unknown;
-}
+import { boolField, objectField, stringField, stringishField } from '../system/fields';
+import { runApi } from '../system/response';
+import { registerSourceCrudRoutes } from './sources_crud';
 
 interface SongBody {
   song?: unknown;
@@ -29,88 +15,6 @@ interface SongBody {
 
 interface SongsBody {
   songs?: unknown;
-}
-
-function handle(fn: () => unknown | Promise<unknown>, statusCode = 200): Promise<HTTPResponse> {
-  return Promise.resolve()
-    .then(fn)
-    .then((data) => apiOk(data, statusCode))
-    .catch((error) => apiError(error, statusFor(error)));
-}
-
-function statusFor(error: unknown): number {
-  if (!(error instanceof StarlightError)) {
-    return 500;
-  }
-  if (error.code === 'BAD_REQUEST') {
-    return 400;
-  }
-  if (error.code === 'PLAY_URL_RESOLVE_FAILED') {
-    return 404;
-  }
-  if (error.code === 'INTERNAL_ERROR' && error.details.upstream === 'songloft_remote_import') {
-    return 502;
-  }
-  return 500;
-}
-
-function stringField(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function stringishField(value: unknown): string {
-  if (typeof value === 'string') {
-    return value;
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  return '';
-}
-
-function objectField(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function boolField(value: unknown): boolean {
-  return value === true || value === 'true';
-}
-
-function requireId(value: unknown, name = 'id'): string {
-  const id = stringField(value);
-  if (!id) {
-    throw new StarlightError('BAD_REQUEST', `${name} is required`);
-  }
-  return id;
-}
-
-function sourceImportFiles(value: unknown): SourceImportFile[] {
-  if (!Array.isArray(value)) {
-    throw new StarlightError('BAD_REQUEST', 'files must be an array');
-  }
-  return value.map((entry) => {
-    const source = objectField(entry);
-    if (!source) {
-      throw new StarlightError('BAD_REQUEST', 'files entries must be objects');
-    }
-    const filename = requireId(source.filename, 'filename');
-    const content = typeof source.content === 'string' ? source.content : '';
-    if (!content) {
-      throw new StarlightError('BAD_REQUEST', 'content is required');
-    }
-    return { filename, content };
-  });
-}
-
-function sourceIds(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    throw new StarlightError('BAD_REQUEST', 'ids must be an array');
-  }
-  const ids = value.map((entry) => requireId(entry));
-  if (ids.length === 0) {
-    throw new StarlightError('BAD_REQUEST', 'ids must not be empty');
-  }
-  return ids;
 }
 
 function requireSong(value: unknown): SearchResultSong {
@@ -182,83 +86,37 @@ function settingsPatch(value: unknown): DownloadSettingsPatch {
   return patch;
 }
 
-function reloadRuntimesInBackground(runtimes: RuntimeManager): void {
-  runtimes.loadEnabledSources().catch((error) => {
-    songloft.log.warn('Failed to reload download source runtimes: ' + String(error));
-  });
-}
-
 export function registerDownloadHandlers(
   router: Router,
   sources: SourceManager,
   runtimes: RuntimeManager,
   downloads: DownloadService,
 ): void {
-  router.get('/api/download/sources', async () => handle(() => sources.listSources()));
+  registerSourceCrudRoutes(router, {
+    prefix: '/api/download/sources',
+    sources,
+    runtimes,
+    runtimeLabel: 'download',
+  });
 
-  router.post('/api/download/sources/import', async (req) =>
-    handle(() => {
-      const body = parseJsonBody<SourceImportBody>(req);
-      if (body.files !== undefined) {
-        return sources.importManyFromJS(sourceImportFiles(body.files));
-      }
-
-      const filename = requireId(body.filename, 'filename');
-      const content = typeof body.content === 'string' ? body.content : '';
-      if (!content) {
-        throw new StarlightError('BAD_REQUEST', 'content is required');
-      }
-      return sources.importFromJS(filename, content);
-    }, 201));
-
-  router.post('/api/download/sources/toggle', async (req) =>
-    handle(async () => {
-      const body = parseJsonBody<SourceToggleBody>(req);
-      const id = requireId(body.id);
-      const enabled = boolField(body.enabled);
-      await sources.setEnabled(id, enabled);
-      reloadRuntimesInBackground(runtimes);
-      return sources.listSources().find((source) => source.id === id) || { id, enabled };
-    }));
-
-  router.post('/api/download/sources/batch-toggle', async (req) =>
-    handle(async () => {
-      const body = parseJsonBody<SourceBatchToggleBody>(req);
-      const ids = sourceIds(body.ids);
-      const enabled = boolField(body.enabled);
-      for (const id of ids) {
-        await sources.setEnabled(id, enabled);
-      }
-      reloadRuntimesInBackground(runtimes);
-      return { ids, enabled };
-    }));
-
-  router.delete('/api/download/sources/:id', async (_req, params) =>
-    handle(async () => {
-      const id = requireId(params.id);
-      await sources.deleteSource(id);
-      reloadRuntimesInBackground(runtimes);
-      return { id };
-    }));
-
-  router.get('/api/download/settings', async () => handle(() => downloads.getSettings()));
+  router.get('/api/download/settings', async () => runApi(() => downloads.getSettings()));
 
   router.post('/api/download/settings', async (req) =>
-    handle(() => downloads.saveSettings(settingsPatch(parseJsonBody(req)))));
+    runApi(() => downloads.saveSettings(settingsPatch(parseJsonBody(req)))));
 
   router.post('/api/download/song', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<SongBody>(req);
       return downloads.startBatch([requireSong(body.song)]);
     }));
 
   router.post('/api/download/batch', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<SongsBody>(req);
       return downloads.startBatch(requireSongs(body.songs));
     }));
 
-  router.get('/api/download/batch/progress', async () => handle(() => downloads.getBatchProgress()));
+  router.get('/api/download/batch/progress', async () => runApi(() => downloads.getBatchProgress()));
 
-  router.post('/api/download/batch/clear', async () => handle(() => downloads.clearBatch()));
+  router.post('/api/download/batch/clear', async () => runApi(() => downloads.clearBatch()));
 }

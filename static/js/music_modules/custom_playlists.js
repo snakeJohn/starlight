@@ -1,5 +1,11 @@
 import { api } from '../api.js';
 import { asArray } from '../shared/arrays.js';
+import {
+    fetchSongloftPlaylistSongs,
+    fetchSongloftPlaylists,
+    songloftPlaylistId,
+    songloftPlaylistName,
+} from '../shared/songloft_playlists.js';
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from '../state.js';
 import { clampPage, pageCount, pageFromPagination, pageSizes, renderPagination } from './pagination.js';
 import { renderArtwork, renderListScroller, renderSongloftSongRow, songAlbum, songArtist, songTitle } from './renderers.js';
@@ -25,15 +31,6 @@ function getCustomPlaylistDependencies() {
 
 function sourceDisplayName(id) {
     return state.platforms.find(item => item.id === id)?.name || builtinPlatformNames[id] || id || '未知';
-}
-
-function songloftPlaylistId(playlist) {
-    const id = playlist?.id ?? playlist?.playlist_id;
-    return id === undefined || id === null ? '' : String(id);
-}
-
-function songloftPlaylistName(playlist) {
-    return playlist?.name || playlist?.title || '未命名歌单';
 }
 
 function currentViewedCustomPlaylist() {
@@ -188,7 +185,7 @@ async function loadSongloftTargetPlaylistSongs(playlistId = state.songloftTarget
     }
 
     renderSongloftTargetPlaylistSongs([], { loading: true });
-    const data = await api.get(`/songloft/playlists/${encodeURIComponent(id)}/songs`);
+    const data = await fetchSongloftPlaylistSongs(id);
     const songs = asArray(data);
     setState({ songloftTargetPlaylistSongs: songs });
     renderSongloftTargetPlaylistSongs(songs);
@@ -231,12 +228,10 @@ function renderCustomPlaylists() {
 export async function loadCustomPlaylists() {
     const [playlists, songloftPlaylists] = await Promise.all([
         api.get('/custom-playlists').then(asArray),
-        api.get('/songloft/playlists')
-            .then(asArray)
-            .catch(error => {
-                toast(error.message || 'Songloft 歌单加载失败', 'error');
-                return asArray(state.songloftTargetPlaylists);
-            }),
+        fetchSongloftPlaylists().catch(error => {
+            toast(error.message || 'Songloft 歌单加载失败', 'error');
+            return asArray(state.songloftTargetPlaylists);
+        }),
     ]);
     setState({
         customPlaylists: playlists,

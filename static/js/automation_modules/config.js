@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { asArray as sharedAsArray } from '../shared/arrays.js';
-import { boolValue, hasField, numberValue, setField, textValue } from '../shared/forms.js';
+import { boolValue, csvNumbers, hasField, numberValue, setField, textValue } from '../shared/forms.js';
 import { $, $$, toast } from '../state.js';
 import { applyAiConfigToForm, updateAiAnalysisAccess } from './ai_config.js';
 
@@ -8,13 +8,6 @@ let savedConversationMonitorEnabled = false;
 
 function asArray(value) {
     return sharedAsArray(value, ['commands', 'tasks', 'logs']);
-}
-
-function csvNumbers(value) {
-    return String(value || '')
-        .split(',')
-        .map(item => Number(item.trim()))
-        .filter(item => Number.isInteger(item) && item > 0);
 }
 
 async function putOrPost(path, body) {

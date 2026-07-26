@@ -4,12 +4,18 @@ import { StarlightError } from '../system/errors';
 import { PlatformRegistry } from '../music/platforms/registry';
 import { RuntimeManager } from '../music/runtime_manager';
 import type { MusicQuality, SearchResultSong } from '../music/types';
-import { resolveMusicLyric, type MusicLyricResult } from '../music/platforms/lyrics';
+import { resolveMusicLyric } from '../music/platforms/lyrics';
+import { updateHostSongLyrics } from '../music/host_lyrics';
 import { toRemoteSong, type RemoteSongPayload } from './mapper';
 import { MinaService } from '../service/service';
 import type { PlayerSong, PlaylistManagerMap } from '../player/manager';
 import { URLBuilder } from '../player/url_builder';
-import { normalizeHostBaseUrl } from '../utils/http';
+import { normalizeHostBaseUrl, requireHostBaseUrl } from '../utils/http';
+import {
+  normalizeSongText,
+  sanitizeProviderError,
+  scoreResolvedCandidate,
+} from '../utils/song_match';
 
 const STARLIGHT_PLUGIN_ENTRY_PATH = 'starlight';
 const EXISTING_REMOTE_SONG_LOOKUP_LIMIT = 20;
@@ -98,7 +104,7 @@ export class BridgeService {
     }
 
     const token = await songloft.plugin.getToken();
-    const host = await songloft.plugin.getHostUrl();
+    const host = await requireHostBaseUrl();
     const imported = await postRemoteSongs(host, token, payloads);
     let importedSongs = imported.ok ? await completeImportedSongs(host, token, payloads, imported.songs) : imported.songs;
     if (!imported.ok) {
@@ -160,7 +166,7 @@ export class BridgeService {
     }
 
     const token = await songloft.plugin.getToken();
-    const host = await songloft.plugin.getHostUrl();
+    const host = await requireHostBaseUrl();
     const imported = await postRemoteSongs(host, token, payloads);
     if (!imported.ok) {
       if (!isDuplicateRemoteSongError(imported.body)) {
@@ -746,13 +752,6 @@ function sortJsonValue(value: unknown): unknown {
   }, {});
 }
 
-function sanitizeProviderError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message
-    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
-    .replace(/token[=:]\s*\S+/gi, 'token=[redacted]')
-    .slice(0, 500);
-}
 
 function playbackFallbackError(attemptedCount: number, failures: string[]): StarlightError {
   const lastFailure = failures.length > 0 ? failures[failures.length - 1] : '未找到可用音源';
@@ -766,40 +765,6 @@ function playUrlResolveFailureMessage(attemptedCount: number, lastFailure: strin
     return `无法解析播放 URL，已尝试 ${attemptedCount} 个播放音源；最后失败原因：${lastFailure || '未找到可用播放音源'}`;
   }
   return '无法解析播放 URL';
-}
-
-function normalizeSongText(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[《》【】[\]（）()\s_\-·,，.。]/g, '');
-}
-
-function textMatches(expected: string, actual: string): boolean {
-  const normalizedExpected = normalizeSongText(expected);
-  const normalizedActual = normalizeSongText(actual);
-  return Boolean(
-    normalizedExpected
-    && normalizedActual
-    && (normalizedActual === normalizedExpected
-      || normalizedActual.includes(normalizedExpected)
-      || normalizedExpected.includes(normalizedActual)),
-  );
-}
-
-function scoreResolvedCandidate(title: string, artist: string, song: SearchResultSong): number {
-  if (!textMatches(title, song.title)) {
-    return 0;
-  }
-
-  let score = normalizeSongText(title) === normalizeSongText(song.title) ? 100 : 60;
-  if (artist.trim()) {
-    if (!textMatches(artist, song.artist)) {
-      return 0;
-    }
-    score += normalizeSongText(artist) === normalizeSongText(song.artist) ? 40 : 20;
-  }
-  return score;
 }
 
 export interface SongloftRemoteSong {
@@ -892,28 +857,10 @@ async function syncImportedSongLyrics(host: string, token: string, songs: Search
   for (const pair of pairs) {
     try {
       const lyric = await resolveMusicLyric(pair.song.source_data.platform, pair.song.source_data.songInfo);
-      await updateRemoteSongLyrics(host, token, Number(pair.imported.id), lyric);
+      await updateHostSongLyrics(host, token, Number(pair.imported.id), lyric);
     } catch (error) {
       songloft.log.warn(`[BridgeService] Sync lyrics failed for "${pair.song.title}": ${sanitizeProviderError(error)}`);
     }
-  }
-}
-
-async function updateRemoteSongLyrics(host: string, token: string, songId: number, lyric: MusicLyricResult): Promise<void> {
-  const baseHost = normalizeHostBaseUrl(host);
-  const response = await fetch(`${baseHost}/api/v1/songs/${songId}/lyrics`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      lyric_source: 'scraped',
-      lyric: lyric.lyric,
-      tlyric: lyric.tlyric || '',
-      rlyric: lyric.rlyric || '',
-      lxlyric: lyric.lxlyric || '',
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${await safeResponseText(response)}`);
   }
 }
 

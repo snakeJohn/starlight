@@ -14,6 +14,29 @@ describe('isBlockedHostname', () => {
   it('allows public hosts', () => {
     expect(isBlockedHostname('example.com')).toBe(false);
     expect(isBlockedHostname('8.8.8.8')).toBe(false);
+    expect(isBlockedHostname('2001:4860:4860::8888')).toBe(false);
+  });
+
+  it('blocks multicast, reserved, and documentation IPv4 ranges', () => {
+    expect(isBlockedHostname('224.0.0.1')).toBe(true);
+    expect(isBlockedHostname('240.0.0.1')).toBe(true);
+    expect(isBlockedHostname('192.0.2.1')).toBe(true);
+    expect(isBlockedHostname('198.51.100.1')).toBe(true);
+    expect(isBlockedHostname('203.0.113.1')).toBe(true);
+    expect(isBlockedHostname('198.18.0.1')).toBe(true);
+    expect(isBlockedHostname('255.255.255.255')).toBe(true);
+  });
+
+  it('blocks IPv6 loopback, ULA, link-local, multicast, docs, and mapped private', () => {
+    expect(isBlockedHostname('::1')).toBe(true);
+    expect(isBlockedHostname('::')).toBe(true);
+    expect(isBlockedHostname('fc00::1')).toBe(true);
+    expect(isBlockedHostname('fd12:3456:789a::1')).toBe(true);
+    expect(isBlockedHostname('fe80::1')).toBe(true);
+    expect(isBlockedHostname('ff02::1')).toBe(true);
+    expect(isBlockedHostname('2001:db8::1')).toBe(true);
+    expect(isBlockedHostname('::ffff:127.0.0.1')).toBe(true);
+    expect(isBlockedHostname('::ffff:192.168.0.1')).toBe(true);
   });
 });
 

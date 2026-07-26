@@ -2,6 +2,8 @@ import { CustomPlaylistStore } from '../custom_playlists/store';
 import type { CustomPlaylist } from '../custom_playlists/types';
 import type { CustomPlaylistService } from '../custom_playlists/service';
 import { StarlightError } from '../system/errors';
+import { generateId } from '../utils/crypto';
+import { isUsableHostBaseUrl, resolveHostBaseUrl } from '../utils/http';
 import {
   DEFAULT_SERVER_NAME,
   LX_SYNC_CONFIG_KEY,
@@ -33,7 +35,7 @@ function nowIso(): string {
 }
 
 function createId(prefix = 'lx'): string {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
+  return generateId(prefix);
 }
 
 function safeParse(raw: unknown): unknown {
@@ -483,7 +485,8 @@ export class LxSyncService {
     let base = this.hostBaseUrl;
     if (!base) {
       try {
-        base = String((await songloft.plugin.getHostUrl()) || '').replace(/\/$/, '');
+        const resolved = await resolveHostBaseUrl();
+        base = isUsableHostBaseUrl(resolved) ? resolved : '';
       } catch {
         base = '';
       }

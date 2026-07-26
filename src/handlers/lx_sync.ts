@@ -1,8 +1,8 @@
-import type { HTTPResponse, Router } from '@songloft/plugin-sdk';
+import type { Router } from '@songloft/plugin-sdk';
 import type { LxSyncService } from '../lx_sync/service';
 import { parseJsonBody } from '../system/body';
 import { StarlightError } from '../system/errors';
-import { apiError, apiOk } from '../system/response';
+import { runApi } from '../system/response';
 
 interface ConfigBody {
   password?: unknown;
@@ -30,19 +30,6 @@ interface ExportFromSongloftBody {
   ids?: unknown;
 }
 
-function handle(fn: () => unknown | Promise<unknown>, statusCode = 200): Promise<HTTPResponse> {
-  return Promise.resolve()
-    .then(fn)
-    .then((data) => apiOk(data, statusCode))
-    .catch((error) => apiError(error, statusFor(error)));
-}
-
-function statusFor(error: unknown): number {
-  if (!(error instanceof StarlightError)) return 500;
-  if (error.code === 'BAD_REQUEST') return 400;
-  return 500;
-}
-
 function parsePlaylistIds(body: ImportSongloftBody): string[] {
   const raw = body.playlist_ids ?? body.playlistIds ?? body.ids;
   if (raw === undefined || raw === null) return [];
@@ -53,10 +40,10 @@ function parsePlaylistIds(body: ImportSongloftBody): string[] {
 }
 
 export function registerLxSyncHandlers(router: Router, service: LxSyncService): void {
-  router.get('/api/lx-sync/config', async () => handle(() => service.getConfig()));
+  router.get('/api/lx-sync/config', async () => runApi(() => service.getConfig()));
 
   router.put('/api/lx-sync/config', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<ConfigBody>(req);
       if (
         body.baseUrl !== undefined ||
@@ -83,7 +70,7 @@ export function registerLxSyncHandlers(router: Router, service: LxSyncService): 
     }));
 
   router.post('/api/lx-sync/import-to-songloft', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<ImportSongloftBody>(req);
       const ids = parsePlaylistIds(body);
       if (!ids.length) {
@@ -94,7 +81,7 @@ export function registerLxSyncHandlers(router: Router, service: LxSyncService): 
 
   /** Songloft playlists → LX (tag as lx:user:songloft:* and push to live peers). */
   router.post('/api/lx-sync/export-from-songloft', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<ExportFromSongloftBody>(req);
       const ids = parsePlaylistIds(body);
       return service.exportSongloftPlaylistsToLx(ids.length ? ids : undefined);

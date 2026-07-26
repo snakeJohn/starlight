@@ -297,14 +297,86 @@ export function setHostBaseUrl(url: string): void {
   _hostBaseUrl = normalizeHostBaseUrl(url);
 }
 
-/** 解析宿主 API 基础 URL：只使用显式配置或已经设置过的地址。 */
+/**
+ * 判断规范化后的宿主地址是否可用于业务请求。
+ * 拒绝空地址、非 http(s)、以及端口为 0（安卓本地 SDK 常见的 localhost:0）。
+ */
+export function isUsableHostBaseUrl(url: string): boolean {
+  const normalized = normalizeHostBaseUrl(url);
+  if (!normalized) {
+    return false;
+  }
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+    if (!parsed.hostname) {
+      return false;
+    }
+    // URL.port is "" when default; explicit 0 is unusable.
+    if (parsed.port === '0') {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function trySdkHostBaseUrl(): Promise<string> {
+  try {
+    const raw = await songloft.plugin.getHostUrl();
+    const normalized = normalizeHostBaseUrl(String(raw || ''));
+    if (isUsableHostBaseUrl(normalized)) {
+      return normalized;
+    }
+  } catch {
+    // SDK unavailable in some test / early-boot contexts.
+  }
+  return '';
+}
+
+/**
+ * 解析 Songloft 宿主 API 基础 URL。
+ * 优先级：显式配置 → 已缓存且有效 → SDK getHostUrl（有效时才采用）。
+ * 无效 SDK 地址（如 http://localhost:0）不得覆盖有效缓存。
+ */
 export async function resolveHostBaseUrl(configuredUrl = ''): Promise<string> {
   const configured = configuredUrl.trim();
   if (configured) {
-    setHostBaseUrl(configured);
+    const normalized = normalizeHostBaseUrl(configured);
+    if (isUsableHostBaseUrl(normalized)) {
+      setHostBaseUrl(normalized);
+      return _hostBaseUrl;
+    }
+    // Explicit but unusable: do not cache; fall through to cache/SDK.
+  }
+
+  if (isUsableHostBaseUrl(_hostBaseUrl)) {
     return _hostBaseUrl;
   }
+
+  const fromSdk = await trySdkHostBaseUrl();
+  if (fromSdk) {
+    setHostBaseUrl(fromSdk);
+    return _hostBaseUrl;
+  }
+
   return _hostBaseUrl;
+}
+
+/**
+ * 业务请求用：解析失败时抛出可读错误，避免打到 localhost:0。
+ */
+export async function requireHostBaseUrl(configuredUrl = ''): Promise<string> {
+  const host = await resolveHostBaseUrl(configuredUrl);
+  if (!isUsableHostBaseUrl(host)) {
+    throw new Error(
+      'Songloft 访问地址不可用。请在插件设置中配置有效的局域网/本机地址，或检查宿主自动获取（当前 SDK 可能返回了无效端口）。',
+    );
+  }
+  return host;
 }
 
 /** 调用 Songloft 宿主 API（自动携带 Bearer token） */

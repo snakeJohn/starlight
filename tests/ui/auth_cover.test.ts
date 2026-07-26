@@ -28,6 +28,18 @@ describe('authenticateSongloftResourceUrl', () => {
     ).toBe('http://192.168.1.10:58091/api/v1/songs/42/cover?access_token=secret-token');
   });
 
+  it('also appends token to same-origin Songloft play paths for browser audio', async () => {
+    vi.stubGlobal('window', {
+      location: { origin: 'http://192.168.1.10:58091' },
+      SongloftPlugin: { getAuthToken: () => 'secret-token' },
+    });
+    const { authenticateSongloftResourceUrl } = await loadAuth();
+
+    expect(authenticateSongloftResourceUrl('/api/v1/songs/42/play')).toBe(
+      '/api/v1/songs/42/play?access_token=secret-token',
+    );
+  });
+
   it('never attaches token to foreign origins that merely match the cover path', async () => {
     vi.stubGlobal('window', {
       location: { origin: 'http://192.168.1.10:58091' },

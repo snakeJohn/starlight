@@ -2,20 +2,16 @@ import type { BridgeService, SongloftRemoteSong } from '../bridge/service';
 import { StarlightError } from '../system/errors';
 import type { MusicPlatform, SearchResultSong } from '../music/types';
 import type { PlayerSong } from '../player/manager';
-import { normalizeHostBaseUrl } from '../utils/http';
+import { generateId } from '../utils/crypto';
+import { requireHostBaseUrl } from '../utils/http';
+import { PLATFORM_SOURCE_NAMES, stableSongKey } from '../utils/song_match';
 import { CustomPlaylistStore } from './store';
 import type { CustomPlaylist, CustomPlaylistSong, ImportNetworkPlaylistInput, SongListDetail } from './types';
 import { customPlaylistIndexFromSyntheticId, syntheticSongId } from './synthetic';
 
 type NativePlaylists = Record<string, unknown>;
 
-const SOURCE_NAMES: Record<MusicPlatform, string> = {
-  kw: '酷我',
-  kg: '酷狗',
-  tx: 'QQ 音乐',
-  mg: '咪咕',
-  wy: '网易云',
-};
+const SOURCE_NAMES = PLATFORM_SOURCE_NAMES;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -25,22 +21,20 @@ function normalizeName(name: string): string {
   return name.trim();
 }
 
+function createId(prefix = 'custom'): string {
+  return generateId(prefix);
+}
+
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function createId(prefix = 'custom'): string {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
-}
-
 function stableSongTextKey(song: Pick<CustomPlaylistSong, 'title' | 'artist'>): string {
-  return `query:${normalizeKey(song.title)}:${normalizeKey(song.artist)}`;
+  return stableSongKey({ title: song.title, artist: song.artist });
 }
 
 function stableSongId(song: SearchResultSong): string {
-  const info = song.source_data.songInfo;
-  const id = info.musicId || info.songmid || info.hash || info.copyrightId || info.strMediaMid || `${song.title}:${song.artist}`;
-  return `${song.source_data.platform}:${id}`;
+  return stableSongKey(song);
 }
 
 function hasSourceData(song: SearchResultSong | CustomPlaylistSong): song is SearchResultSong {
@@ -820,11 +814,8 @@ export class CustomPlaylistService {
   }
 
   private async hostAddSongIds(playlistId: number, songIds: number[]): Promise<void> {
-    const host = normalizeHostBaseUrl(await songloft.plugin.getHostUrl());
+    const host = await requireHostBaseUrl();
     const token = await songloft.plugin.getToken();
-    if (!host) {
-      throw new Error('Songloft host URL is empty');
-    }
     const response = await fetch(`${host}/api/v1/playlists/${playlistId}/songs`, {
       method: 'POST',
       headers: {

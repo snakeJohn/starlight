@@ -330,6 +330,156 @@ describe('SourceManager', () => {
     await expect(store.loadIndex()).resolves.toEqual([meta]);
     await expect(store.loadScript(meta.id)).resolves.toBe(sourceScript);
   });
+
+  test('upserts an online source by normalized sourceUrl and keeps id on update', async () => {
+    const manager = await createInitializedManager();
+    const first = await manager.upsertOnlineSource({
+      stableId: 'online-1',
+      filename: 'source.js',
+      script: sourceScript,
+      sourceUrl: 'https://example.test/source.js',
+      resolvedUrl: 'https://cdn.test/source.js',
+      contentHash: 'hash-1',
+      enabled: true,
+    });
+    const second = await manager.upsertOnlineSource({
+      stableId: 'online-2',
+      filename: 'source-v2.js',
+      script: `${sourceScript}\n//v2`,
+      sourceUrl: 'https://example.test/source.js',
+      resolvedUrl: 'https://cdn.test/source-v2.js',
+      contentHash: 'hash-2',
+      enabled: false,
+    });
+    expect(first.operation).toBe('imported');
+    expect(second).toMatchObject({ operation: 'updated', contentChanged: true });
+    expect(second.source.id).toBe(first.source.id);
+    expect(second.source.enabled).toBe(false);
+    expect(await manager.getScript(first.source.id)).toContain('//v2');
+  });
+
+  test('keeps same-name online sources separate when sourceUrl differs', async () => {
+    const manager = await createInitializedManager();
+    await manager.upsertOnlineSource({
+      stableId: 'a',
+      filename: 'a.js',
+      script: sourceScript,
+      sourceUrl: 'https://a.test/a.js',
+      resolvedUrl: 'https://a.test/a.js',
+      contentHash: 'a',
+      enabled: false,
+    });
+    await manager.upsertOnlineSource({
+      stableId: 'b',
+      filename: 'b.js',
+      script: sourceScript,
+      sourceUrl: 'https://b.test/b.js',
+      resolvedUrl: 'https://b.test/b.js',
+      contentHash: 'b',
+      enabled: false,
+    });
+    expect(manager.listSources()).toHaveLength(2);
+  });
+
+  test('skips script rewrite when contentHash is unchanged but still updates enabled state', async () => {
+    const store = new SourceStore();
+    const manager = await createInitializedManager(store);
+    const first = await manager.upsertOnlineSource({
+      stableId: 'online-same',
+      filename: 'source.js',
+      script: sourceScript,
+      sourceUrl: 'https://example.test/same.js',
+      resolvedUrl: 'https://example.test/same.js',
+      contentHash: 'same-hash',
+      enabled: false,
+    });
+    const originalScript = await store.loadScript(first.source.id);
+
+    const second = await manager.upsertOnlineSource({
+      stableId: 'online-same-other',
+      filename: 'source-renamed.js',
+      script: `${sourceScript}\n//should-not-write`,
+      sourceUrl: 'https://example.test/same.js',
+      resolvedUrl: 'https://cdn.test/same.js',
+      contentHash: 'same-hash',
+      enabled: true,
+    });
+
+    expect(second).toMatchObject({ operation: 'updated', contentChanged: false });
+    expect(second.source.enabled).toBe(true);
+    expect(second.source.filename).toBe('source-renamed.js');
+    expect(await store.loadScript(first.source.id)).toBe(originalScript);
+  });
+
+  test('captureSnapshot and restoreSnapshot recover index and script after mutation', async () => {
+    const manager = await createInitializedManager();
+    const first = await manager.upsertOnlineSource({
+      stableId: 'snap-1',
+      filename: 'source.js',
+      script: sourceScript,
+      sourceUrl: 'https://example.test/snap.js',
+      resolvedUrl: 'https://example.test/snap.js',
+      contentHash: 'snap-1',
+      enabled: false,
+    });
+    const snapshot = await manager.captureSnapshot();
+
+    await manager.upsertOnlineSource({
+      stableId: 'snap-2',
+      filename: 'source-v2.js',
+      script: `${sourceScript}\n//changed`,
+      sourceUrl: 'https://example.test/snap.js',
+      resolvedUrl: 'https://example.test/snap-v2.js',
+      contentHash: 'snap-2',
+      enabled: true,
+    });
+    await manager.restoreSnapshot(snapshot);
+
+    expect(manager.listSources()).toEqual([first.source]);
+    expect(await manager.getScript(first.source.id)).toBe(sourceScript);
+  });
+
+  test('restoreOnlineEntry rolls back one URL without wiping unrelated sources', async () => {
+    const manager = await createInitializedManager();
+    const unrelated = await manager.importFromJS('local.js', sourceScript);
+    const entrySnap = await manager.captureOnlineEntryBySourceUrl('https://example.test/online.js');
+    expect(entrySnap).toEqual({ present: false });
+
+    await manager.upsertOnlineSource({
+      stableId: 'online-abc',
+      filename: 'online.js',
+      script: sourceScript,
+      sourceUrl: 'https://example.test/online.js',
+      resolvedUrl: 'https://example.test/online.js',
+      contentHash: 'online-1',
+      enabled: true,
+    });
+
+    await manager.restoreOnlineEntry('https://example.test/online.js', 'online-abc', entrySnap);
+
+    const list = manager.listSources();
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(unrelated.id);
+    expect(list.some((source) => source.sourceUrl === 'https://example.test/online.js')).toBe(false);
+    expect(await manager.getScript(unrelated.id)).toBe(sourceScript);
+  });
+
+  test('upsertOnlineSource rejects stableId collision with a different source', async () => {
+    const manager = await createInitializedManager();
+    const local = await manager.importFromJS('local.js', sourceScript);
+
+    await expect(
+      manager.upsertOnlineSource({
+        stableId: local.id,
+        filename: 'online.js',
+        script: sourceScript,
+        sourceUrl: 'https://example.test/collide.js',
+        resolvedUrl: 'https://example.test/collide.js',
+        contentHash: 'c1',
+        enabled: false,
+      }),
+    ).rejects.toMatchObject({ code: 'SOURCE_IMPORT_INVALID' });
+  });
 });
 
 describe('SourceStore', () => {

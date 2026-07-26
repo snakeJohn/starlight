@@ -2,13 +2,18 @@
 
 import { toRemoteSong } from '../bridge/mapper';
 import { postRemoteSongs, type SongloftRemoteSong } from '../bridge/service';
-import { resolveMusicLyric, type MusicLyricResult } from '../music/platforms/lyrics';
+import { resolveMusicLyric } from '../music/platforms/lyrics';
+import { updateHostSongLyrics } from '../music/host_lyrics';
 import { PlatformRegistry } from '../music/platforms/registry';
 import type { RuntimeManager } from '../music/runtime_manager';
 import type { SearchResultSong } from '../music/types';
 import { StarlightError } from '../system/errors';
 import { sourceDiagnostics } from '../diagnostics/source_logs';
-import { normalizeHostBaseUrl } from '../utils/http';
+import { requireHostBaseUrl } from '../utils/http';
+import {
+  sanitizeProviderError,
+  scoreResolvedCandidate,
+} from '../utils/song_match';
 
 const SETTINGS_KEY = 'starlight:download:settings';
 const DEFAULT_SETTINGS: DownloadSettings = {
@@ -277,7 +282,7 @@ export class DownloadService {
 
   private async importDownloadRemoteSong(song: SearchResultSong, url: string): Promise<SongloftRemoteSong> {
     const token = await songloft.plugin.getToken();
-    const host = await songloft.plugin.getHostUrl();
+    const host = await requireHostBaseUrl();
     const payload = toRemoteSong({ ...song, duration: 0 }, url);
     const imported = await postRemoteSongs(host, token, [payload]);
     if (!imported.ok) {
@@ -301,9 +306,9 @@ export class DownloadService {
   private async syncDownloadedSongLyrics(song: SearchResultSong, songId: number): Promise<void> {
     try {
       const token = await songloft.plugin.getToken();
-      const host = await songloft.plugin.getHostUrl();
+      const host = await requireHostBaseUrl();
       const lyric = await resolveMusicLyric(song.source_data.platform, song.source_data.songInfo);
-      await updateDownloadedSongLyrics(host, token, songId, lyric);
+      await updateHostSongLyrics(host, token, songId, lyric);
     } catch (error) {
       songloft.log.warn(`[DownloadService] Sync lyrics failed for "${song.title}": ${errorMessage(error)}`);
     }
@@ -364,38 +369,8 @@ function numericSongId(song: SongloftRemoteSong): number {
   return Number.isFinite(id) && id > 0 ? id : 0;
 }
 
-async function updateDownloadedSongLyrics(host: string, token: string, songId: number, lyric: MusicLyricResult): Promise<void> {
-  const baseHost = normalizeHostBaseUrl(host);
-  const response = await fetch(`${baseHost}/api/v1/songs/${songId}/lyrics`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      lyric_source: 'scraped',
-      lyric: lyric.lyric,
-      tlyric: lyric.tlyric || '',
-      rlyric: lyric.rlyric || '',
-      lxlyric: lyric.lxlyric || '',
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${await safeResponseText(response)}`);
-  }
-}
-
-async function safeResponseText(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return '';
-  }
-}
-
 function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message
-    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
-    .replace(/token[=:]\s*\S+/gi, 'token=[redacted]')
-    .slice(0, 500);
+  return sanitizeProviderError(error);
 }
 
 function downloadFailure(error: unknown): DownloadFailure {
@@ -423,40 +398,6 @@ function downloadFallbackError(attemptedCount: number, failures: DownloadFailure
   const message = `下载失败，已尝试 ${attempts} 个下载音源；最后失败原因：${lastFailure}`;
   const code = last?.code === 'PLAY_URL_RESOLVE_FAILED' ? 'PLAY_URL_RESOLVE_FAILED' : 'INTERNAL_ERROR';
   return new StarlightError(code, message, true, { attempts, lastFailure });
-}
-
-function normalizeSongText(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[《》【】[\]（）()\s_\-·,，.。]/g, '');
-}
-
-function textMatches(expected: string, actual: string): boolean {
-  const normalizedExpected = normalizeSongText(expected);
-  const normalizedActual = normalizeSongText(actual);
-  return Boolean(
-    normalizedExpected
-    && normalizedActual
-    && (normalizedActual === normalizedExpected
-      || normalizedActual.includes(normalizedExpected)
-      || normalizedExpected.includes(normalizedActual)),
-  );
-}
-
-function scoreResolvedCandidate(title: string, artist: string, song: SearchResultSong): number {
-  if (!textMatches(title, song.title)) {
-    return 0;
-  }
-
-  let score = normalizeSongText(title) === normalizeSongText(song.title) ? 100 : 60;
-  if (artist.trim()) {
-    if (!textMatches(artist, song.artist)) {
-      return 0;
-    }
-    score += normalizeSongText(artist) === normalizeSongText(song.artist) ? 40 : 20;
-  }
-  return score;
 }
 
 function sleep(ms: number): Promise<void> {

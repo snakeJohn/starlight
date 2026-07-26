@@ -1,6 +1,6 @@
 /**
- * Outbound URL validation for user-configured webhooks and similar fetch targets.
- * Blocks loopback, link-local, and common private ranges to reduce SSRF risk.
+ * Outbound URL validation for user-configured webhooks and online source import.
+ * Blocks loopback, private, link-local, multicast, reserved, and documentation ranges.
  */
 
 export type UrlValidationResult =
@@ -28,7 +28,93 @@ function inCidr(ip: number, base: string, prefix: number): boolean {
   return (ip & mask) === (baseInt & mask);
 }
 
-/** True when host resolves to a non-public address we refuse for outbound webhooks. */
+/**
+ * Expand an IPv6 literal into 8 hextets.
+ * Supports compressed form and an embedded IPv4 tail (e.g. ::ffff:127.0.0.1).
+ */
+function expandIpv6Hextets(host: string): number[] | null {
+  let raw = host.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!raw.includes(':')) return null;
+  if (raw.includes(':::')) return null;
+
+  const v4Tail = raw.match(/:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (v4Tail && isIpv4(v4Tail[1])) {
+    const [a, b, c, d] = v4Tail[1].split('.').map(Number);
+    const hi = ((a << 8) | b).toString(16);
+    const lo = ((c << 8) | d).toString(16);
+    raw = `${raw.slice(0, -v4Tail[1].length)}${hi}:${lo}`;
+  }
+
+  const sides = raw.split('::');
+  if (sides.length > 2) return null;
+
+  const parseSide = (side: string): number[] | null => {
+    if (side === '') return [];
+    const parts = side.split(':');
+    const out: number[] = [];
+    for (const part of parts) {
+      if (!/^[0-9a-f]{1,4}$/i.test(part)) return null;
+      out.push(parseInt(part, 16));
+    }
+    return out;
+  };
+
+  if (sides.length === 1) {
+    const parts = parseSide(sides[0]);
+    if (!parts || parts.length !== 8) return null;
+    return parts;
+  }
+
+  const left = parseSide(sides[0]);
+  const right = parseSide(sides[1]);
+  if (!left || !right) return null;
+  const missing = 8 - left.length - right.length;
+  if (missing < 0) return null;
+  return [...left, ...Array(missing).fill(0), ...right];
+}
+
+function isBlockedIpv6(host: string): boolean {
+  const hextets = expandIpv6Hextets(host);
+  if (!hextets) {
+    // Unparseable with ':' — fail closed for SSRF targets.
+    return true;
+  }
+
+  const h = hextets;
+  // :: / unspecified
+  if (h.every((x) => x === 0)) return true;
+  // ::1 loopback
+  if (h[0] === 0 && h[1] === 0 && h[2] === 0 && h[3] === 0 && h[4] === 0 && h[5] === 0 && h[6] === 0 && h[7] === 1) {
+    return true;
+  }
+
+  // IPv4-mapped ::ffff:a.b.c.d
+  if (h[0] === 0 && h[1] === 0 && h[2] === 0 && h[3] === 0 && h[4] === 0 && h[5] === 0xffff) {
+    const a = (h[6] >> 8) & 0xff;
+    const b = h[6] & 0xff;
+    const c = (h[7] >> 8) & 0xff;
+    const d = h[7] & 0xff;
+    return isBlockedHostname(`${a}.${b}.${c}.${d}`);
+  }
+
+  // Deprecated IPv4-compatible ::a.b.c.d and other ::/96
+  if (h[0] === 0 && h[1] === 0 && h[2] === 0 && h[3] === 0 && h[4] === 0 && h[5] === 0) {
+    return true;
+  }
+
+  // Link-local fe80::/10
+  if (h[0] >= 0xfe80 && h[0] <= 0xfebf) return true;
+  // ULA fc00::/7
+  if ((h[0] & 0xfe00) === 0xfc00) return true;
+  // Multicast ff00::/8
+  if ((h[0] & 0xff00) === 0xff00) return true;
+  // Documentation 2001:db8::/32
+  if (h[0] === 0x2001 && h[1] === 0xdb8) return true;
+
+  return false;
+}
+
+/** True when host is a non-public address we refuse for outbound webhooks / online import. */
 export function isBlockedHostname(hostname: string): boolean {
   const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
   if (!host) return true;
@@ -36,18 +122,12 @@ export function isBlockedHostname(hostname: string): boolean {
     return true;
   }
 
-  // IPv6 loopback / link-local / ULA
   if (host.includes(':')) {
-    if (host === '::1' || host === '::') return true;
-    if (host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) return true;
-    // IPv4-mapped IPv6 ::ffff:a.b.c.d
-    const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
-    if (mapped) return isBlockedHostname(mapped[1]);
-    return false;
+    return isBlockedIpv6(host);
   }
 
   if (!isIpv4(host)) {
-    // Hostnames are allowed (user may point to a LAN name); IP-literal private ranges are blocked.
+    // Hostnames are allowed at the string layer; DNS resolution must still verify public A/AAAA.
     return false;
   }
 
@@ -59,6 +139,14 @@ export function isBlockedHostname(hostname: string): boolean {
   if (inCidr(ip, '172.16.0.0', 12)) return true;
   if (inCidr(ip, '192.168.0.0', 16)) return true;
   if (inCidr(ip, '100.64.0.0', 10)) return true; // CGNAT
+  if (inCidr(ip, '192.0.0.0', 24)) return true; // IETF protocol assignments
+  if (inCidr(ip, '192.0.2.0', 24)) return true; // TEST-NET-1
+  if (inCidr(ip, '198.51.100.0', 24)) return true; // TEST-NET-2
+  if (inCidr(ip, '203.0.113.0', 24)) return true; // TEST-NET-3
+  if (inCidr(ip, '198.18.0.0', 15)) return true; // benchmarking
+  if (inCidr(ip, '224.0.0.0', 4)) return true; // multicast
+  if (inCidr(ip, '240.0.0.0', 4)) return true; // reserved
+  if (ip === ipv4ToInt('255.255.255.255')) return true; // broadcast
   return false;
 }
 
@@ -66,7 +154,7 @@ export function isBlockedHostname(hostname: string): boolean {
  * Validate a webhook / outbound URL.
  * - Only http: and https:
  * - Reject credentials in userinfo
- * - Reject loopback / private / link-local IP literals
+ * - Reject loopback / private / link-local / multicast / reserved IP literals
  */
 export function validateOutboundWebhookUrl(raw: unknown): UrlValidationResult {
   if (typeof raw !== 'string' || !raw.trim()) {

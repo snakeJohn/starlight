@@ -1,14 +1,7 @@
 import { parseQuery } from '@songloft/plugin-sdk';
-import type { HTTPRequest, HTTPResponse, Router } from '@songloft/plugin-sdk';
+import type { HTTPRequest, Router } from '@songloft/plugin-sdk';
 import { sourceDiagnostics, type SourceDiagnosticOperation, type SourceDiagnosticStatus } from '../diagnostics/source_logs';
-import { apiError, apiOk } from '../system/response';
-
-function handle(fn: () => unknown | Promise<unknown>): Promise<HTTPResponse> {
-  return Promise.resolve()
-    .then(fn)
-    .then((data) => apiOk(data))
-    .catch((error) => apiError(error));
-}
+import { runApi } from '../system/response';
 
 function operationFilter(value: unknown): SourceDiagnosticOperation | 'all' {
   return value === 'playback' || value === 'download' ? value : 'all';
@@ -25,7 +18,7 @@ function limitFilter(value: unknown): number {
 
 export function registerDiagnosticsHandlers(router: Router): void {
   router.get('/api/diagnostics/source-logs', async (req: HTTPRequest) =>
-    handle(() => {
+    runApi(() => {
       const params = parseQuery(req.query || '');
       const logs = sourceDiagnostics.list({
         operation: operationFilter(params.operation),
@@ -36,7 +29,7 @@ export function registerDiagnosticsHandlers(router: Router): void {
     }));
 
   router.post('/api/diagnostics/source-logs/clear', async () =>
-    handle(() => {
+    runApi(() => {
       sourceDiagnostics.clear();
       return { ok: true };
     }));

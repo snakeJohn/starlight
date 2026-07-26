@@ -2,6 +2,7 @@
 // 翻译自 Go 源码: plugins/songloft-plugin-xiaomi/handlers/device_handler.go
 
 import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
+import { parseJsonBody } from '../system/body';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { MinaService } from '../service/service';
 import { AccountManager } from '../account/manager';
@@ -14,19 +15,6 @@ import {
 } from './playlist';
 import type { PlayerSong, PlaylistManagerMap } from '../player/manager';
 import { parseVolume } from '../utils/volume';
-
-/** 解析请求体（兼容 Uint8Array 和 string） */
-function parseBody(req: HTTPRequest): any {
-  if (!req.body) return {};
-  try {
-    const str = typeof req.body === 'string'
-      ? req.body
-      : String.fromCharCode.apply(null, Array.from(req.body as Uint8Array));
-    return JSON.parse(str);
-  } catch {
-    return {};
-  }
-}
 
 /**
  * 注册设备控制相关路由
@@ -92,7 +80,7 @@ export function registerDeviceHandlers(
   // POST /mina/volume - 设置音量
   router.post('/mina/volume', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { account_id, device_id, volume } = body;
       if (!account_id) {
         return jsonResponse({ success: false, error: 'account_id is required' });
@@ -121,7 +109,7 @@ export function registerDeviceHandlers(
   // POST /mina/play-url - 播放URL
   router.post('/mina/play-url', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { account_id, device_id, url } = body;
       if (!account_id) {
         return jsonResponse({ success: false, error: 'account_id is required' });
@@ -150,7 +138,7 @@ export function registerDeviceHandlers(
   // POST /mina/pause - 暂停播放
   router.post('/mina/pause', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { account_id, device_id } = body;
       if (!account_id) {
         return jsonResponse({ success: false, error: 'account_id is required' });
@@ -172,7 +160,7 @@ export function registerDeviceHandlers(
   // POST /mina/resume - 恢复播放
   router.post('/mina/resume', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { account_id, device_id } = body;
       if (!account_id) {
         return jsonResponse({ success: false, error: 'account_id is required' });
@@ -194,7 +182,7 @@ export function registerDeviceHandlers(
   // POST /mina/stop - 停止播放
   router.post('/mina/stop', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { account_id, device_id } = body;
       if (!account_id) {
         return jsonResponse({ success: false, error: 'account_id is required' });
@@ -216,7 +204,7 @@ export function registerDeviceHandlers(
   // POST /mina/tts - 让音箱播报指定文字（TTS）
   router.post('/mina/tts', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { account_id, device_id, text } = body;
       const textLength = typeof text === 'string' ? text.length : 0;
       songloft.log.info(`[/mina/tts] request account_id=${account_id || ''} device_id=${device_id || ''} text_length=${textLength}`);
@@ -316,7 +304,7 @@ export function registerDeviceHandlers(
   // POST /mina/device/managed - 更新设备管理状态
   router.post('/mina/device/managed', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { account_id, device_id, managed } = body;
       if (!account_id) {
         return jsonResponse({ success: false, error: 'account_id is required' });
@@ -346,7 +334,7 @@ export function registerDeviceHandlers(
   // POST /mina/last_selection - 记录最后选中设备
   router.post('/mina/last_selection', async (req: HTTPRequest) => {
     try {
-      const body = parseBody(req);
+      const body = parseJsonBody<any>(req);
       const { account_id, device_id } = body;
       if (!account_id) {
         return jsonResponse({ success: false, error: 'account_id is required' });

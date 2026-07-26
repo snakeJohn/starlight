@@ -1,6 +1,21 @@
 import { api } from '../api.js';
-import { $, $$, durationLabel, selectedDevicePayload, setState, state, toast } from '../state.js';
+import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from '../state.js';
 import { getCurrentLyricIndex, parseLrc } from './lrc_parser.js';
+import {
+    browserPlayerAction,
+    getBrowserPlaybackStatus,
+    getBrowserQueueSnapshot,
+    hasBrowserQueue,
+    pauseBrowserPlayback,
+    playBrowserQueue,
+    subscribeBrowserPlayback,
+} from './browser_player.js';
+import {
+    clearPendingTargetHint,
+    getSelectedPlaybackTarget,
+    onPlaybackTargetChange,
+    setActivePlayingTarget,
+} from './playback_target.js';
 
 const PLAYER_POLL_MS = 5000;
 
@@ -16,6 +31,9 @@ let playerPollTimer = null;
 let isCurrentlyPlaying = false;
 let currentCanSeek = false;
 
+/** Last non-empty speaker status (for speaker → browser handoff). */
+let lastSpeakerPlayback = null;
+
 function selectedPayload(extra = {}) {
     const payload = { ...selectedDevicePayload(), ...extra };
     if (!payload.account_id || !payload.device_id) {
@@ -30,13 +48,17 @@ export function setSpeakerMessage(message) {
 }
 
 export function updatePlayerToggleButton(playerState = state.speakerPlayerState) {
-    const paused = playerState === 'paused';
-    const label = paused ? '继续播放' : '暂停播放';
+    // Idle/stopped → Play; paused → Resume; only playing → Pause.
+    // (Old logic treated every non-paused state as playing, so idle showed 暂停播放.)
+    const isPlaying = playerState === 'playing';
+    const isPaused = playerState === 'paused';
+    const label = isPlaying ? '暂停播放' : isPaused ? '继续播放' : '播放';
+    const showPlayIcon = !isPlaying;
     $$('[data-action="speaker-player-toggle"]').forEach(button => {
         const icon = button.querySelector?.('[data-role="speaker-player-play-icon"], [data-role="global-player-play-icon"], [data-role="fullscreen-player-play-icon"]');
         if (icon) {
             icon.classList?.remove?.('fa-play', 'fa-pause');
-            icon.classList?.add?.(paused ? 'fa-play' : 'fa-pause');
+            icon.classList?.add?.(showPlayIcon ? 'fa-play' : 'fa-pause');
         } else {
             button.textContent = label;
         }
@@ -152,7 +174,9 @@ function updateProgressSeekState() {
         if (currentCanSeek) {
             track.removeAttribute?.('title');
         } else {
-            track.setAttribute?.('title', '当前音箱播放暂不支持拖动跳转');
+            track.setAttribute?.('title', getSelectedPlaybackTarget() === 'browser'
+                ? '当前浏览器音频不支持拖动跳转'
+                : '当前音箱播放暂不支持拖动跳转');
         }
     }
 }
@@ -175,15 +199,6 @@ function renderActiveLyric(position = currentPosition) {
     const line = list.querySelector?.(`[data-lyric-index="${index}"]`);
     line?.classList?.add?.('active');
     line?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-}
-
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
 }
 
 function renderFullscreenLyrics(lyrics) {
@@ -227,6 +242,15 @@ function setCoverImage(src) {
     }
 }
 
+function isSameOriginUrl(url) {
+    try {
+        const parsed = new URL(url, window.location?.href || 'http://localhost');
+        return parsed.origin === (window.location?.origin || parsed.origin);
+    } catch {
+        return !/^https?:\/\//i.test(String(url || ''));
+    }
+}
+
 function loadCover(coverUrl) {
     if (coverUrl === currentCoverUrl) return;
     currentCoverUrl = coverUrl || '';
@@ -239,14 +263,22 @@ function loadCover(coverUrl) {
 
     if (!currentCoverUrl) return;
 
+    // External album art (e.g. kuwo CDN) cannot be fetched with auth headers (CORS).
+    // Use the browser's native image load for cross-origin URLs.
+    if (!isSameOriginUrl(currentCoverUrl)) {
+        setCoverImage(currentCoverUrl);
+        return;
+    }
+
     fetchWithAuth(currentCoverUrl)
         .then(blob => {
             currentCoverObjectUrl = URL.createObjectURL(blob);
             setCoverImage(currentCoverObjectUrl);
         })
         .catch(() => {
+            // Fall back to direct URL if authenticated fetch fails.
             currentCoverObjectUrl = '';
-            setCoverImage('');
+            setCoverImage(currentCoverUrl);
         });
 }
 
@@ -321,11 +353,17 @@ function startProgressAnimation() {
 
 export function renderPlayerStatus(status = {}) {
     const nextState = status.state || state.speakerPlayerState || 'idle';
-    const song = status.current_song || {};
+    const song = status.current_song || {
+        title: status.title,
+        artist: status.artist,
+        cover_url: status.cover_url,
+        lyric_url: status.lyric_url,
+    };
     const titleText = song.title
         ? `${song.title}${song.artist ? ` - ${song.artist}` : ''}`
         : '暂无播放信息';
-    const metaText = `${playStateLabel(nextState)} · ${playModeLabel(status.play_mode)} · ${durationLabel(status.position)}/${durationLabel(status.duration)}`;
+    const targetHint = status.target === 'browser' ? '浏览器' : status.target === 'speaker' ? '智能音箱' : '';
+    const metaText = `${playStateLabel(nextState)} · ${playModeLabel(status.play_mode)}${targetHint ? ` · ${targetHint}` : ''} · ${durationLabel(status.position)}/${durationLabel(status.duration)}`;
     const songTitle = song.title || '暂无播放';
     const songArtist = song.artist || '-';
 
@@ -387,13 +425,212 @@ export function renderPlayerStatus(status = {}) {
     updatePlayerToggleButton(nextState);
 }
 
+function speakerStatusLooksEmpty(status) {
+    if (!status || typeof status !== 'object') return true;
+    const song = status.current_song || null;
+    const title = status.title || song?.title || song?.name || '';
+    const playing = status.is_playing === true || status.state === 'playing' || status.state === 'paused';
+    // playlist_id may be 0 for standalone queues; trust song/title/playing instead.
+    return !title && !song && !playing;
+}
+
+/** Keep browser queue visible after switching to speaker until handoff/play. */
+function retainedBrowserStatusForSpeaker() {
+    if (!hasBrowserQueue()) return null;
+    const status = getBrowserPlaybackStatus();
+    return {
+        ...status,
+        state: status.state === 'playing' ? 'paused' : (status.state || 'paused'),
+        is_playing: false,
+        target: 'speaker',
+        retained_from_browser: true,
+    };
+}
+
+function rememberSpeakerPlayback(status) {
+    if (!status || typeof status !== 'object') return;
+    const queue = Array.isArray(status.queue) ? status.queue : [];
+    const song = status.current_song || null;
+    const title = status.title || song?.title || '';
+    if (!queue.length && !title && !song) return;
+    lastSpeakerPlayback = {
+        ...status,
+        queue: queue.length
+            ? queue
+            : (song || title
+                ? [{
+                    id: song?.id || 0,
+                    title: song?.title || status.title || '未知歌曲',
+                    artist: song?.artist || status.artist || '',
+                    cover_url: song?.cover_url || status.cover_url || '',
+                    lyric_url: song?.lyric_url || status.lyric_url || '',
+                    url: song?.url || status.url || '',
+                }]
+                : []),
+        current_index: Number.isFinite(Number(status.current_index)) ? Number(status.current_index) : 0,
+    };
+}
+
+function retainedSpeakerStatusForBrowser() {
+    if (!lastSpeakerPlayback) return null;
+    const song = lastSpeakerPlayback.current_song || lastSpeakerPlayback.queue?.[lastSpeakerPlayback.current_index] || lastSpeakerPlayback.queue?.[0];
+    if (!song && !lastSpeakerPlayback.title) return null;
+    return {
+        state: 'paused',
+        is_playing: false,
+        title: song?.title || lastSpeakerPlayback.title || '',
+        artist: song?.artist || lastSpeakerPlayback.artist || '',
+        cover_url: song?.cover_url || lastSpeakerPlayback.cover_url || '',
+        lyric_url: song?.lyric_url || lastSpeakerPlayback.lyric_url || '',
+        play_mode: lastSpeakerPlayback.play_mode || 'loop',
+        position: lastSpeakerPlayback.position || 0,
+        duration: lastSpeakerPlayback.duration || 0,
+        target: 'browser',
+        retained_from_speaker: true,
+        current_song: song || undefined,
+        queue_length: lastSpeakerPlayback.queue?.length || 0,
+        queue_index: lastSpeakerPlayback.current_index || 0,
+    };
+}
+
+function songsFromSpeakerPlayback(playback) {
+    if (!playback) return [];
+    if (Array.isArray(playback.queue) && playback.queue.length) {
+        return playback.queue.map((song) => ({
+            id: song.id,
+            title: song.title,
+            name: song.title,
+            artist: song.artist,
+            album: song.album,
+            cover_url: song.cover_url,
+            cover: song.cover_url,
+            lyric_url: song.lyric_url,
+            lyric: song.lyric_url,
+            url: song.url,
+            play_url: song.url,
+        }));
+    }
+    const song = playback.current_song;
+    if (song?.title || playback.title) {
+        return [{
+            id: song?.id || 0,
+            title: song?.title || playback.title,
+            name: song?.title || playback.title,
+            artist: song?.artist || playback.artist || '',
+            cover_url: song?.cover_url || playback.cover_url || '',
+            lyric_url: song?.lyric_url || playback.lyric_url || '',
+            url: song?.url || playback.url || '',
+        }];
+    }
+    return [];
+}
+
+/**
+ * Push the in-memory browser queue to the selected speaker device.
+ * Rotates so the current browser track starts first.
+ */
+export async function handoffBrowserQueueToSpeaker() {
+    const snapshot = getBrowserQueueSnapshot();
+    if (!snapshot.songs.length) {
+        throw new Error('没有可交接的浏览器播放队列');
+    }
+    const payload = selectedDevicePayload();
+    if (!payload.account_id || !payload.device_id) {
+        throw new Error('请先在音箱页选择账号和设备');
+    }
+
+    pauseBrowserPlayback();
+    const rotated = [
+        ...snapshot.songs.slice(snapshot.index),
+        ...snapshot.songs.slice(0, snapshot.index),
+    ];
+
+    const result = await api.post('/bridge/play-songlist', {
+        ...payload,
+        songs: rotated,
+    });
+    clearPendingTargetHint();
+    setActivePlayingTarget('speaker');
+    await refreshPlayerStatus().catch(() => null);
+    toast('已将当前队列推送到音箱');
+    return result;
+}
+
+/**
+ * Load the last speaker queue into the browser player and start playback.
+ */
+export async function handoffSpeakerQueueToBrowser() {
+    // Prefer a fresh speaker status (includes queue) when device is selected.
+    let playback = lastSpeakerPlayback;
+    if (state.accountId && state.deviceId) {
+        try {
+            const fresh = await api.get(`/miot/player/status?account_id=${encodeURIComponent(state.accountId)}&device_id=${encodeURIComponent(state.deviceId)}`);
+            if (fresh && !speakerStatusLooksEmpty(fresh)) {
+                rememberSpeakerPlayback(fresh);
+                playback = lastSpeakerPlayback;
+            }
+        } catch {
+            // fall back to cached speaker playback
+        }
+    }
+
+    const songs = songsFromSpeakerPlayback(playback);
+    if (!songs.length) {
+        throw new Error('浏览器暂无播放内容，请先选择歌曲播放');
+    }
+
+    const startIndex = Math.max(0, Math.min(Number(playback?.current_index) || 0, songs.length - 1));
+    const modeSelect = $('[data-role="speaker-player-mode"]');
+    if (modeSelect && playback?.play_mode) {
+        modeSelect.value = normalizePlayMode(playback.play_mode);
+    }
+
+    clearPendingTargetHint();
+    await playBrowserQueue(songs, { startIndex });
+    const status = getBrowserPlaybackStatus();
+    renderPlayerStatus(status);
+    toast('已在浏览器继续播放');
+    return status;
+}
+
 export async function refreshPlayerStatus() {
+    if (getSelectedPlaybackTarget() === 'browser') {
+        if (hasBrowserQueue()) {
+            const browserStatus = getBrowserPlaybackStatus();
+            renderPlayerStatus(browserStatus);
+            return browserStatus;
+        }
+        // Empty browser queue: keep showing retained speaker track until handoff play.
+        const retained = retainedSpeakerStatusForBrowser();
+        if (retained) {
+            renderPlayerStatus(retained);
+            return retained;
+        }
+        const browserStatus = getBrowserPlaybackStatus();
+        renderPlayerStatus(browserStatus);
+        return browserStatus;
+    }
     if (!state.accountId || !state.deviceId) {
-        renderPlayerStatus({ state: 'idle' });
-        return null;
+        const retained = retainedBrowserStatusForSpeaker();
+        renderPlayerStatus(retained || { state: 'idle' });
+        return retained;
     }
     const result = await api.get(`/miot/player/status?account_id=${encodeURIComponent(state.accountId)}&device_id=${encodeURIComponent(state.deviceId)}`);
-    renderPlayerStatus(result || {});
+    // Avoid wiping the now-playing card when speaker has no session yet but browser still has a queue.
+    if (speakerStatusLooksEmpty(result) && hasBrowserQueue()) {
+        const retained = retainedBrowserStatusForSpeaker();
+        if (retained) {
+            renderPlayerStatus(retained);
+            return retained;
+        }
+    }
+    if (!speakerStatusLooksEmpty(result)) {
+        rememberSpeakerPlayback(result);
+    }
+    renderPlayerStatus({ ...(result || {}), target: 'speaker' });
+    if (result?.state === 'playing' || result?.is_playing) {
+        setActivePlayingTarget('speaker');
+    }
     return result;
 }
 
@@ -436,6 +673,49 @@ async function togglePlayerPlayback() {
 
 export async function runPlayerAction(action, options = {}) {
     const command = String(action || '').replace(/^speaker-player-/, '');
+    const modeSelect = $('[data-role="speaker-player-mode"]');
+    const selectedMode = command === 'mode'
+        ? normalizePlayMode(options.playMode || modeSelect?.value || 'loop')
+        : '';
+    if (selectedMode && modeSelect) {
+        modeSelect.value = selectedMode;
+    }
+
+    if (getSelectedPlaybackTarget() === 'browser') {
+        if (command === 'refresh') {
+            return await refreshPlayerStatus() || {};
+        }
+        // Speaker → browser: empty browser queue should resume from last speaker session.
+        if ((command === 'toggle' || command === 'next' || command === 'previous') && !hasBrowserQueue()) {
+            try {
+                return await handoffSpeakerQueueToBrowser();
+            } catch (error) {
+                // fall through to browser action for clearer empty-queue message if handoff fails
+                const message = error instanceof Error ? error.message : String(error);
+                if (!/暂无播放内容|没有可播放|没有可交接/.test(message)) {
+                    throw error;
+                }
+            }
+        }
+        try {
+            const result = await browserPlayerAction(command, {
+                playMode: selectedMode || modeSelect?.value || 'loop',
+                position: options.position,
+            });
+            clearPendingTargetHint();
+            renderPlayerStatus(result);
+            return result;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if ((command === 'toggle' || command === 'next' || command === 'previous')
+                && /暂无播放内容|播放队列为空|没有可播放/.test(message)
+                && lastSpeakerPlayback) {
+                return await handoffSpeakerQueueToBrowser();
+            }
+            throw error;
+        }
+    }
+
     const endpointMap = {
         previous: '/miot/player/previous',
         toggle: '/miot/player/toggle',
@@ -451,21 +731,38 @@ export async function runPlayerAction(action, options = {}) {
     const endpoint = endpointMap[command];
     if (!endpoint) throw new Error('未知播放控制命令');
 
-    const modeSelect = $('[data-role="speaker-player-mode"]');
-    const selectedMode = command === 'mode'
-        ? normalizePlayMode(options.playMode || modeSelect?.value || 'loop')
-        : '';
-    if (selectedMode && modeSelect) {
-        modeSelect.value = selectedMode;
+    // Browser → speaker: toggle/next/previous with no speaker playlist should hand off the browser queue.
+    if ((command === 'toggle' || command === 'next' || command === 'previous') && hasBrowserQueue()) {
+        try {
+            if (command === 'toggle') {
+                return await togglePlayerPlayback();
+            }
+            const result = await api.post(endpoint, selectedPayload());
+            clearPendingTargetHint();
+            setActivePlayingTarget('speaker');
+            await refreshPlayerStatus().catch(() => null);
+            return result || {};
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (/no playlist loaded|select a playlist first|没有.*歌单|playlist/i.test(message)) {
+                return await handoffBrowserQueueToSpeaker();
+            }
+            throw error;
+        }
     }
+
     const result = command === 'toggle'
         ? await togglePlayerPlayback()
         : await api.post(endpoint, selectedPayload(command === 'mode' ? { play_mode: selectedMode || modeSelect?.value || 'order' } : {}));
 
+    clearPendingTargetHint();
+    setActivePlayingTarget('speaker');
     if (command === 'stop') {
-        renderPlayerStatus({ state: 'stopped', play_mode: modeSelect?.value || 'order', position: 0, duration: 0 });
+        renderPlayerStatus({ state: 'stopped', play_mode: modeSelect?.value || 'order', position: 0, duration: 0, target: 'speaker' });
     } else if (command !== 'toggle') {
         await refreshPlayerStatus().catch(() => null);
+    } else if (result) {
+        renderPlayerStatus({ ...result, target: 'speaker' });
     }
     return result || {};
 }
@@ -482,11 +779,20 @@ function getPositionFromEvent(event, track, duration) {
 }
 
 async function seekToPosition(seconds) {
+    if (!currentCanSeek) {
+        throw new Error(getSelectedPlaybackTarget() === 'browser'
+            ? '当前浏览器音频不支持拖动跳转'
+            : '当前音箱播放暂不支持拖动跳转');
+    }
+
+    if (getSelectedPlaybackTarget() === 'browser') {
+        const result = await browserPlayerAction('seek', { position: seconds });
+        renderPlayerStatus(result);
+        return result;
+    }
+
     if (!state.accountId || !state.deviceId) {
         throw new Error('请先选择账号和设备');
-    }
-    if (!currentCanSeek) {
-        throw new Error('当前音箱播放暂不支持拖动跳转');
     }
 
     const result = await api.post('/miot/player/seek', {
@@ -517,8 +823,53 @@ function cleanupProgressHandlers() {
     }
 }
 
+let browserStatusUnsub = null;
+
+let targetChangeBound = false;
+
+export function bindBrowserStatusBridge() {
+    if (browserStatusUnsub) return;
+    browserStatusUnsub = subscribeBrowserPlayback((status) => {
+        if (getSelectedPlaybackTarget() !== 'browser') return;
+        renderPlayerStatus(status);
+    });
+}
+
+export function bindPlaybackTargetHandoff() {
+    if (targetChangeBound) return;
+    targetChangeBound = true;
+    onPlaybackTargetChange((next, previous) => {
+        if (previous === 'browser' && next === 'speaker') {
+            // Keep queue + now-playing card; stop browser audio so two devices don't fight.
+            pauseBrowserPlayback();
+            const retained = retainedBrowserStatusForSpeaker();
+            if (retained) {
+                renderPlayerStatus(retained);
+                return;
+            }
+        }
+        // Selecting browser: keep current card (speaker session) if browser queue is empty.
+        if (next === 'browser') {
+            if (hasBrowserQueue()) {
+                renderPlayerStatus(getBrowserPlaybackStatus());
+                return;
+            }
+            const retained = retainedSpeakerStatusForBrowser();
+            if (retained) {
+                renderPlayerStatus(retained);
+                return;
+            }
+            renderPlayerStatus(getBrowserPlaybackStatus());
+            return;
+        }
+        refreshPlayerStatus().catch(() => null);
+    });
+}
+
 export function bindProgressInteraction() {
     cleanupProgressHandlers();
+    bindBrowserStatusBridge();
+    bindPlaybackTargetHandoff();
     updateProgressSeekState();
 
     const scopes = ['speaker-player', 'global-player', 'fullscreen-player'];
@@ -533,7 +884,9 @@ export function bindProgressInteraction() {
         addProgressHandler(track, 'mousedown', (event) => {
             if (currentDuration <= 0) return;
             if (!currentCanSeek) {
-                toast('当前音箱播放暂不支持拖动跳转', 'error');
+                toast(getSelectedPlaybackTarget() === 'browser'
+                    ? '当前浏览器音频不支持拖动跳转'
+                    : '当前音箱播放暂不支持拖动跳转', 'error');
                 return;
             }
             isDragging = true;

@@ -1,12 +1,19 @@
-import type { HTTPResponse, Router } from '@songloft/plugin-sdk';
+import type { Router } from '@songloft/plugin-sdk';
 import { CustomPlaylistService } from '../custom_playlists/service';
 import type { CustomPlaylistSong, SongListDetail } from '../custom_playlists/types';
 import type { PlatformRegistry } from '../music/platforms/registry';
 import type { MusicPlatformProvider } from '../music/platforms/types';
+import { loadFullSonglist } from '../music/songlist_loader';
 import type { MusicPlatform, SearchResultSong } from '../music/types';
 import { parseJsonBody } from '../system/body';
 import { StarlightError } from '../system/errors';
-import { apiError, apiOk } from '../system/response';
+import {
+  objectField,
+  requirePositiveInteger,
+  requireString,
+  stringishField,
+} from '../system/fields';
+import { runApi } from '../system/response';
 
 interface NameBody {
   name?: unknown;
@@ -29,47 +36,6 @@ interface ImportSongloftBody {
   playlist_id?: unknown;
   id?: unknown;
   name?: unknown;
-}
-
-const IMPORT_PAGE_SIZE = 100;
-const MAX_IMPORT_PAGES = 100;
-
-function handle(fn: () => unknown | Promise<unknown>, statusCode = 200): Promise<HTTPResponse> {
-  return Promise.resolve()
-    .then(fn)
-    .then((data) => apiOk(data, statusCode))
-    .catch((error) => apiError(error, statusFor(error)));
-}
-
-function statusFor(error: unknown): number {
-  if (error instanceof StarlightError) {
-    if (error.code === 'BAD_REQUEST' || error.code === 'MUSIC_PLATFORM_UNSUPPORTED') {
-      return 400;
-    }
-  }
-  return 500;
-}
-
-function stringField(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function stringishField(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return '';
-}
-
-function objectField(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function requireString(value: unknown, name: string): string {
-  const text = stringField(value);
-  if (!text) {
-    throw new StarlightError('BAD_REQUEST', `${name} is required`);
-  }
-  return text;
 }
 
 function providerFor(platforms: PlatformRegistry, id: unknown): { provider: MusicPlatformProvider; source: MusicPlatform } {
@@ -137,19 +103,6 @@ function importId(body: ImportBody): string {
   return requireString(body.id || body.sourceListId || body.source_list_id || body.link || body.url, 'id');
 }
 
-function numericTotal(value: unknown): number {
-  const total = Number(value);
-  return Number.isFinite(total) && total > 0 ? Math.floor(total) : 0;
-}
-
-function requirePositiveInteger(value: unknown, name: string): number {
-  const numeric = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
-  if (typeof numeric !== 'number' || !Number.isInteger(numeric) || numeric <= 0) {
-    throw new StarlightError('BAD_REQUEST', `invalid ${name}`);
-  }
-  return numeric;
-}
-
 function normalizeSongloftSongs(value: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(value)) {
     return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)));
@@ -167,35 +120,12 @@ function normalizeSongloftSongs(value: unknown): Array<Record<string, unknown>> 
 }
 
 async function loadSongListDetail(provider: MusicPlatformProvider, id: string): Promise<SongListDetail> {
-  const first = await provider.songListDetail(id, 1, IMPORT_PAGE_SIZE) as SongListDetail;
-  const songs = Array.isArray(first.songs) ? [...first.songs] : [];
-  const total = numericTotal(first.total);
-
-  let page = 2;
-  while (
-    page <= MAX_IMPORT_PAGES
-    && (
-      (total > 0 && songs.length < total)
-      || (total === 0 && songs.length > 0 && songs.length % IMPORT_PAGE_SIZE === 0)
-    )
-  ) {
-    const detail = await provider.songListDetail(id, page, IMPORT_PAGE_SIZE) as SongListDetail;
-    const pageSongs = Array.isArray(detail.songs) ? detail.songs : [];
-    if (pageSongs.length === 0) {
-      break;
-    }
-    songs.push(...pageSongs);
-    if (pageSongs.length < IMPORT_PAGE_SIZE) {
-      break;
-    }
-    page += 1;
-  }
-
+  const detail = await loadFullSonglist(provider, id);
   return {
-    name: first.name || id,
-    cover_url: first.cover_url || first.cover || first.img || '',
-    songs: total > 0 ? songs.slice(0, total) : songs,
-    total: total || songs.length,
+    name: detail.name,
+    cover_url: detail.cover_url,
+    songs: detail.songs,
+    total: detail.total,
   };
 }
 
@@ -204,16 +134,16 @@ export function registerCustomPlaylistHandlers(
   service: CustomPlaylistService,
   platforms: PlatformRegistry,
 ): void {
-  router.get('/api/custom-playlists', async () => handle(() => service.list()));
+  router.get('/api/custom-playlists', async () => runApi(() => service.list()));
 
   router.post('/api/custom-playlists', async (req) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<NameBody>(req);
       return service.create(requireString(body.name, 'name'));
     }, 201));
 
   router.post('/api/custom-playlists/import', async (req) =>
-    handle(async () => {
+    runApi(async () => {
       const body = parseJsonBody<ImportBody>(req);
       const { provider, source } = providerFor(platforms, body.source_id);
       const sourceListId = importId(body);
@@ -222,7 +152,7 @@ export function registerCustomPlaylistHandlers(
     }, 201));
 
   router.post('/api/custom-playlists/import-songloft', async (req) =>
-    handle(async () => {
+    runApi(async () => {
       const body = parseJsonBody<ImportSongloftBody>(req);
       const playlistId = requirePositiveInteger(body.playlist_id ?? body.id, 'playlist_id');
       const songs = normalizeSongloftSongs(await songloft.playlists.getSongs(playlistId));
@@ -234,16 +164,16 @@ export function registerCustomPlaylistHandlers(
     }, 201));
 
   router.post('/api/custom-playlists/:id/refresh', async (_req, params) =>
-    handle(() => service.refreshNetworkPlaylist(requireString(params.id, 'id'), async (source, sourceListId) => {
+    runApi(() => service.refreshNetworkPlaylist(requireString(params.id, 'id'), async (source, sourceListId) => {
       const provider = providerFor(platforms, source).provider;
       return loadSongListDetail(provider, sourceListId);
     })));
 
   router.post('/api/custom-playlists/:id/sync-songloft', async (_req, params) =>
-    handle(() => service.syncToSongloftPlaylist(requireString(params.id, 'id'))));
+    runApi(() => service.syncToSongloftPlaylist(requireString(params.id, 'id'))));
 
   router.post('/api/custom-playlists/:id/songs', async (req, params) =>
-    handle(async () => {
+    runApi(async () => {
       const id = requireString(params.id, 'id');
       const playlist = (await service.list()).find((item) => item.id === id);
       if (!playlist) {
@@ -254,11 +184,11 @@ export function registerCustomPlaylistHandlers(
     }));
 
   router.put('/api/custom-playlists/:id', async (req, params) =>
-    handle(() => {
+    runApi(() => {
       const body = parseJsonBody<NameBody>(req);
       return service.rename(requireString(params.id, 'id'), requireString(body.name, 'name'));
     }));
 
   router.delete('/api/custom-playlists/:id', async (_req, params) =>
-    handle(() => service.delete(requireString(params.id, 'id'))));
+    runApi(() => service.delete(requireString(params.id, 'id'))));
 }

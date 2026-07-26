@@ -10,13 +10,9 @@ import {
   type LxUserListInfo,
 } from './types';
 
-const PLATFORM_SOURCE_NAMES: Record<LxMusicPlatform, string> = {
-  kw: '酷我',
-  kg: '酷狗',
-  tx: 'QQ 音乐',
-  mg: '咪咕',
-  wy: '网易云',
-};
+import { PLATFORM_SOURCE_NAMES as SHARED_PLATFORM_NAMES } from '../utils/song_match';
+
+const PLATFORM_SOURCE_NAMES: Record<LxMusicPlatform, string> = SHARED_PLATFORM_NAMES;
 
 const ONLINE_PLATFORMS = new Set<string>(['kw', 'kg', 'tx', 'mg', 'wy']);
 
