@@ -1,7 +1,7 @@
 import { createRouter } from '@songloft/plugin-sdk';
 import type { HTTPRequest, HTTPResponse } from '@songloft/plugin-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { BridgeService } from '../../src/bridge/service';
+import { BridgeService, resolvePlayerSongLyric } from '../../src/bridge/service';
 import { registerBridgeHandlers } from '../../src/handlers/bridge';
 import { OnlineSearcher } from '../../src/voicecmd/online_searcher';
 import { setHostBaseUrl } from '../../src/utils/http';
@@ -875,7 +875,23 @@ describe('BridgeService', () => {
     ], 0, 'order');
   });
 
-  it('fills parseable inline lyrics after pushing a direct source stream to the speaker', async () => {
+  it('hands the speaker queue songs that carry source_data so the manager can fill lyrics', async () => {
+    // 歌词补全的归属已移交 PlaylistManager（见 tests/player/lyric_ownership.test.ts）。
+    // BridgeService 这边的契约只剩一条：交给管理器的队列必须带上 source_data，
+    // 否则管理器无从解析。
+    const { service, playlistManager } = createService({ usePlaylistManager: true });
+
+    await expect(service.playSonglistOnSpeaker('acc-1', 'dev-1', [txSong])).resolves.toEqual({
+      urls: ['https://audio.test/song.mp3'],
+    });
+
+    const [queue] = playlistManager.playStandalone.mock.calls[0] as unknown as [Array<Record<string, unknown>>];
+    // 直连音源没有宿主歌曲 ID，只能靠内联歌词兜底
+    expect(queue[0]).toMatchObject({ id: 0, lyric_url: '' });
+    expect(queue[0].source_data).toMatchObject({ platform: txSong.source_data.platform });
+  });
+
+  it('normalizes lyric time tags so the frontend parser can read them', async () => {
     // 一位分钟 / 一位小数的时间标签前端 parseLrc 认不出来，必须归一化后再下发。
     const rawLrc = '[ti:风起天阑]\n[0:01.5]第一句\n[00:12.34]第二句';
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -885,20 +901,20 @@ describe('BridgeService', () => {
       }
       throw new Error(`Unexpected fetch ${url}`);
     });
-    const { service, playlistManager } = createService({ usePlaylistManager: true });
 
-    await expect(service.playSonglistOnSpeaker('acc-1', 'dev-1', [txSong])).resolves.toEqual({
-      urls: ['https://audio.test/song.mp3'],
-    });
-    await flushBackgroundSync();
+    const lyric = await resolvePlayerSongLyric({
+      title: '风起天阑',
+      source_data: {
+        platform: txSong.source_data.platform,
+        quality: txSong.source_data.quality,
+        songInfo: txSong.source_data.songInfo as unknown as Record<string, unknown>,
+      },
+    } as unknown as Parameters<typeof resolvePlayerSongLyric>[0]);
 
-    const [queue] = playlistManager.playStandalone.mock.calls[0] as unknown as [Array<Record<string, unknown>>];
-    // 直连音源没有宿主歌曲 ID，只能靠内联歌词兜底。
-    expect(queue[0]).toMatchObject({ id: 0, lyric_url: '' });
-    expect(queue[0].lyric_text).toBe('[ti:风起天阑]\n[00:01.500]第一句\n[00:12.340]第二句');
+    expect(lyric).toBe('[ti:风起天阑]\n[00:01.500]第一句\n[00:12.340]第二句');
     // 与 static/js/speaker_modules/lrc_parser.js 的 parseLrc 时间标签保持一致。
     const parserTimeTag = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/;
-    for (const line of String(queue[0].lyric_text).split('\n').slice(1)) {
+    for (const line of lyric.split('\n').slice(1)) {
       expect(line).toMatch(parserTimeTag);
     }
   });
@@ -925,19 +941,18 @@ describe('BridgeService', () => {
     vi.useRealTimers();
   });
 
-  it('keeps speaker playback working when the deferred lyric fill fails', async () => {
-    const warnSpy = vi.spyOn(songloft.log, 'warn');
+  it('returns an empty lyric instead of throwing when the lyric upstream fails', async () => {
+    // 歌词永远不该影响播放：解析失败要安静地返回空串，由调用方跳过。
     globalThis.fetch = vi.fn(async () => responseJson({ message: 'lyric upstream down' }, 500));
-    const { service, playlistManager } = createService({ usePlaylistManager: true });
 
-    await expect(service.playSonglistOnSpeaker('acc-1', 'dev-1', [txSong])).resolves.toEqual({
-      urls: ['https://audio.test/song.mp3'],
-    });
-    await flushBackgroundSync();
-
-    const [queue] = playlistManager.playStandalone.mock.calls[0] as unknown as [Array<Record<string, unknown>>];
-    expect(queue[0].lyric_text).toBeUndefined();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Player lyric fill failed'));
+    await expect(resolvePlayerSongLyric({
+      title: '风起天阑',
+      source_data: {
+        platform: txSong.source_data.platform,
+        quality: txSong.source_data.quality,
+        songInfo: txSong.source_data.songInfo as unknown as Record<string, unknown>,
+      },
+    } as unknown as Parameters<typeof resolvePlayerSongLyric>[0])).resolves.toBe('');
   });
 
   it('throws DEVICE_OFFLINE when MIoT speaker playback fails', async () => {

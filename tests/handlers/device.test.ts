@@ -28,6 +28,58 @@ function parseResponseBody(response: HTTPResponse): any {
 }
 
 describe('registerDeviceHandlers', () => {
+  it('routes /mina/pause through PlaylistManager so the auto-advance timer stops', async () => {
+    // 只调 minaService.pausePlay() 会让管理器停在 playing、切歌定时器继续跑，
+    // 于是切到浏览器后音箱会在下一首到点时自己重新出声。
+    const router = createRouter();
+    const minaService = {
+      pausePlay: vi.fn(async () => true),
+    } as unknown as MinaService;
+    const manager = { pause: vi.fn(async () => undefined) };
+    const playlistManagerMap = {
+      getOrCreate: vi.fn(async () => manager),
+    };
+
+    (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+      router,
+      minaService,
+      {} as AccountManager,
+      playlistManagerMap,
+    );
+
+    const response = await router.handle(request('POST', '/mina/pause', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+    }));
+
+    expect(parseResponseBody(response).success).toBe(true);
+    expect(playlistManagerMap.getOrCreate).toHaveBeenCalledWith('acc-1', 'dev-1');
+    expect(manager.pause).toHaveBeenCalledTimes(1);
+    // manager.pause() 内部会停设备，handler 不该再自己调一次
+    expect(minaService.pausePlay).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a bare device pause when no PlaylistManagerMap is wired', async () => {
+    const router = createRouter();
+    const minaService = {
+      pausePlay: vi.fn(async () => true),
+    } as unknown as MinaService;
+
+    (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+      router,
+      minaService,
+      {} as AccountManager,
+    );
+
+    const response = await router.handle(request('POST', '/mina/pause', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+    }));
+
+    expect(parseResponseBody(response).success).toBe(true);
+    expect(minaService.pausePlay).toHaveBeenCalledWith('acc-1', 'dev-1');
+  });
+
   it('rejects non-finite volume values before calling Mina service', async () => {
     const router = createRouter();
     const minaService = {

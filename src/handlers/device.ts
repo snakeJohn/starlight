@@ -146,9 +146,20 @@ export function registerDeviceHandlers(
       if (!device_id) {
         return jsonResponse({ success: false, error: 'device_id is required' });
       }
-      const ok = await minaService.pausePlay(account_id, device_id);
-      if (!ok) {
-        return jsonResponse({ success: false, error: 'failed to pause' });
+      // 必须经 PlaylistManager 暂停，不能只停物理设备：管理器持有自动切歌定时器，
+      // 只暂停设备的话它仍处于 playing，定时器到期就会把下一首推给音箱——
+      // 切到浏览器播放后音箱会自己重新出声。
+      // manager.pause() 内部会调用 minaService.pausePlay()，所以不必再调一次。
+      const manager = playlistManagerMap
+        ? await playlistManagerMap.getOrCreate(account_id, device_id)
+        : null;
+      if (manager) {
+        await manager.pause();
+      } else {
+        const ok = await minaService.pausePlay(account_id, device_id);
+        if (!ok) {
+          return jsonResponse({ success: false, error: 'failed to pause' });
+        }
       }
       updateDeviceStatusCache(account_id, device_id, { state: 'paused' });
       return jsonResponse({ success: true, data: { message: 'paused' } });

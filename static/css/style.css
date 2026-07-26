@@ -4367,7 +4367,7 @@ html[data-theme="dark"] {
 
 /* The 账号 card is far shorter than 设备; stretching it left ~160px of blank
    card, which reads as a rendering fault rather than as breathing room. */
-#tab-speaker 
+#tab-speaker
 
 /* 索引 metric tiles stacked label-over-value burned 68px each in a 290px
    column. Label left / value right keeps the vertical stacking (and the long
@@ -4448,7 +4448,7 @@ html[data-theme="dark"] {
         margin-bottom: 10px;
     }
 
-    #tab-speaker 
+    #tab-speaker
 
     /* children already carry the 10px margin-top above */
     #tab-speaker .speaker-side-stack {
@@ -5625,9 +5625,9 @@ label > .field-help,
     /* The rule above outranks `.speaker-top-layout > .surface-section{margin-top:0}`
        on id alone, which would double the top pair's gap (grid gap + margin).
        Restore it and let the grid own that distance. */
-    #tab-speaker 
+    #tab-speaker
 
-    #tab-speaker 
+    #tab-speaker
 
     #tab-speaker .panel-heading {
         margin-bottom: var(--space-4);

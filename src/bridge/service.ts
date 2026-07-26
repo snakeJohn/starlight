@@ -335,22 +335,10 @@ export class BridgeService {
       throw new StarlightError('DEVICE_OFFLINE', '音箱播放 URL 失败', true);
     }
 
-    if (this.playlistManagerMap) {
-      // 只有带 source_data 的条目才能解析歌词；已解析条目要么已有 /songs/{id}/lyric，
-      // 要么是外链直播流，没有可查的音源信息。两侧必须按下标成对过滤。
-      const fillPlayerSongs: PlayerSong[] = [];
-      const fillSourceSongs: SearchResultSong[] = [];
-      songs.forEach((song, index) => {
-        if (!isResolvedSpeakerSong(song)) {
-          fillPlayerSongs.push(playerSongs[index]);
-          fillSourceSongs.push(song);
-        }
-      });
-      if (fillSourceSongs.length > 0) {
-        startPlayerSongLyricFill(fillPlayerSongs, fillSourceSongs);
-      }
-    }
-
+    // 歌词补全由 PlaylistManager 独家负责：它持有队列、知道何时切歌，
+    // 会在每次切歌时补当前曲与下一曲。这里不能再补一遍，否则前几首会被
+    // 两套实现重复解析——两边不共享 in-flight 状态，音源限流时反而降低成功率，
+    // 且响应先后不同会互相覆盖。playerSongs 已带 source_data，管理器据此解析。
     return { urls };
   }
 
@@ -489,10 +477,7 @@ export class BridgeService {
         return null;
       }
 
-      if (this.playlistManagerMap) {
-        startPlayerSongLyricFill([playerSong], [song]);
-      }
-
+      // 同上：歌词由 PlaylistManager 在切歌时按需补，不在这里重复发起。
       return target.url;
     } catch (error) {
       failures.push(sanitizeProviderError(error));
@@ -628,7 +613,7 @@ function withPlaybackQuality(song: SearchResultSong, quality: MusicQuality): Sea
 
 /**
  * @param songId Songloft 歌曲 ID；0 表示直连音源 URL，宿主没有这首歌，
- *   此时 lyric_url 只能留空，改由 startPlayerSongLyricFill 异步补 lyric_text。
+ *   此时 lyric_url 只能留空，改由 PlaylistManager 在切歌时按需补 lyric_text。
  */
 function toPlayerSong(song: Omit<SpeakerQueueEntry, 'source_data' | 'playback_url' | 'song_id'>, url: string, songId = 0): PlayerSong {
   return {
@@ -968,61 +953,6 @@ type ImportedSongPair = {
   song: SearchResultSong;
   imported: SongloftRemoteSong;
 };
-
-type PlayerSongLyricPair = {
-  playerSong: PlayerSong;
-  song: SearchResultSong;
-};
-
-/**
- * 一次播放最多补几首歌词：整条队列一起抓会打爆音源接口，
- * 而且用户看得见的只有当前这首和紧随其后的几首。
- */
-const PLAYER_SONG_LYRIC_FILL_LIMIT = 3;
-
-/**
- * 播放已被音箱接受之后，为没有宿主歌词端点（lyric_url 为空，即 songId 0 的直连音源）
- * 的 PlayerSong 异步补内联歌词。PlaylistManager 持有同一批对象引用，
- * 写回 song.lyric_text 后下一次 getStatus() 轮询即可带上。
- *
- * 绝不阻塞播放：调用方不 await，失败只告警，歌词缺失不能影响播放。
- */
-function startPlayerSongLyricFill(playerSongs: PlayerSong[], songs: SearchResultSong[]): void {
-  const pending: PlayerSongLyricPair[] = [];
-  for (const [index, playerSong] of playerSongs.entries()) {
-    const song = songs[index];
-    if (!song || playerSong.lyric_url || playerSong.lyric_text) {
-      continue;
-    }
-    pending.push({ playerSong, song });
-    if (pending.length >= PLAYER_SONG_LYRIC_FILL_LIMIT) {
-      break;
-    }
-  }
-  if (pending.length === 0) {
-    return;
-  }
-
-  void fillPlayerSongLyrics(pending).catch((error) => {
-    songloft.log.warn(`[BridgeService] Deferred player lyric fill failed: ${sanitizeProviderError(error)}`);
-  });
-}
-
-async function fillPlayerSongLyrics(pending: PlayerSongLyricPair[]): Promise<void> {
-  for (const pair of pending) {
-    try {
-      const lyric = await resolveMusicLyric(pair.song.source_data.platform, pair.song.source_data.songInfo);
-      const text = playerLyricText(lyric.lyric);
-      if (!text) {
-        songloft.log.warn(`[BridgeService] Player lyric fill got no usable LRC for "${pair.song.title}"`);
-        continue;
-      }
-      pair.playerSong.lyric_text = text;
-    } catch (error) {
-      songloft.log.warn(`[BridgeService] Player lyric fill failed for "${pair.song.title}": ${sanitizeProviderError(error)}`);
-    }
-  }
-}
 
 /**
  * 归一化时间标签为 `[MM:SS.mmm]` 后再下发。
