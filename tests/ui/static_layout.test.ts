@@ -753,14 +753,16 @@ describe('static UI layout copy', () => {
 
     expect(html).toContain('href="static/css/style.css"');
     expect(html).toContain('src="static/js/app.js"');
-    expect(html).toContain('href="static/icon.png"');
+    // WebP, not PNG: the icon is a 10k-colour gradient that PNG cannot compress
+    // (86 KB, and PNG does not shrink further inside the zip). See style.css too.
+    expect(html).toContain('href="static/icon.webp"');
     expect(html).not.toContain('/api/v1/jsplugin/starlight/static/');
     expect(api).toContain("const BASE = 'api'");
     expect(api).not.toContain('/api/v1/jsplugin');
     // Side-rail brand mark uses the plugin icon (not the letter "S").
     expect(app).toContain('class="brand-mark"');
     expect(app).not.toContain('brand-mark" aria-hidden="true">S</div>');
-    expect(stylesheet).toContain('url(../icon.png)');
+    expect(stylesheet).toContain('url(../icon.webp)');
   });
 
   it('maps Starlight visual tokens to Songloft and Material theme variables', () => {

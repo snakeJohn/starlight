@@ -128,7 +128,7 @@ textarea:disabled {
     display: block;
     flex-shrink: 0;
     background-color: var(--surface-elevated);
-    background-image: url(../icon.png);
+    background-image: url(../icon.webp);
     background-position: center;
     background-repeat: no-repeat;
     background-size: cover;
