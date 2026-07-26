@@ -539,7 +539,6 @@ export async function handoffBrowserQueueToSpeaker() {
         throw new Error('请先在音箱页选择账号和设备');
     }
 
-    pauseBrowserPlayback();
     const rotated = [
         ...snapshot.songs.slice(snapshot.index),
         ...snapshot.songs.slice(0, snapshot.index),
@@ -549,6 +548,7 @@ export async function handoffBrowserQueueToSpeaker() {
         ...payload,
         songs: rotated,
     });
+    pauseBrowserPlayback();
     clearPendingTargetHint();
     setActivePlayingTarget('speaker');
     await refreshPlayerStatus().catch(() => null);

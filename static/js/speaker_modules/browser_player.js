@@ -16,6 +16,8 @@ let index = 0;
 let playMode = 'loop';
 let statusListeners = new Set();
 let bound = false;
+let playGeneration = 0;
+let lastError = '';
 
 function ensureAudio() {
     if (audio) return audio;
@@ -28,9 +30,11 @@ function ensureAudio() {
         emitStatus();
     });
     audio.addEventListener('pause', () => emitStatus());
-    audio.addEventListener('ended', () => {
-        void handleEnded();
-    });
+    audio.addEventListener('ended', () =>
+        handleEnded().catch(error => {
+            lastError = error instanceof Error ? error.message : String(error);
+            emitStatus();
+        }));
     audio.addEventListener('error', () => emitStatus());
     return audio;
 }
@@ -188,8 +192,9 @@ export async function playBrowserQueue(songs, options = {}) {
 
 async function playIndex(next, options = {}) {
     if (!queue.length) throw new Error('播放队列为空');
-    index = ((next % queue.length) + queue.length) % queue.length;
-    const song = queue[index];
+    const targetIndex = ((next % queue.length) + queue.length) % queue.length;
+    const song = queue[targetIndex];
+    const generation = ++playGeneration;
     const el = ensureAudio();
     let url = '';
     try {
@@ -198,9 +203,13 @@ async function playIndex(next, options = {}) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`浏览器播放失败: ${message}`);
     }
+    if (generation !== playGeneration) return;
     if (!url) {
         throw new Error('浏览器播放失败: 无效的音频地址');
     }
+    const previousIndex = index;
+    const previousSrc = el.src;
+    index = targetIndex;
     if (options.restart || el.src !== url) {
         try {
             el.pause();
@@ -218,12 +227,24 @@ async function playIndex(next, options = {}) {
     try {
         await el.play();
     } catch (error) {
+        if (generation === playGeneration) {
+            index = previousIndex;
+            el.removeAttribute?.('src');
+            el.src = previousSrc;
+            try {
+                el.load?.();
+            } catch {
+                // ignore restore failures
+            }
+        }
         const message = error instanceof Error ? error.message : String(error);
         if (/no supported sources|empty src|not supported/i.test(message)) {
             throw new Error('浏览器播放失败: 当前歌曲没有可播放的音频源（地址无效或需要重新解析）');
         }
         throw new Error(`浏览器播放失败: ${message}`);
     }
+    if (generation !== playGeneration) return;
+    lastError = '';
     emitStatus();
 }
 
@@ -301,6 +322,7 @@ export function getBrowserPlaybackStatus() {
         queue_length: queue.length,
         queue_index: index,
         current_song: song || undefined,
+        error: lastError || undefined,
     };
 }
 
