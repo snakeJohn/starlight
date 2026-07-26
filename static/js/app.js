@@ -66,7 +66,10 @@ function renderNavigation() {
                     </button>
                 `).join('')}
             </nav>
-            <div class="rail-footer">音源与同步在「设置」</div>
+            <div class="rail-footer">
+                <strong>音源与同步</strong>
+                <span>在「设置」中管理</span>
+            </div>
         `;
     }
 
@@ -165,6 +168,26 @@ function bindNavigation() {
     });
 }
 
+function connectionTone(initStatus) {
+    if (failedDomains(initStatus).length) return 'danger';
+    const pending = initDomains.some(domain => initStatus?.[domain.id]?.status === 'running' || initStatus?.[domain.id]?.status === 'idle');
+    return pending ? 'warning' : 'success';
+}
+
+/**
+ * One hairline-separated meta line, not a row of badges. The tone lives in a
+ * dot so the value keeps full text contrast, and the connection state leads
+ * the line instead of floating alone against the far right edge.
+ */
+function statusChip({ label = '', value, tone = '', className = '' }) {
+    const classes = ['status-chip', className].filter(Boolean).join(' ');
+    return `<span class="${classes}"${tone ? ` data-tone="${tone}"` : ''}>`
+        + (tone ? '<span class="status-dot" aria-hidden="true"></span>' : '')
+        + (label ? `<strong>${escapeHtml(label)}</strong>` : '')
+        + `<span class="status-value">${escapeHtml(value)}</span>`
+        + '</span>';
+}
+
 function renderStatus() {
     const status = $('#statusStrip');
     if (!status) return;
@@ -176,12 +199,12 @@ function renderStatus() {
     const failed = failedDomains(initStatus);
     status.innerHTML = `
         <div class="status-items">
-            <span class="status-chip" data-tone="${state.accountId ? 'success' : 'warning'}"><strong>账号</strong>${escapeHtml(accountLabel)}</span>
-            <span class="status-chip" data-tone="${state.deviceId ? 'success' : 'warning'}"><strong>设备</strong>${escapeHtml(deviceLabel)}</span>
-            <span class="status-chip"><strong>音源</strong>${sourceTotal} / ${sourceEnabled} 启用</span>
+            ${statusChip({ value: state.message || '就绪', tone: connectionTone(initStatus), className: 'status-chip-state' })}
+            ${statusChip({ label: '账号', value: accountLabel, tone: state.accountId ? 'success' : 'warning' })}
+            ${statusChip({ label: '设备', value: deviceLabel, tone: state.deviceId ? 'success' : 'warning' })}
+            ${statusChip({ label: '音源', value: `${sourceEnabled}/${sourceTotal} 启用` })}
         </div>
         <div class="status-side">
-            <span class="status-pill">${escapeHtml(state.message || '就绪')}</span>
             ${failed.length ? '<button class="ghost-button compact-icon-button" type="button" data-action="retry-init">重试</button>' : ''}
             ${initStatus.diagnostics?.status === 'failed' ? '<button class="ghost-button compact-icon-button" type="button" data-action="open-logs">日志</button>' : ''}
         </div>

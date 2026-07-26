@@ -5,8 +5,9 @@ import {
     fetchSongloftPlaylists,
     songloftPlaylistId,
 } from '../shared/songloft_playlists.js';
-import { $, escapeHtml, setState, state, toast } from '../state.js';
+import { $, setState, state, toast } from '../state.js';
 import {
+    renderEmptyState,
     renderListScroller,
     renderSongloftPlaylistRow,
     renderSongloftSongRow,
@@ -73,7 +74,7 @@ async function toggleSongloftLibraryPanel(kind, load) {
     } catch (error) {
         // 失败时必须替换掉“正在加载”占位，否则面板会一直停在加载态。
         const node = $(`[data-role="${songloftLibraryPanelMap[kind].listRole}"]`);
-        if (node) node.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(error?.message || error)}</div>`;
+        if (node) node.innerHTML = renderEmptyState(`加载失败：${error?.message || error}`, 'error');
         throw error;
     }
 }
@@ -83,7 +84,7 @@ function renderSongloftSongList(role, songs, emptyText) {
     if (!node) return;
     node.innerHTML = songs.length
         ? renderListScroller(songs.map((song, index) => renderSongloftSongRow(song, index)).join(''), `${role}-scroll`)
-        : `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
+        : renderEmptyState(emptyText);
 }
 
 function renderSongloftPlaylists(playlists) {
@@ -91,12 +92,12 @@ function renderSongloftPlaylists(playlists) {
     if (!node) return;
     node.innerHTML = playlists.length
         ? renderListScroller(playlists.map((playlist, index) => renderSongloftPlaylistRow(playlist, index)).join(''), 'songloft-playlists-scroll')
-        : '<div class="empty-state">暂无 Songloft 歌单。</div>';
+        : renderEmptyState('暂无 Songloft 歌单。');
 }
 
 async function loadSongloftSongs() {
     const node = $('[data-role="songloft-songs"]');
-    if (node) node.innerHTML = '<div class="empty-state">正在加载 Songloft 歌曲库...</div>';
+    if (node) node.innerHTML = renderEmptyState('正在加载 Songloft 歌曲库...', 'loading');
     const data = await api.get('/songloft/songs');
     const songs = asArray(data);
     setState({ songloftSongs: songs });
@@ -107,7 +108,7 @@ async function loadSongloftSongs() {
 
 async function loadSongloftLocalSongs() {
     const node = $('[data-role="songloft-local-songs"]');
-    if (node) node.innerHTML = '<div class="empty-state">正在加载本地歌曲...</div>';
+    if (node) node.innerHTML = renderEmptyState('正在加载本地歌曲...', 'loading');
     const data = await api.get('/songloft/local-songs');
     const songs = asArray(data);
     setState({ songloftLocalSongs: songs });
@@ -118,7 +119,7 @@ async function loadSongloftLocalSongs() {
 
 async function loadSongloftPlaylists() {
     const node = $('[data-role="songloft-playlists"]');
-    if (node) node.innerHTML = '<div class="empty-state">正在加载 Songloft 歌单...</div>';
+    if (node) node.innerHTML = renderEmptyState('正在加载 Songloft 歌单...', 'loading');
     const playlists = await fetchSongloftPlaylists();
     setState({ songloftPlaylists: playlists });
     $('[data-role="songloft-playlists-total"]').textContent = String(playlists.length);
@@ -130,7 +131,7 @@ async function loadSongloftPlaylistSongs(playlist, index) {
     const id = songloftPlaylistId(playlist);
     if (!id) throw new Error('Songloft 歌单缺少 ID');
     const node = $('[data-role="songloft-playlist-songs"]');
-    if (node) node.innerHTML = '<div class="empty-state">正在加载歌单歌曲...</div>';
+    if (node) node.innerHTML = renderEmptyState('正在加载歌单歌曲...', 'loading');
     const songs = await fetchSongloftPlaylistSongs(id);
     setState({
         songloftPlaylistSongs: songs,

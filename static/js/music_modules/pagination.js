@@ -26,16 +26,23 @@ export function renderPagination({ scope, page, total, pageSize }) {
     const totalPages = pageCount(total, pageSize);
     const currentPage = clampPage(page, totalPages);
     const escapedScope = escapeHtml(scope);
+    // Five sibling controls in one flex row read as scattered debris and wrapped
+    // unpredictably on narrow panels. Two groups — step through pages, or go to
+    // one — give the bar a spine and a single wrap point.
     return `
         <nav class="pagination-bar" data-pagination="${escapedScope}" data-page="${currentPage}" data-total-pages="${totalPages}">
-            <button type="button" data-page-action="prev"${currentPage <= 1 ? ' disabled' : ''}>上一页</button>
-            <span>第 ${currentPage} / ${totalPages} 页</span>
-            <button type="button" data-page-action="next"${currentPage >= totalPages ? ' disabled' : ''}>下一页</button>
-            <label>
-                <span>指定页</span>
-                <input data-role="${escapedScope}-page-input" type="number" min="1" max="${totalPages}" value="${currentPage}">
-            </label>
-            <button type="button" data-page-action="jump">跳转</button>
+            <div class="pagination-pager">
+                <button type="button" data-page-action="prev"${currentPage <= 1 ? ' disabled' : ''}>上一页</button>
+                <span class="pagination-status">第 ${currentPage} / ${totalPages} 页</span>
+                <button type="button" data-page-action="next"${currentPage >= totalPages ? ' disabled' : ''}>下一页</button>
+            </div>
+            <div class="pagination-jump">
+                <label>
+                    <span>指定页</span>
+                    <input data-role="${escapedScope}-page-input" type="number" min="1" max="${totalPages}" value="${currentPage}">
+                </label>
+                <button type="button" data-page-action="jump">跳转</button>
+            </div>
         </nav>
     `;
 }

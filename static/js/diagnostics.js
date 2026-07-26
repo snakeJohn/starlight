@@ -22,24 +22,37 @@ function timeLabel(value) {
     return date.toLocaleString();
 }
 
+/**
+ * Success/failure led with a badge rather than a faint border tint, and the
+ * five right-aligned meta lines collapse into one hairline-separated row so a
+ * long log scans top-to-bottom instead of zig-zagging.
+ */
 function renderSourceLog(log) {
     const title = [log.title, log.artist].filter(Boolean).join(' - ') || '未知歌曲';
     const source = log.sourceName || log.sourceId || 'Starlight';
+    const meta = [
+        source,
+        `${log.platform || '-'} · ${log.quality || '-'}`,
+        `${Number(log.durationMs) || 0} ms`,
+        timeLabel(log.time),
+    ];
     return `
         <article class="source-log-row" data-status="${escapeHtml(log.status)}">
+            <span class="source-log-status">
+                <span class="source-log-dot" aria-hidden="true"></span>${escapeHtml(statusLabel(log.status))}
+            </span>
             <div class="source-log-main">
                 <div class="source-log-title">
                     <strong>${escapeHtml(title)}</strong>
-                    <span>${escapeHtml(operationLabel(log.operation))} / ${escapeHtml(stageLabel(log.stage))}</span>
+                    <span class="source-log-tags">
+                        <span>${escapeHtml(operationLabel(log.operation))}</span>
+                        <span>${escapeHtml(stageLabel(log.stage))}</span>
+                    </span>
                 </div>
-                <p>${escapeHtml(log.message || '')}</p>
-            </div>
-            <div class="source-log-meta">
-                <span>${escapeHtml(statusLabel(log.status))}</span>
-                <span>${escapeHtml(source)}</span>
-                <span>${escapeHtml(log.platform || '-')} · ${escapeHtml(log.quality || '-')}</span>
-                <span>${escapeHtml(String(log.durationMs || 0))} ms</span>
-                <span>${escapeHtml(timeLabel(log.time))}</span>
+                ${log.message ? `<p>${escapeHtml(log.message)}</p>` : ''}
+                <div class="source-log-meta">
+                    ${meta.map(item => `<span>${escapeHtml(item)}</span>`).join('')}
+                </div>
             </div>
         </article>
     `;

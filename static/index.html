@@ -215,7 +215,6 @@
                         <p class="eyebrow">Library</p>
                         <h1>歌单</h1>
                     </div>
-                    <button class="ghost-button" type="button" data-action="refresh-custom-playlists">刷新</button>
                 </div>
                 <section class="surface-section">
                     <div class="section-bar">
@@ -264,8 +263,8 @@
                     <button class="ghost-button" type="button" data-action="refresh-speaker">刷新</button>
                 </div>
 
-                <div class="two-column speaker-top-layout">
-                    <section class="surface-section">
+                <div class="two-column speaker-layout">
+                    <section class="surface-section speaker-account-panel">
                         <div class="section-bar">
                             <h2>账号</h2>
                             <span data-role="auth-summary">未加载</span>
@@ -348,9 +347,7 @@
                         </form>
                         <div class="list-stack tight" data-role="device-list"></div>
                     </section>
-                </div>
 
-                <div class="two-column speaker-operations-layout">
                     <section class="surface-section speaker-player-panel">
                         <div class="section-bar">
                             <h2>播放控制</h2>
@@ -418,12 +415,12 @@
                             <button class="lx-player-button" type="button" data-action="speaker-player-song-list" title="歌曲列表" aria-label="歌曲列表">
                                 <i class="fas fa-list-ul" aria-hidden="true"></i>
                             </button>
-                        </div>
-                        <div class="inline-actions">
-                            <input type="hidden" data-role="speaker-player-mode" value="loop">
                             <button class="lx-player-button" type="button" data-action="speaker-player-refresh" title="刷新状态" aria-label="刷新状态">
                                 <i class="fas fa-sync-alt" aria-hidden="true"></i>
                             </button>
+                        </div>
+                        <div class="inline-actions">
+                            <input type="hidden" data-role="speaker-player-mode" value="loop">
                         </div>
                         <section class="speaker-playlist-panel">
                             <div class="section-bar compact-bar">
@@ -816,16 +813,32 @@
                     <strong data-role="global-player-title">暂无播放</strong>
                     <span data-role="global-player-artist">-</span>
                 </span>
-                <span data-role="global-player-lyric">暂无歌词</span>
+                <span class="global-player-subline">
+                    <span class="global-player-time">
+                        <span data-role="global-player-current-time">--:--</span>
+                        <span class="global-player-time-sep" aria-hidden="true">/</span>
+                        <span data-role="global-player-total-time">--:--</span>
+                    </span>
+                    <span data-role="global-player-lyric">暂无歌词</span>
+                </span>
             </span>
         </button>
         <div class="global-player-progress">
-            <span data-role="global-player-current-time">--:--</span>
             <div class="player-progress-track" aria-hidden="true">
                 <div class="player-progress-fill" data-role="global-player-progress"></div>
                 <div class="player-progress-thumb" data-role="global-player-progress-thumb"></div>
             </div>
-            <span data-role="global-player-total-time">--:--</span>
+        </div>
+        <div class="global-player-transport">
+            <button class="lx-player-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">
+                <i class="fas fa-step-backward" aria-hidden="true"></i>
+            </button>
+            <button class="lx-player-button lx-player-main-button global-player-toggle" type="button" data-action="speaker-player-toggle" title="播放" aria-label="播放">
+                <i class="fas fa-play" data-role="global-player-play-icon" aria-hidden="true"></i>
+            </button>
+            <button class="lx-player-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">
+                <i class="fas fa-step-forward" aria-hidden="true"></i>
+            </button>
         </div>
         <div class="global-player-controls">
             <div class="playback-target-segment compact" role="group" aria-label="播放目标">
@@ -845,15 +858,6 @@
                     <button type="button" data-action="speaker-player-mode-option" data-mode="order"><i class="fas fa-play" aria-hidden="true"></i><span>顺序播放</span></button>
                 </div>
             </div>
-            <button class="lx-player-button" type="button" data-action="speaker-player-previous" title="上一首" aria-label="上一首">
-                <i class="fas fa-step-backward" aria-hidden="true"></i>
-            </button>
-            <button class="lx-player-button lx-player-main-button global-player-toggle" type="button" data-action="speaker-player-toggle" title="播放" aria-label="播放">
-                <i class="fas fa-play" data-role="global-player-play-icon" aria-hidden="true"></i>
-            </button>
-            <button class="lx-player-button" type="button" data-action="speaker-player-next" title="下一首" aria-label="下一首">
-                <i class="fas fa-step-forward" aria-hidden="true"></i>
-            </button>
             <button class="lx-player-button" type="button" data-action="speaker-player-stop" title="停止" aria-label="停止">
                 <i class="fas fa-stop" aria-hidden="true"></i>
             </button>

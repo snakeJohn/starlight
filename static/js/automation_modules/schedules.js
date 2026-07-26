@@ -18,7 +18,10 @@ function renderSchedules(data) {
     const tasks = asArray(data);
     const status = $('[data-role="schedules-enabled"]');
     const list = $('[data-role="schedule-list"]');
-    if (status) status.textContent = data?.enabled ? '已启用' : '未启用';
+    if (status) {
+        status.textContent = data?.enabled ? '已启用' : '未启用';
+        if (status.dataset) status.dataset.state = data?.enabled ? 'on' : 'off';
+    }
     if (!list) return;
     list.innerHTML = tasks.length
         ? tasks.map(task => `

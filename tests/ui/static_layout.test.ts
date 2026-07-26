@@ -378,7 +378,9 @@ describe('static UI layout copy', () => {
   it('stacks moved speaker index metrics vertically and allows long values to wrap', () => {
     const stylesheet = css();
 
-    expect(stylesheet).toContain('.speaker-operations-layout .metric-grid');
+    // 断言的是「索引指标纵向堆叠、长值可换行」这个意图，而不是某个布局 wrapper 的名字。
+    // 原来绑的 `.speaker-operations-layout` 已随音箱页重排移除，规则由 `.speaker-side-stack` 承接。
+    expect(stylesheet).toContain('.speaker-side-stack .metric-grid');
     expect(stylesheet).toContain('grid-template-columns: 1fr');
     expect(stylesheet).toContain('white-space: normal');
   });
@@ -419,10 +421,15 @@ describe('static UI layout copy', () => {
     const stylesheet = css();
     const speakerHtml = panelHtml(html, 'speaker');
     const deviceStart = speakerHtml.indexOf('<section class="surface-section speaker-device-panel">');
-    const operationsStart = speakerHtml.indexOf('<div class="two-column speaker-operations-layout">');
-    const deviceHtml = speakerHtml.slice(deviceStart, operationsStart);
+    // End the slice at the next card rather than at a layout wrapper: wrappers get
+    // reshuffled by layout work, and when the old marker disappeared indexOf returned
+    // -1, silently widening the slice to the whole panel so these assertions stopped
+    // proving the fields are inside the device card at all.
+    const deviceEnd = speakerHtml.indexOf('<section class="surface-section speaker-player-panel">', deviceStart);
+    const deviceHtml = speakerHtml.slice(deviceStart, deviceEnd);
 
     expect(deviceStart).toBeGreaterThanOrEqual(0);
+    expect(deviceEnd).toBeGreaterThan(deviceStart);
     expect(deviceHtml).toContain('data-role="speaker-config-form"');
     expect(deviceHtml.indexOf('data-role="speaker-config-form"')).toBeLessThan(deviceHtml.indexOf('data-role="device-list"'));
     expect(deviceHtml).toContain('speaker-device-settings settings-form');

@@ -1,9 +1,9 @@
 import { api } from '../api.js';
 import { asArray, resultCount } from '../shared/arrays.js';
 import { bindSelectableBatchActions } from '../shared/selectable_list.js';
-import { $, $$, escapeHtml, setState, state, toast } from '../state.js';
+import { $, $$, setState, state, toast } from '../state.js';
 import { bindPagination, clearPagination, pageSizes, renderPaginationInto } from './pagination.js';
-import { renderListScroller, renderSongRow } from './renderers.js';
+import { renderEmptyState, renderListScroller, renderSongRow } from './renderers.js';
 
 let searchDependencies = null;
 
@@ -20,7 +20,7 @@ export async function loadSearchPage(page = 1) {
     const list = $('[data-role="search-results"]');
     const query = state.searchQuery;
     if (!list || !query?.keyword) return;
-    list.innerHTML = '<div class="empty-state">正在搜索...</div>';
+    list.innerHTML = renderEmptyState('正在搜索...', 'loading');
     const data = await api.post('/music/search', {
         keyword: query.keyword,
         source_id: query.platform,
@@ -37,7 +37,7 @@ export async function loadSearchPage(page = 1) {
             selectable: true,
             checkboxRole: 'search-song-check',
         })).join(''), 'search-results-scroll')
-        : '<div class="empty-state">没有找到匹配歌曲。</div>';
+        : renderEmptyState('没有找到匹配歌曲。');
     renderPaginationInto('search-pagination', { scope: 'search', page, total, pageSize: pageSizes.search });
 }
 
@@ -76,7 +76,7 @@ export function bindSearch() {
             });
             await loadSearchPage(1);
         } catch (error) {
-            list.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+            list.innerHTML = renderEmptyState(error.message, 'error');
             clearPagination('search-pagination');
             toast(error.message, 'error');
         } finally {

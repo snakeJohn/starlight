@@ -23,7 +23,10 @@ function setAiState(message) {
 
 function setAiStatus(enabled) {
     const node = $('[data-role="ai-config-status"]');
-    if (node) node.textContent = enabled ? '已开启' : '已关闭';
+    if (!node) return;
+    node.textContent = enabled ? '已开启' : '已关闭';
+    // Drives the indicator dot on the section-bar status chip.
+    if (node.dataset) node.dataset.state = enabled ? 'on' : 'off';
 }
 
 export function updateAiAnalysisAccess(voiceEnabled) {

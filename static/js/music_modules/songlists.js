@@ -1,8 +1,8 @@
 import { api } from '../api.js';
 import { asArray, resultCount } from '../shared/arrays.js';
-import { $, escapeHtml, setState, state, toast } from '../state.js';
+import { $, setState, state, toast } from '../state.js';
 import { bindPagination, clearPagination, pageSizes, renderPaginationInto } from './pagination.js';
-import { renderListScroller, renderSongListItem, renderSongRow, songListTitle } from './renderers.js';
+import { renderEmptyState, renderListScroller, renderSongListItem, renderSongRow, songListTitle } from './renderers.js';
 import { songloftImportSummary, trackSongloftImportJob } from './songloft_playlist_target.js';
 
 let songlistDependencies = null;
@@ -25,7 +25,7 @@ function renderSongLists(items) {
     if (!list) return;
     list.innerHTML = items.length
         ? renderListScroller(items.map((item, index) => renderSongListItem(item, index)).join(''), 'songlist-results-scroll')
-        : '<div class="empty-state">暂无歌单。</div>';
+        : renderEmptyState('暂无歌单。');
 }
 
 export async function loadSongListDetail(item) {
@@ -60,8 +60,8 @@ export async function loadSongListDetailPage(page = 1) {
         ? `${renderListScroller(songs.map((song, index) => renderSongRow(song, index, '', {
             selectable: true,
             checkboxRole: 'songlist-detail-song-check',
-        })).join(''), 'songlist-detail-scroll')}<div class="inline-actions"><button class="ghost-button" type="button" data-action="select-songlist-detail-page">全选当前页</button><button class="ghost-button" type="button" data-action="clear-songlist-detail-selection">取消选择</button><button class="ghost-button" type="button" data-action="add-selected-songlist-detail-to-playlist">加入选中到歌单</button><button class="primary-button" type="button" data-action="speaker-songlist">播放</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button><button class="ghost-button" type="button" data-action="download-songlist">下载当前歌单</button></div>`
-        : '<div class="empty-state">歌单没有可显示歌曲。</div>';
+        })).join(''), 'songlist-detail-scroll')}<div class="inline-actions list-actions-bar"><button class="ghost-button" type="button" data-action="select-songlist-detail-page">全选当前页</button><button class="ghost-button" type="button" data-action="clear-songlist-detail-selection">取消选择</button><button class="ghost-button" type="button" data-action="add-selected-songlist-detail-to-playlist">加入选中到歌单</button><button class="primary-button" type="button" data-action="speaker-songlist">播放</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button><button class="ghost-button" type="button" data-action="download-songlist">下载当前歌单</button></div>`
+        : renderEmptyState('歌单没有可显示歌曲。');
     renderPaginationInto('songlist-detail-pagination', { scope: 'songlist-detail', page, total, pageSize: pageSizes.songlistDetail });
 }
 
@@ -69,7 +69,7 @@ export async function loadSongListsPage(page = 1) {
     const list = $('[data-role="songlist-list"]');
     const query = state.songlistQuery;
     if (!list || !query) return;
-    list.innerHTML = '<div class="empty-state">正在加载...</div>';
+    list.innerHTML = renderEmptyState('正在加载...', 'loading');
     const data = query.mode === 'recommended'
         ? await api.get(`/music/songlist/list?source_id=${encodeURIComponent(query.platform)}&quality=${encodeURIComponent(query.quality)}&page=${page}&page_size=${pageSizes.songlist}`)
         : await api.post('/music/songlist/search', { keyword: query.keyword || '热门', source_id: query.platform, quality: query.quality, page, page_size: pageSizes.songlist });
@@ -121,7 +121,7 @@ export function bindSongLists() {
             clearPagination('songlist-detail-pagination');
             await loadSongListsPage(1);
         } catch (error) {
-            list.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+            list.innerHTML = renderEmptyState(error.message, 'error');
             clearPagination('songlist-pagination');
             toast(error.message, 'error');
         }

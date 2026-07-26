@@ -259,6 +259,95 @@ function setCoverImage(src) {
     }
 }
 
+/**
+ * Sample a representative accent from the artwork.
+ * Downscales to 12x12, drops near-transparent / washed-out pixels, buckets the
+ * rest by hue and picks the bucket carrying the most colour weight. Lightness is
+ * clamped so the result stays legible against both light and dark host themes.
+ */
+function accentFromImage(image) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 12;
+    canvas.height = 12;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(image, 0, 0, 12, 12);
+    // Throws (SecurityError) on a tainted cross-origin canvas — caller catches.
+    const { data } = ctx.getImageData(0, 0, 12, 12);
+
+    const buckets = new Map();
+    for (let i = 0; i < data.length; i += 4) {
+        const [r, g, b, a] = [data[i], data[i + 1], data[i + 2], data[i + 3]];
+        if (a < 128) continue;
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const lightness = (max + min) / 510;
+        const delta = max - min;
+        if (!delta || lightness < 0.12 || lightness > 0.94) continue;
+        const saturation = delta / (255 - Math.abs(max + min - 255) || 1);
+        if (saturation < 0.18) continue;
+
+        let hue;
+        if (max === r) hue = ((g - b) / delta + (g < b ? 6 : 0)) * 60;
+        else if (max === g) hue = ((b - r) / delta + 2) * 60;
+        else hue = ((r - g) / delta + 4) * 60;
+
+        const key = Math.round(hue / 24) * 24 % 360;
+        const entry = buckets.get(key) || { weight: 0, x: 0, y: 0, saturation: 0 };
+        const weight = saturation * delta;
+        const radians = hue * Math.PI / 180;
+        entry.weight += weight;
+        // Circular mean: hue is an angle, so a bucket straddling 0°/360° (red
+        // artwork) would average to cyan if summed linearly.
+        entry.x += Math.cos(radians) * weight;
+        entry.y += Math.sin(radians) * weight;
+        entry.saturation += saturation * weight;
+        buckets.set(key, entry);
+    }
+
+    let best = null;
+    for (const entry of buckets.values()) {
+        if (!best || entry.weight > best.weight) best = entry;
+    }
+    if (!best || !best.weight) return null;
+
+    const hue = Math.round((Math.atan2(best.y, best.x) * 180 / Math.PI + 360) % 360);
+    const saturation = Math.min(82, Math.max(46, Math.round((best.saturation / best.weight) * 100)));
+    return `hsl(${hue}, ${saturation}%, 52%)`;
+}
+
+function setPlayerAccent(color) {
+    const root = document.documentElement;
+    if (!root?.style) return;
+    if (color) root.style.setProperty('--player-accent', color);
+    else root.style.removeProperty('--player-accent');
+}
+
+function applyCoverAccent(src, requestId) {
+    if (!src) {
+        setPlayerAccent('');
+        return;
+    }
+    try {
+        if (typeof Image !== 'function' || typeof document?.createElement !== 'function') return;
+        const probe = new Image();
+        // Needed for CDN artwork; harmless for same-origin blob URLs.
+        probe.crossOrigin = 'anonymous';
+        probe.onload = () => {
+            if (requestId !== coverRequestId) return;
+            try {
+                setPlayerAccent(accentFromImage(probe));
+            } catch {
+                // Tainted canvas or unsupported context — keep the theme accent.
+            }
+        };
+        probe.onerror = () => {};
+        probe.src = src;
+    } catch {
+        // Never let artwork sampling break playback rendering.
+    }
+}
+
 function isSameOriginUrl(url) {
     try {
         const parsed = new URL(url, window.location?.href || 'http://localhost');
@@ -280,12 +369,16 @@ function loadCover(coverUrl) {
     currentCoverObjectUrl = '';
     setCoverImage('');
 
-    if (!currentCoverUrl) return;
+    if (!currentCoverUrl) {
+        setPlayerAccent('');
+        return;
+    }
 
     // External album art (e.g. kuwo CDN) cannot be fetched with auth headers (CORS).
     // Use the browser's native image load for cross-origin URLs.
     if (!isSameOriginUrl(currentCoverUrl)) {
         setCoverImage(currentCoverUrl);
+        applyCoverAccent(currentCoverUrl, coverRequestId);
         return;
     }
 
@@ -298,12 +391,14 @@ function loadCover(coverUrl) {
             if (requestId !== coverRequestId) return;
             currentCoverObjectUrl = URL.createObjectURL(blob);
             setCoverImage(currentCoverObjectUrl);
+            applyCoverAccent(currentCoverObjectUrl, requestId);
         })
         .catch(() => {
             if (requestId !== coverRequestId) return;
             // Fall back to direct URL if authenticated fetch fails.
             currentCoverObjectUrl = '';
             setCoverImage(requestedUrl);
+            applyCoverAccent(requestedUrl, requestId);
         });
 }
 

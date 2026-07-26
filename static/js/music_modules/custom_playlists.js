@@ -8,7 +8,7 @@ import {
 } from '../shared/songloft_playlists.js';
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from '../state.js';
 import { clampPage, pageCount, pageFromPagination, pageSizes, renderPagination } from './pagination.js';
-import { renderArtwork, renderListScroller, renderSongloftSongRow, songAlbum, songArtist, songTitle } from './renderers.js';
+import { renderArtwork, renderEmptyState, renderListScroller, renderSongloftSongRow, songAlbum, songArtist, songTitle } from './renderers.js';
 
 let customPlaylistDependencies = null;
 
@@ -106,7 +106,7 @@ export function renderCustomPlaylistItem(playlist) {
 
 export function renderCustomPlaylistDetail(playlist, page = state.customPlaylistDetailPage || 1) {
     if (!playlist) {
-        return '<div class="empty-state">选择一个歌单后可查看歌曲明细，并将选中的歌曲加入 Songloft 歌单。</div>';
+        return renderEmptyState('选择一个歌单后可查看歌曲明细，并将选中的歌曲加入 Songloft 歌单。');
     }
     const songs = Array.isArray(playlist.songs) ? playlist.songs : [];
     const meta = [playlist.source_name, `${songs.length} 首`].filter(Boolean).join(' · ');
@@ -126,7 +126,7 @@ export function renderCustomPlaylistDetail(playlist, page = state.customPlaylist
             ${songs.length
                 ? `${renderListScroller(pageSongs.map((song, index) => renderCustomPlaylistSongRow(song, start + index)).join(''), 'custom-playlist-detail-scroll', 'list-stack tight')}
                     ${renderPagination({ scope: 'custom-playlist-detail', page: currentPage, total: songs.length, pageSize: pageSizes.customPlaylistDetail })}`
-                : '<div class="empty-state">这个歌单还没有歌曲。</div>'}
+                : renderEmptyState('这个歌单还没有歌曲。')}
         </section>
     `;
 }
@@ -146,17 +146,17 @@ function renderSongloftTargetPlaylistSongs(songs = asArray(state.songloftTargetP
     if (!list) return;
 
     if (options.loading) {
-        list.innerHTML = '<div class="empty-state">正在加载歌单歌曲...</div>';
+        list.innerHTML = renderEmptyState('正在加载歌单歌曲...', 'loading');
         return;
     }
 
     if (options.error) {
-        list.innerHTML = `<div class="empty-state">${escapeHtml(options.error)}</div>`;
+        list.innerHTML = renderEmptyState(options.error, 'error');
         return;
     }
 
     if (!state.songloftTargetPlaylistId) {
-        list.innerHTML = '<div class="empty-state">请选择 Songloft 歌单。</div>';
+        list.innerHTML = renderEmptyState('请选择 Songloft 歌单。');
         return;
     }
 
@@ -171,7 +171,7 @@ function renderSongloftTargetPlaylistSongs(songs = asArray(state.songloftTargetP
             </div>
             ${songs.length
                 ? renderListScroller(songs.map((song, index) => renderSongloftSongRow(song, index)).join(''), 'songloft-target-playlist-scroll', 'list-stack tight')
-                : '<div class="empty-state">这个 Songloft 歌单没有歌曲。</div>'}
+                : renderEmptyState('这个 Songloft 歌单没有歌曲。')}
         </section>
     `;
 }

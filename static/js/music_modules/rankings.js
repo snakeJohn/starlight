@@ -1,8 +1,8 @@
 import { api } from '../api.js';
 import { asArray, resultCount } from '../shared/arrays.js';
-import { $, escapeHtml, setState, state, toast } from '../state.js';
+import { $, setState, state, toast } from '../state.js';
 import { bindPagination, clearPagination, pageSizes, renderPaginationInto } from './pagination.js';
-import { boardTitle, renderListScroller, renderRankingBoard, renderSongRow } from './renderers.js';
+import { boardTitle, renderEmptyState, renderListScroller, renderRankingBoard, renderSongRow } from './renderers.js';
 
 let rankingDependencies = null;
 
@@ -23,7 +23,7 @@ export async function loadRankingPage(page = 1) {
     const context = state.rankingContext;
     const songsNode = $('[data-role="ranking-songs"]');
     if (!context?.id || !songsNode) return;
-    songsNode.innerHTML = '<div class="empty-state">正在加载歌曲...</div>';
+    songsNode.innerHTML = renderEmptyState('正在加载歌曲...', 'loading');
     const data = await api.get(`/music/leaderboard/list?source_id=${encodeURIComponent(context.platform)}&id=${encodeURIComponent(context.id)}&quality=${encodeURIComponent(context.quality)}&page=${page}&page_size=${pageSizes.ranking}`);
     const songs = asArray(data);
     const total = resultCount(data);
@@ -33,8 +33,8 @@ export async function loadRankingPage(page = 1) {
         ? `${renderListScroller(songs.map((song, index) => renderSongRow(song, index, '', {
             selectable: true,
             checkboxRole: 'ranking-song-check',
-        })).join(''), 'ranking-songs-scroll')}<div class="inline-actions"><button class="ghost-button" type="button" data-action="select-ranking-page">全选当前页</button><button class="ghost-button" type="button" data-action="clear-ranking-selection">取消选择</button><button class="ghost-button" type="button" data-action="add-selected-ranking-to-playlist">加入选中到歌单</button></div>`
-        : '<div class="empty-state">榜单没有可显示歌曲。</div>';
+        })).join(''), 'ranking-songs-scroll')}<div class="inline-actions list-actions-bar"><button class="ghost-button" type="button" data-action="select-ranking-page">全选当前页</button><button class="ghost-button" type="button" data-action="clear-ranking-selection">取消选择</button><button class="ghost-button" type="button" data-action="add-selected-ranking-to-playlist">加入选中到歌单</button></div>`
+        : renderEmptyState('榜单没有可显示歌曲。');
     renderPaginationInto('ranking-pagination', { scope: 'ranking', page, total, pageSize: pageSizes.ranking });
 }
 
@@ -47,18 +47,18 @@ export function bindRankings() {
     $('[data-action="load-rankings"]')?.addEventListener('click', async () => {
         const platform = $('[data-role="ranking-platform"]')?.value || state.platform;
         const quality = $('[data-role="ranking-quality"]')?.value || state.rankingQuality;
-        boardsNode.innerHTML = '<div class="empty-state">正在加载榜单...</div>';
+        boardsNode.innerHTML = renderEmptyState('正在加载榜单...', 'loading');
         try {
             const data = await api.get(`/music/leaderboard/boards?source_id=${encodeURIComponent(platform)}`);
             const boards = asArray(data);
             setState({ rankingBoards: boards, rankingContext: null, rankingSongs: [], platform, rankingQuality: quality });
             boardsNode.innerHTML = boards.length
                 ? boards.map((board, index) => renderRankingBoard(board, index)).join('')
-                : '<div class="empty-state">暂无榜单。</div>';
+                : renderEmptyState('暂无榜单。');
             songsNode.innerHTML = '';
             clearPagination('ranking-pagination');
         } catch (error) {
-            boardsNode.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+            boardsNode.innerHTML = renderEmptyState(error.message, 'error');
             toast(error.message, 'error');
         }
     });
@@ -86,7 +86,7 @@ export function bindRankings() {
             });
             await loadRankingPage(1);
         } catch (error) {
-            songsNode.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+            songsNode.innerHTML = renderEmptyState(error.message, 'error');
             clearPagination('ranking-pagination');
             toast(error.message, 'error');
         }

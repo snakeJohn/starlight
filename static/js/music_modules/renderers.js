@@ -45,6 +45,51 @@ export function sourceMeta(song) {
         .join(' · ');
 }
 
+/**
+ * Rows previously joined platform, quality and duration into one grey run of
+ * text, so nothing in the row read as a rank above anything else. The three
+ * facts have different jobs — provenance, format, length — so each gets its own
+ * element and the format becomes a badge the eye can find without reading.
+ */
+export function renderRowMeta(parts) {
+    const chips = parts
+        .filter(part => part && part.text)
+        .map(part => {
+            const className = ['row-meta-item', part.className].filter(Boolean).join(' ');
+            return `<span class="${escapeHtml(className)}">${escapeHtml(part.text)}</span>`;
+        })
+        .join('');
+    return `<span class="row-meta">${chips}</span>`;
+}
+
+export function renderSourceMeta(song) {
+    const data = song?.source_data || {};
+    return renderRowMeta([
+        { text: data.platform ? platformName(data.platform) : '', className: 'row-meta-source' },
+        { text: data.quality || '', className: 'row-meta-quality' },
+        { text: durationLabel(song?.duration), className: 'row-meta-duration' },
+    ]);
+}
+
+/**
+ * Empty and loading slots were bare sentences in a dashed box. Keeping the
+ * `.empty-state` element and its text intact means nothing regresses where the
+ * class is styled generically; the tone lets the music surfaces frame a "no
+ * results yet" differently from a failure or a pending request.
+ */
+export function renderEmptyState(text, tone = 'idle') {
+    return `<div class="empty-state" data-empty-tone="${escapeHtml(tone)}"><span class="empty-state-text">${escapeHtml(text)}</span></div>`;
+}
+
+/** 4439475 次播放 is a number nobody reads. 443.9 万 is a size. */
+export function formatCompactCount(value) {
+    const count = Number(value);
+    if (!Number.isFinite(count) || count <= 0) return '';
+    if (count >= 100000000) return `${(count / 100000000).toFixed(1).replace(/\.0$/, '')} 亿`;
+    if (count >= 10000) return `${(count / 10000).toFixed(1).replace(/\.0$/, '')} 万`;
+    return String(Math.round(count));
+}
+
 function decodeHtmlEntities(value) {
     return String(value ?? '')
         .replace(/&amp;/g, '&')
@@ -187,8 +232,8 @@ export function renderSongRow(song, index, extraActions = '', options = {}) {
             ${renderArtwork(song, songTitle(song))}
             <div class="row-main">
                 <strong>${escapeHtml(songTitle(song))}</strong>
-                <span>${escapeHtml(songArtist(song))} · ${escapeHtml(songAlbum(song))}</span>
-                <span class="row-meta">${escapeHtml(sourceMeta(song))}</span>
+                <span class="row-sub">${escapeHtml(songArtist(song))} · ${escapeHtml(songAlbum(song))}</span>
+                ${renderSourceMeta(song)}
             </div>
             <div class="row-actions">
                 ${actionButton('import', index, '加入歌曲库')}
@@ -203,7 +248,7 @@ export function renderSongRow(song, index, extraActions = '', options = {}) {
 
 export function renderDownloadProgressMarkup(progress) {
     if (!progress?.active) {
-        return '<div class="empty-state">暂无下载任务。</div>';
+        return renderEmptyState('暂无下载任务。');
     }
 
     const current = Number(progress.current) || 0;
@@ -227,7 +272,7 @@ export function renderDownloadProgressMarkup(progress) {
             <div><span>成功</span><strong>${Number(progress.success) || 0}</strong></div>
             <div><span>失败</span><strong>${Number(progress.failed) || 0}</strong></div>
         </div>
-        <div class="list-stack tight">${rows || '<div class="empty-state">任务已开始，等待第一首完成。</div>'}</div>
+        <div class="list-stack tight">${rows || renderEmptyState('任务已开始，等待第一首完成。', 'loading')}</div>
     `;
 }
 
@@ -236,7 +281,7 @@ export function songListTitle(item) {
 }
 
 export function songListSummary(item) {
-    const playCount = item?.play_count || item?.playCount || item?.total || item?.count;
+    const playCount = formatCompactCount(item?.play_count ?? item?.playCount ?? item?.total ?? item?.count);
     return firstText(
         item?.author,
         item?.creator,
@@ -247,13 +292,22 @@ export function songListSummary(item) {
     );
 }
 
+/** The play count is a stat, not prose — it belongs beside the byline, not in it. */
+export function songListPlayCount(item) {
+    const playCount = formatCompactCount(item?.play_count ?? item?.playCount ?? item?.total ?? item?.count);
+    return playCount ? `${playCount} 次播放` : '';
+}
+
 export function renderSongListItem(item, index) {
+    const summary = songListSummary(item);
+    const playCount = songListPlayCount(item);
     return `
         <article class="songlist-row media-row" data-index="${index}">
             ${renderArtwork(item, songListTitle(item))}
             <div class="row-main">
                 <strong>${escapeHtml(songListTitle(item))}</strong>
-                <span>${escapeHtml(songListSummary(item))}</span>
+                <span class="row-sub">${escapeHtml(summary)}</span>
+                ${playCount && playCount !== summary ? renderRowMeta([{ text: playCount, className: 'row-meta-count' }]) : ''}
             </div>
             <div class="row-actions">
                 <button type="button" data-action="songlist-detail" data-index="${index}">查看</button>
@@ -273,12 +327,20 @@ export function boardSummary(board) {
 }
 
 export function renderRankingBoard(board, index) {
+    const summary = boardSummary(board);
+    // Boards rarely ship a cover, so every row fell back to the same ♪ tile —
+    // six identical placeholders read as a rendering fault, not as a list.
+    // A rank ordinal is information the placeholder never carried.
+    const hasCover = Boolean(mediaCoverUrl(board));
+    const leading = hasCover
+        ? renderArtwork(board, boardTitle(board))
+        : `<span class="media-artwork ranking-ordinal" aria-hidden="true">${index + 1}</span>`;
     return `
-        <button class="ranking-row media-row" type="button" data-action="ranking-detail" data-index="${index}">
-            ${renderArtwork(board, boardTitle(board))}
+        <button class="ranking-row media-row${hasCover ? '' : ' ranking-row-plain'}" type="button" data-action="ranking-detail" data-index="${index}">
+            ${leading}
             <span class="row-main">
                 <strong>${escapeHtml(boardTitle(board))}</strong>
-                <span>${escapeHtml(boardSummary(board))}</span>
+                ${summary ? `<span class="row-sub">${escapeHtml(summary)}</span>` : ''}
             </span>
         </button>
     `;
@@ -299,8 +361,11 @@ export function renderSongloftSongRow(song, index) {
             ${renderArtwork(song, songTitle(song))}
             <div class="row-main">
                 <strong>${escapeHtml(songTitle(song))}</strong>
-                <span>${escapeHtml(songArtist(song))} · ${escapeHtml(songAlbum(song))}</span>
-                <span class="row-meta">${escapeHtml([songloftTypeLabel(song), durationLabel(song?.duration)].filter(Boolean).join(' · '))}</span>
+                <span class="row-sub">${escapeHtml(songArtist(song))} · ${escapeHtml(songAlbum(song))}</span>
+                ${renderRowMeta([
+                    { text: songloftTypeLabel(song), className: 'row-meta-quality' },
+                    { text: durationLabel(song?.duration), className: 'row-meta-duration' },
+                ])}
             </div>
             <div class="row-actions">
                 <button type="button" data-action="speaker-songloft-song" data-index="${index}">播放</button>
@@ -315,7 +380,7 @@ export function renderSongloftPlaylistRow(playlist, index) {
             ${renderArtwork(playlist, songloftPlaylistTitle(playlist))}
             <div class="row-main">
                 <strong>${escapeHtml(songloftPlaylistTitle(playlist))}</strong>
-                <span>${escapeHtml(songloftPlaylistSummary(playlist))}</span>
+                <span class="row-sub">${escapeHtml(songloftPlaylistSummary(playlist))}</span>
             </div>
             <div class="row-actions">
                 <button type="button" data-action="view-songloft-playlist" data-index="${index}">查看歌曲</button>

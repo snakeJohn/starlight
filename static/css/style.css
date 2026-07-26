@@ -36,7 +36,7 @@
     --duration-fast: 140ms;
     --duration-tab: 160ms;
     --control-height: 44px;
-    --global-player-height: 120px;
+    --global-player-height: 96px;
     --bottom-tabs-height: calc(64px + env(safe-area-inset-bottom, 0px));
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-right: env(safe-area-inset-right, 0px);
@@ -1250,18 +1250,11 @@ textarea:focus {
     grid-template-columns: minmax(190px, 0.42fr) minmax(0, 1.58fr);
 }
 
-.speaker-operations-layout {
-    grid-template-columns: minmax(0, 1.28fr) minmax(240px, 0.72fr);
-}
 
-.speaker-top-layout {
-    grid-template-columns: minmax(320px, 1fr) minmax(420px, 1fr);
-    align-items: stretch;
-}
 
-.speaker-top-layout > .surface-section {
-    margin-top: 0;
-}
+
+
+
 
 .speaker-device-panel {
     min-width: 0;
@@ -2167,6 +2160,12 @@ body.playback-target-browser .speaker-device-field {
     font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Player bar: full-bleed progress hairline pinned to the top edge, then a
+ * three-track row — meta (left) / transport (centred) / target + secondary
+ * (right). The centre track is `auto` so the transport stays optically centred
+ * no matter how long the track title is.
+ */
 .global-player-bar {
     position: fixed;
     left: 0;
@@ -2175,31 +2174,55 @@ body.playback-target-browser .speaker-device-field {
     z-index: 48;
     min-height: var(--global-player-height);
     display: grid;
-    grid-template-columns: minmax(260px, 1fr) minmax(180px, 0.8fr) auto;
-    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas:
+        "progress progress progress"
+        "meta     transport aux";
+    column-gap: 16px;
     align-items: center;
-    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    padding: 0 16px calc(10px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--surface-line);
     background: var(--surface-elevated);
     box-shadow: 0 -4px 18px rgba(15, 23, 42, 0.08);
 }
 
+.global-player-progress {
+    grid-area: progress;
+    /* Overrides the shared 42px|1fr|42px time-label grid — the times moved into
+       the meta column, so the track is the only child and spans the full width. */
+    display: block;
+    /* Bleed past the bar padding so the hairline reaches both edges. */
+    margin: 0 -16px 12px;
+}
+
+.global-player-transport {
+    grid-area: transport;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.global-player-bar .global-player-controls {
+    grid-area: aux;
+}
+
 .global-player-main {
+    grid-area: meta;
     min-width: 0;
     display: grid;
-    grid-template-columns: 58px minmax(0, 1fr);
-    gap: 10px;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 12px;
     align-items: center;
     padding: 0;
     text-align: left;
 }
 
 .global-player-cover {
-    width: 58px;
+    width: 48px;
     aspect-ratio: 1;
     display: grid;
     place-items: center;
-    border-radius: var(--radius);
+    border-radius: var(--radius-sm);
     border: 1px solid var(--surface-line);
     overflow: hidden;
     background: var(--surface-solid);
@@ -2240,6 +2263,51 @@ body.playback-target-browser .speaker-device-field {
 .global-player-state {
     color: var(--muted);
     font-size: 12px;
+}
+
+.global-player-subline {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.global-player-time {
+    flex: none;
+    display: inline-flex;
+    gap: 3px;
+    font-variant-numeric: tabular-nums;
+}
+
+.global-player-time-sep {
+    opacity: 0.55;
+}
+
+/* Full-bleed hairline: no rounding, no border, thickens on hover for grabbing. */
+.global-player-progress .player-progress-track {
+    height: 3px;
+    border: 0;
+    border-radius: 0;
+    background: color-mix(in srgb, var(--host-on-surface) 14%, transparent);
+}
+
+.global-player-progress .player-progress-track:hover {
+    height: 6px;
+}
+
+.global-player-progress .player-progress-track[aria-disabled="true"]:hover {
+    height: 3px;
+}
+
+.global-player-progress .player-progress-thumb {
+    opacity: 0;
+    transition: opacity var(--duration-fast) ease, width 150ms, height 150ms;
+}
+
+.global-player-progress .player-progress-track:hover .player-progress-thumb {
+    opacity: 1;
 }
 
 .global-player-controls,
@@ -2533,9 +2601,8 @@ body.playback-target-browser .speaker-device-field {
     grid-template-columns: minmax(0, 1fr) minmax(220px, 0.34fr);
 }
 
-.speaker-operations-layout .metric-grid {
-    grid-template-columns: 1fr;
-}
+/* `.speaker-operations-layout` 已随音箱页重排移除；单列规则由
+   `#tab-speaker .speaker-side-stack .metric-grid` 承接，见文件末尾。 */
 
 .schedule-settings-form {
     display: flex;
@@ -2888,8 +2955,43 @@ legend {
     display: none;
 }
 
+/*
+ * Dark tokens are keyed off TWO independent signals and both must be honoured:
+ *
+ *  - the Songloft host flips its own theme with `html[data-theme="dark"]`;
+ *  - the OS/browser reports `prefers-color-scheme`.
+ *
+ * They disagree routinely (dark host on a light OS, and vice versa). Keying only
+ * off the media query left a dark host with Starlight's light derived tokens:
+ * `common.css` re-maps `--md-surface` per theme but defines no `--md-background`,
+ * so `--host-background` stayed pinned to the light `#f3f5f8` fallback and
+ * `--surface-control` mixed to a pale grey behind dark text.
+ *
+ * The host attribute is authoritative when present; the media query only decides
+ * when the host has expressed no preference. The declarations are duplicated
+ * because plain CSS cannot share one block between a selector and an at-rule.
+ */
+html[data-theme="dark"] {
+    --host-surface: var(--md-sys-color-surface, var(--md-surface, var(--sl-color-surface, #1c222c)));
+    --host-background: var(--md-sys-color-background, var(--md-background, var(--sl-color-background, #0b0f14)));
+    --host-on-surface: var(--md-sys-color-on-surface, var(--md-on-surface, var(--sl-color-text, #eef2f6)));
+    --host-on-surface-variant: var(--md-sys-color-on-surface-variant, var(--md-on-surface-variant, var(--sl-color-text-muted, #a5adba)));
+    --surface-elevated: color-mix(in srgb, var(--host-surface) 55%, transparent);
+    --surface-glass: color-mix(in srgb, var(--host-surface) 48%, transparent);
+    --surface-solid: color-mix(in srgb, var(--host-surface) 78%, transparent);
+    --surface-control: color-mix(in srgb, var(--host-surface) 70%, transparent);
+    --surface-muted: color-mix(in srgb, var(--host-background) 72%, #274866 28%);
+    --glass-highlight: color-mix(in srgb, #ffffff 10%, transparent);
+    --text: var(--host-on-surface);
+    --muted: var(--host-on-surface-variant);
+    --shadow-soft: 0 18px 52px rgba(0, 0, 0, 0.42);
+    --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.28), 0 1px 0 var(--glass-highlight) inset;
+}
+
 @media (prefers-color-scheme: dark) {
-    :root {
+    /* Only when the host has not pinned a theme — an explicit light host must
+       stay light on a dark OS. */
+    html:not([data-theme]) {
         --host-surface: var(--md-sys-color-surface, var(--md-surface, var(--sl-color-surface, #1c222c)));
         --host-background: var(--md-sys-color-background, var(--md-background, var(--sl-color-background, #0b0f14)));
         --host-on-surface: var(--md-sys-color-on-surface, var(--md-on-surface, var(--sl-color-text, #eef2f6)));
@@ -2952,7 +3054,9 @@ legend {
 
 @media (max-width: 760px) {
     :root {
-        --global-player-height: 200px;
+        /* Transport no longer wraps to a second row, so the bar needs far less
+           height — that reclaims ~70px of an already short mobile viewport. */
+        --global-player-height: 128px;
     }
 
     .app-shell {
@@ -3285,5 +3389,2780 @@ legend {
 
     .fullscreen-player-controls button {
         flex: 0 0 auto;
+    }
+}
+
+/* ============================================================
+   UI polish pass — 2026-07
+   Fixes found by reviewing the running plugin at 1440x900 / 390x844.
+   ============================================================ */
+
+/*
+ * Cover-derived accent. player.js samples the artwork and writes
+ * --player-accent onto :root; everything player-related reads it, so the bar
+ * and the fullscreen view tint together. Falls back to the host primary when
+ * sampling is impossible (tainted cross-origin canvas, no artwork).
+ */
+:root {
+    --player-accent: var(--accent);
+}
+
+/*
+ * Rebind --accent inside the player subtrees rather than overriding each rule:
+ * the transport buttons already use `background: var(--accent) !important`, and
+ * this way progress, toggle, active target and mode menu all pick up the
+ * artwork colour through the declarations that are already there.
+ * Lightness/saturation are clamped in player.js so white text stays legible.
+ */
+.global-player-bar,
+.fullscreen-player,
+/* The speaker page's own player card shows the same track as the bar, so it must
+   carry the same artwork accent — otherwise two representations of one playing
+   song sit on screen in different colours. */
+.speaker-player-panel {
+    --accent: var(--player-accent);
+}
+
+/* Search / songlist / ranking control rows.
+   `.wide-field` spans two columns by default, which consumed the trailing
+   `auto` column of `.control-grid.compact` and pushed the submit button onto a
+   second row as a full-width block. In the compact row it takes one column so
+   the button stays inline and baseline-aligned with the inputs. */
+.control-grid.compact > .wide-field {
+    grid-column: auto;
+}
+
+/* Selection helpers are secondary to the actions sitting beside them —
+   six identically weighted outline buttons read as undifferentiated noise. */
+.batch-actions button[data-action^="select-"],
+.batch-actions button[data-action^="clear-"] {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    padding: 0 10px;
+}
+
+.batch-actions button[data-action^="select-"]:hover:not(:disabled),
+.batch-actions button[data-action^="clear-"]:hover:not(:disabled) {
+    background: var(--surface-control);
+    border-color: var(--surface-line);
+    color: var(--text);
+}
+
+/* Result counts were bare numbers floating against the adjacent button, which
+   reads as a rendering fault. Present them as a deliberate count chip. */
+.section-bar .inline-actions > [data-role$="-total"] {
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 9px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-muted);
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The QR frame reserved ~250px of dead space before a code was ever requested. */
+.qr-box:not(.has-qr) {
+    min-height: 132px;
+}
+
+@media (max-width: 760px) {
+    /* Three bands: full-bleed progress, then meta + transport, then the
+       secondary controls. Previously everything sat in one flex row that wrapped,
+       orphaning 停止/列表/刷新 onto a line of their own. */
+    .global-player-bar {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "progress progress"
+            "meta     transport"
+            "aux      aux";
+        row-gap: 8px;
+        align-items: center;
+    }
+
+    .global-player-progress {
+        margin-bottom: 4px;
+    }
+
+    .global-player-bar .global-player-controls {
+        justify-content: center;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .global-player-bar .global-player-controls::-webkit-scrollbar {
+        display: none;
+    }
+
+    .global-player-state {
+        display: none;
+    }
+
+    /* Status chips ate ~250px of an 844px viewport by wrapping onto three rows.
+       One swipeable row instead. */
+    .status-items {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding-bottom: 2px;
+    }
+
+    .status-items::-webkit-scrollbar {
+        display: none;
+    }
+
+    .status-items > * {
+        flex: 0 0 auto;
+    }
+}
+
+/* Fullscreen player: blurred artwork underneath, tinted with the sampled accent
+   so the whole surface reads as one piece instead of a grey scrim over a photo. */
+.fullscreen-player-overlay {
+    background:
+        radial-gradient(120% 80% at 50% 0%,
+            color-mix(in srgb, var(--player-accent) 34%, transparent) 0%,
+            transparent 62%),
+        linear-gradient(to bottom, rgba(11, 18, 32, 0.52), rgba(11, 18, 32, 0.9));
+}
+
+.fullscreen-player-lyrics .fullscreen-player-lyric-line {
+    transition: color var(--duration-fast) ease, opacity var(--duration-fast) ease;
+}
+
+.fullscreen-player-lyrics .fullscreen-player-lyric-line.active {
+    color: #fff;
+    font-weight: 650;
+}
+
+/* The cover and the lyric column were pinned to opposite screen edges on wide
+   viewports, leaving a dead gulf between them. Cap and centre the pair. */
+.fullscreen-player-main {
+    width: min(1040px, 100%);
+    margin-inline: auto;
+}
+
+
+/* ============================================================
+   polish-shell — UI polish pass 2026-07
+   ============================================================ */
+/* ==========================================================================
+   Starlight — app shell (side rail / status strip / page headings) + settings
+   Appended after style.css. Additive only: nothing here contradicts the
+   declarations asserted by tests/ui/static_layout.test.ts.
+   Colours come from existing tokens; no literal surface/text hex.
+   ========================================================================== */
+
+/* Tone aliases. The host publishes theme-aware semantic colours
+   (--md-success / --md-warning / --md-error) that flip with its dark switch;
+   Starlight's own --success/--warning/--danger are fixed light-theme values.
+   Prefer the host's, fall back to ours. */
+:root {
+    --tone-success: var(--md-success, var(--success));
+    --tone-warning: var(--md-warning, var(--warning));
+    --tone-danger: var(--md-error, var(--danger));
+}
+
+/* ==========================================================================
+   1. Side rail — the footer hint was rendered *under* the fixed player bar
+      (rail height 100vh inside a shell padded by --global-player-height), so
+      it was never visible. Bound the rail to the visible column, narrow it,
+      and turn the hint into a deliberate anchored card.
+   ========================================================================== */
+
+/* Must be min-width gated: this block sits after the ≤760px rule that collapses
+   the shell to a single column, so an unconditional declaration would win on
+   mobile and keep reserving a rail track the rail no longer occupies. */
+@media (min-width: 761px) {
+    .app-shell {
+        grid-template-columns: 208px minmax(0, 1fr);
+    }
+}
+
+.side-rail {
+    height: calc(100vh - var(--global-player-height));
+    padding: 16px 10px 14px;
+    gap: 12px;
+}
+
+.brand-lockup {
+    min-height: 0;
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 10px;
+    padding: 2px 6px 12px;
+    border-bottom: 1px solid var(--hairline);
+}
+
+.brand-mark {
+    width: 36px;
+    height: 36px;
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.brand-lockup strong {
+    font-size: 14px;
+    letter-spacing: -0.01em;
+}
+
+.brand-lockup span {
+    font-size: 11px;
+}
+
+.rail-tabs {
+    gap: 3px;
+}
+
+/* Active rail item gets a rail marker, not just a tinted box — it reads as
+   "you are here in this column" instead of "this button is selected". */
+.rail-tab {
+    position: relative;
+    min-height: 42px;
+    padding: 0 10px 0 12px;
+    font-size: 13.5px;
+}
+
+.rail-tab.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 3px;
+    height: 18px;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent);
+    transform: translateY(-50%);
+}
+
+.rail-footer {
+    display: grid;
+    gap: 2px;
+    align-content: end;
+    margin: 0 2px;
+    padding: 10px 12px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+    font-size: 11px;
+}
+
+.rail-footer strong {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 650;
+}
+
+/* Lower bound for the same reason — without it this also outranks the ≤760px
+   single-column rule that appears earlier in the file. */
+@media (min-width: 761px) and (max-width: 980px) {
+    .app-shell {
+        grid-template-columns: 184px minmax(0, 1fr);
+    }
+}
+
+/* ==========================================================================
+   2. Status strip — six heavy pills plus a state pill stranded against the
+      far right edge. Demote the pills to a single hairline-separated meta
+      line and move the connection state to the head of that line, so the
+      strip reads as one sentence instead of scattered badges.
+   ========================================================================== */
+
+.status-strip {
+    min-height: 44px;
+    padding: 6px 18px;
+    gap: 12px;
+    border-bottom: 1px solid var(--hairline);
+}
+
+.status-items {
+    gap: 0;
+    align-items: center;
+}
+
+.status-strip .status-chip {
+    min-height: 26px;
+    gap: 6px;
+    padding: 2px 14px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    font-size: 12px;
+}
+
+/* Tone must colour the indicator, not repaint the whole chip. */
+.status-strip .status-chip,
+.status-strip .status-chip[data-tone] {
+    color: var(--muted);
+}
+
+.status-strip .status-chip:first-child {
+    padding-left: 0;
+}
+
+.status-strip .status-chip + .status-chip {
+    border-left: 1px solid var(--hairline);
+}
+
+.status-strip .status-chip strong {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.status-value {
+    min-width: 0;
+    color: var(--text);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.status-dot {
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+}
+
+.status-chip[data-tone="success"] .status-dot { background: var(--tone-success); }
+.status-chip[data-tone="warning"] .status-dot { background: var(--tone-warning); }
+.status-chip[data-tone="danger"] .status-dot { background: var(--tone-danger); }
+
+.status-chip-state .status-value {
+    font-weight: 650;
+}
+
+.status-chip-state[data-tone="warning"] .status-value { color: var(--tone-warning); }
+.status-chip-state[data-tone="danger"] .status-value { color: var(--tone-danger); }
+
+.status-side {
+    gap: 6px;
+}
+
+/* ==========================================================================
+   3. Page headings — the right-hand slot (a pill on 搜索, a ghost button on
+      歌单/音箱, nothing on 发现/设置) floated to the block's vertical centre,
+      so it landed at a different height on every tab. Bottom-align it to the
+      h1 and give every heading the same trailing rule / spacing.
+   ========================================================================== */
+
+.panel-heading {
+    min-height: 0;
+    align-items: flex-end;
+    gap: 16px;
+    margin: 0 0 16px;
+}
+
+.panel-heading > :first-child {
+    min-width: 0;
+}
+
+.panel-heading > :not(:first-child) {
+    flex: 0 0 auto;
+}
+
+.panel-heading h1 {
+    font-size: 26px;
+}
+
+.eyebrow {
+    margin: 0 0 3px;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+}
+
+.panel-heading .status-pill {
+    min-height: 30px;
+    padding: 0 12px;
+    border-color: var(--hairline);
+    background: var(--surface-muted);
+    font-size: 12px;
+}
+
+.panel-heading .ghost-button {
+    min-height: 38px;
+}
+
+/* Pages that carry their own sub-nav get their rule from the sub-nav, so only
+   the plain ones need one here. Written as :not(:has()) on purpose: if a
+   browser drops the selector the result is "no rule anywhere", which is still
+   consistent, rather than a double rule. */
+.tab-panel:not(:has(> .page-subnav)) .panel-heading {
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--hairline);
+}
+
+/* ==========================================================================
+   4. Sub-navigation — a row of pill buttons was indistinguishable from the
+      ghost/primary action buttons on the same pages, and inactive vs active
+      differed only by fill. Underline tabs separate navigation from action
+      and carry three simultaneous signals: weight, colour, accent bar.
+   ========================================================================== */
+
+.page-subnav {
+    gap: 2px;
+    margin: 0 0 18px;
+    padding: 0;
+    border-bottom: 1px solid var(--hairline);
+    scrollbar-width: none;
+}
+
+.page-subnav::-webkit-scrollbar {
+    display: none;
+}
+
+.page-subnav-item {
+    position: relative;
+    min-height: 42px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    background: transparent;
+    color: color-mix(in srgb, var(--muted) 82%, transparent);
+    font-size: 14px;
+    font-weight: 550;
+}
+
+.page-subnav-item::after {
+    content: "";
+    position: absolute;
+    inset: auto 10px -1px;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: transparent;
+    transition: background var(--duration-fast) ease;
+}
+
+.page-subnav-item.active {
+    color: var(--text);
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    font-weight: 700;
+}
+
+.page-subnav-item.active::after {
+    background: var(--accent);
+}
+
+.page-subnav-item:hover:not(.active):not(:disabled) {
+    color: var(--text);
+    border-color: transparent;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.page-subnav-item:hover:not(.active):not(:disabled)::after {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* ==========================================================================
+   5. Settings forms — label / field / help rhythm, and action rows that
+      belong to their form instead of floating after it.
+   ========================================================================== */
+
+#tab-settings .settings-section > .surface-section:first-child,
+#tab-settings .settings-section > .settings-stack:first-child {
+    margin-top: 0;
+}
+
+#tab-settings .form-stack {
+    gap: 18px;
+}
+
+#tab-settings .field-row {
+    gap: 6px;
+}
+
+#tab-settings .field-row > .field-label {
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+}
+
+/* Help text sat at the same size and weight as its label, so a field read as
+   three equal lines. Step it down. */
+#tab-settings label > .field-help {
+    margin-top: 1px;
+    color: color-mix(in srgb, var(--muted) 88%, transparent);
+    font-size: 11.5px;
+}
+
+/* Standalone notes (sync instructions, AI dependency hint, test caption)
+   get a quiet rule instead of reading as orphaned body copy. */
+#tab-settings p.field-help {
+    margin: 0;
+    padding-left: 12px;
+    border-left: 2px solid var(--hairline);
+    color: var(--muted);
+    font-size: 12px;
+}
+
+/* A checkbox beside a text input had no control frame, so the pair looked
+   misaligned even when it wasn't. Same frame, same height, bottom aligned. */
+#tab-settings .checkbox-field {
+    min-height: var(--control-height);
+    padding: 0 12px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    background: var(--surface-control);
+}
+
+#tab-settings .field-row-inline {
+    padding-top: 0;
+    align-self: end;
+}
+
+/* Form footers: one alignment everywhere. `.lx-sync-actions` also carried
+   `.row-actions`, which right-aligned only that one panel's buttons. */
+#tab-settings .form-actions {
+    justify-content: flex-start;
+    align-items: center;
+    gap: 10px;
+    margin-top: 2px;
+    padding-top: 14px;
+    border-top: 1px solid var(--hairline);
+}
+
+/* "已加载 / 未加载" trailing state belongs at the far end of the footer,
+   vertically centred — not hanging off the button baseline. */
+#tab-settings .inline-actions > [data-role$="-state"] {
+    margin-left: auto;
+    align-self: center;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+/* Section-bar status text becomes a consistent chip across all five
+   sub-sections (洛雪 status, 语音口令 已启用, 定时任务, AI 已开启). */
+#tab-settings .section-bar > span[data-role],
+#tab-settings .section-bar .status-pill,
+#tab-settings .settings-section > .inline-actions > .status-pill {
+    flex: 0 0 auto;
+    min-height: 26px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-pill);
+    background: var(--surface-muted);
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+#tab-settings .section-bar > span[data-state]::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+}
+
+#tab-settings .section-bar > span[data-state="on"]::before {
+    background: var(--tone-success);
+}
+
+/* Loose toolbars (音源导入, 日志 refresh/clear) floated between the heading
+   and the first card with no container of their own. */
+#tab-settings .settings-section > .inline-actions,
+#tab-settings .source-import-toolbar {
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+    background: var(--surface-elevated);
+    box-shadow: var(--shadow-soft);
+}
+
+#tab-settings .empty-state {
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    padding: 20px 16px;
+    background: var(--surface-muted);
+    color: var(--muted);
+    text-align: center;
+}
+
+/* 自动化: the schedule column was pinned to 0.34fr / 220px, which forced a
+   ten-field form into a ~280px gutter. */
+#tab-settings .automation-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.46fr);
+}
+
+#tab-settings .schedule-settings-form {
+    display: grid;
+    gap: 10px;
+    align-items: stretch;
+}
+
+#tab-settings .schedule-settings-form .toggle-line {
+    min-width: 0;
+}
+
+#tab-settings .schedule-settings-form .inline-actions {
+    align-items: center;
+    gap: 10px;
+}
+
+/* ==========================================================================
+   6. Diagnostics log rows — status was carried only by a faint border tint,
+      and five right-aligned meta lines doubled every row's height. Status is
+      now a badge plus a rail; meta is one hairline-separated line.
+   ========================================================================== */
+
+.source-log-list {
+    gap: 8px;
+}
+
+.source-log-row {
+    position: relative;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+    padding: 12px 14px 12px 17px;
+    overflow: hidden;
+}
+
+.source-log-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--muted);
+}
+
+.source-log-row[data-status="success"] {
+    border-color: var(--hairline);
+}
+
+.source-log-row[data-status="success"]::before {
+    background: var(--tone-success);
+}
+
+.source-log-row[data-status="failed"] {
+    border-color: color-mix(in srgb, var(--tone-danger) 32%, var(--hairline));
+}
+
+.source-log-row[data-status="failed"]::before {
+    background: var(--tone-danger);
+}
+
+.source-log-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 22px;
+    padding: 0 9px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-muted);
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.source-log-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.source-log-row[data-status="success"] .source-log-status {
+    color: var(--tone-success);
+    background: color-mix(in srgb, var(--tone-success) 12%, transparent);
+}
+
+.source-log-row[data-status="failed"] .source-log-status {
+    color: var(--tone-danger);
+    background: color-mix(in srgb, var(--tone-danger) 14%, transparent);
+}
+
+.source-log-main {
+    gap: 5px;
+}
+
+.source-log-title {
+    align-items: center;
+    gap: 8px;
+}
+
+.source-log-title strong {
+    color: var(--text);
+    font-size: 13.5px;
+    font-weight: 650;
+}
+
+.source-log-tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.source-log-tags span {
+    padding: 1px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-muted);
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.source-log-main p {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.source-log-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    justify-items: start;
+    text-align: left;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.source-log-meta span {
+    padding: 0 10px;
+}
+
+.source-log-meta span:first-child {
+    padding-left: 0;
+}
+
+.source-log-meta span + span {
+    border-left: 1px solid var(--hairline);
+}
+
+/* ==========================================================================
+   Mobile
+   ========================================================================== */
+
+@media (max-width: 760px) {
+    /* Keep the whole strip on the single swipeable row the lead introduced —
+       stacking `.status-side` underneath cost a full 44px band for one pill,
+       and the connection state now travels with the chips. */
+    .status-strip {
+        grid-template-columns: minmax(0, 1fr) auto;
+        padding: 6px 12px;
+    }
+
+    .status-side {
+        width: auto;
+        justify-content: flex-end;
+    }
+
+    .status-strip .status-chip {
+        padding: 2px 12px;
+    }
+
+    .panel-heading {
+        align-items: flex-end;
+    }
+
+    .panel-heading h1 {
+        font-size: 23px;
+    }
+
+    .page-subnav {
+        margin-bottom: 14px;
+        padding-bottom: 0;
+    }
+
+    .page-subnav-item {
+        min-height: 42px;
+        padding: 0 12px;
+        font-size: 13px;
+    }
+
+    /* A long status chip (上次同步 …) squeezed the section caption to a
+       three-line column. Let it take its own line instead. */
+    #tab-settings .section-bar {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        row-gap: 8px;
+    }
+
+    #tab-settings .section-bar > div:first-child {
+        flex: 1 1 100%;
+    }
+
+    #tab-settings .settings-section > .inline-actions,
+    #tab-settings .source-import-toolbar {
+        padding: 10px;
+    }
+
+    .source-log-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+    }
+
+    .source-log-status {
+        justify-self: start;
+    }
+
+    .source-log-meta {
+        justify-items: start;
+        text-align: left;
+    }
+}
+
+
+/* ============================================================
+   polish-speaker — UI polish pass 2026-07
+   ============================================================ */
+/* ===========================================================================
+   Speaker page polish (#tab-speaker only).
+   Every rule is scoped to #tab-speaker / .speaker-* / .qr-box / .auth-* /
+   .voice-record-* / .device-* so nothing bleeds into the other tabs.
+   Colours come from the existing tokens only, so both host themes work.
+   =========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   1. 账号 / 设备 selection row — 保存设备 sat on its own baseline.
+
+   `.speaker-device-actions` used `repeat(auto-fit, minmax(min(100%,112px),1fr))`
+   inside a ~170px grid column, so the two buttons collapsed onto two rows;
+   `align-items:end` then bottom-aligned that stack and pushed 保存设备 a whole
+   row above the selects it belongs to. The actions are now a flex row that
+   never stacks: inline with the selects when there is room for three columns,
+   and a full-width action row underneath when there is not.
+   --------------------------------------------------------------------------- */
+#tab-speaker .device-selection-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: end;
+    gap: 10px 12px;
+}
+
+#tab-speaker .speaker-device-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 8px;
+}
+
+#tab-speaker .speaker-device-actions > button {
+    width: auto;
+    flex: 0 1 auto;
+    padding: 0 16px;
+}
+
+/* Wide enough for the button pair to share the selects' baseline. */
+@media (min-width: 1241px) {
+    #tab-speaker .device-selection-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) auto;
+    }
+
+    #tab-speaker .speaker-device-actions {
+        grid-column: 3;
+        flex-wrap: nowrap;
+    }
+}
+
+/* ---------------------------------------------------------------------------
+   2. QR frame — placeholder instead of a reserved void.
+
+   Builds on the lead's `.qr-box:not(.has-qr){min-height:132px}`: before a code
+   is requested there is one line of status text, so the dashed frame is a slim
+   strip. It still grows to the full 168px frame the moment `.has-qr` lands.
+   The empty <a data-role="qr-link"> was also adding a grid row + gap.
+   --------------------------------------------------------------------------- */
+#tab-speaker .qr-box {
+    gap: 10px;
+}
+
+#tab-speaker .qr-box:not(.has-qr) {
+    min-height: 56px;
+    align-content: center;
+    padding: 10px 14px;
+    font-size: 12px;
+}
+
+#tab-speaker .qr-box:not(.has-qr) [data-role="qr-link"]:empty {
+    display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   3. Card rhythm — 设备设置 / 播放控制 / 索引 headers and internal spacing.
+
+   Card headers were 34px tall when the trailing element was a status span and
+   44px when it was a ghost button, so 账号 / 设备 / 播放控制 / 索引 / 语音记录
+   never lined up. One header height everywhere; the 设备设置 sub-header matches
+   it; status text becomes the same count-chip the lead already introduced for
+   `[data-role$="-total"]`, so it centres in the header instead of floating on
+   the button's baseline.
+   --------------------------------------------------------------------------- */
+#tab-speaker .surface-section > .section-bar:not(.compact-bar) {
+    min-height: 44px;
+    margin-bottom: 12px;
+}
+
+#tab-speaker .section-bar > span,
+#tab-speaker .section-bar .inline-actions > span,
+#tab-speaker .speaker-settings-actions > [data-role="config-state"] {
+    flex: 0 0 auto;
+    min-height: 26px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-muted);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#tab-speaker .device-settings-header {
+    min-height: 44px;
+}
+
+#tab-speaker .device-settings-header strong {
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+}
+
+#tab-speaker .speaker-device-settings {
+    gap: 12px;
+    padding-top: 14px;
+}
+
+/* 保存设置 and its state were pinned to opposite edges of a ~600px row, so the
+   state read as unrelated to the button that produces it. */
+#tab-speaker .speaker-settings-actions {
+    justify-content: flex-start;
+    gap: 12px;
+}
+
+/* Both top cards close with a saved-items list; give them the same divider and
+   the same distance from the controls above. */
+#tab-speaker [data-role="account-list"],
+#tab-speaker .speaker-device-panel [data-role="device-list"] {
+    margin-top: 14px;
+    border-top: 1px solid var(--surface-line);
+    padding-top: 14px;
+}
+
+#tab-speaker .auth-tabs {
+    margin-bottom: 12px;
+}
+
+#tab-speaker .auth-panel.active {
+    gap: 12px;
+}
+
+/* The 账号 card is far shorter than 设备; stretching it left ~160px of blank
+   card, which reads as a rendering fault rather than as breathing room. */
+#tab-speaker 
+
+/* 索引 metric tiles stacked label-over-value burned 68px each in a 290px
+   column. Label left / value right keeps the vertical stacking (and the long
+   timestamp still wraps) at ~40px a row. */
+#tab-speaker .speaker-side-stack .metric-grid {
+    gap: 6px;
+}
+
+#tab-speaker .speaker-side-stack .metric-grid div {
+    min-height: 0;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+}
+
+#tab-speaker .speaker-side-stack .metric-grid strong {
+    justify-self: end;
+    text-align: right;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 刷新状态 now sits inside the transport row (it used to be an orphan row of
+   its own). Its circular-arrow glyph reads almost identically to the play-mode
+   button at the other end of that row, so keep it visually secondary: smaller,
+   bordered, quieter — a utility control rather than a transport control. */
+#tab-speaker .speaker-player-panel [data-action="speaker-player-refresh"] {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    margin-inline-start: 4px;
+    border: 1px solid var(--surface-line);
+    background: var(--surface-control);
+    color: var(--muted);
+}
+
+#tab-speaker .speaker-player-panel [data-action="speaker-player-refresh"]:hover:not(:disabled) {
+    color: var(--text);
+}
+
+#tab-speaker .speaker-player-panel [data-action="speaker-player-refresh"] i {
+    font-size: 14px;
+}
+
+/* ---------------------------------------------------------------------------
+   4. Account row hierarchy — 删除账号 is destructive, not peer-weight.
+   --------------------------------------------------------------------------- */
+#tab-speaker [data-role="account-list"] .row-actions button[data-action="delete-account"] {
+    border-color: transparent;
+    background: transparent;
+    color: var(--muted);
+}
+
+#tab-speaker [data-role="account-list"] .row-actions button[data-action="delete-account"]:hover:not(:disabled),
+#tab-speaker [data-role="account-list"] .row-actions button[data-action="delete-account"]:focus-visible {
+    border-color: color-mix(in srgb, var(--danger) 46%, var(--surface-line));
+    background: color-mix(in srgb, var(--danger) 10%, var(--surface-solid));
+    color: var(--danger);
+}
+
+/* ---------------------------------------------------------------------------
+   5. Mobile density — the panels were ~3950px tall for very little content.
+   --------------------------------------------------------------------------- */
+@media (max-width: 760px) {
+    #tab-speaker .panel-heading {
+        min-height: 48px;
+        margin-bottom: 12px;
+    }
+
+    #tab-speaker .surface-section {
+        margin-top: 10px;
+        padding: 14px 12px;
+    }
+
+    #tab-speaker .surface-section > .section-bar:not(.compact-bar) {
+        margin-bottom: 10px;
+    }
+
+    #tab-speaker 
+
+    /* children already carry the 10px margin-top above */
+    #tab-speaker .speaker-side-stack {
+        gap: 0;
+    }
+
+    #tab-speaker .speaker-device-panel,
+    #tab-speaker .speaker-player-panel {
+        gap: 12px;
+    }
+
+    /* Device names can be long, so the selects stay full width — but the two
+       actions belong on one row, not two stacked full-width blocks. */
+    #tab-speaker .device-selection-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    #tab-speaker .speaker-device-actions {
+        flex-wrap: nowrap;
+    }
+
+    #tab-speaker .speaker-device-actions > button {
+        flex: 1 1 0;
+        padding: 0 10px;
+    }
+
+    /* Three single-file toggles were three near-empty 40px bands. */
+    #tab-speaker .speaker-device-settings .speaker-settings-toggles {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    #tab-speaker .speaker-settings-actions {
+        align-items: center;
+    }
+
+    #tab-speaker .speaker-settings-actions .primary-button {
+        flex: 0 0 auto;
+        width: auto;
+    }
+
+    #tab-speaker [data-role="account-list"],
+    #tab-speaker .speaker-device-panel [data-role="device-list"] {
+        margin-top: 12px;
+        padding-top: 12px;
+    }
+
+    /* 语音记录 header: the count wrapped onto the title's line while 刷新/清空
+       dropped below it, which read as a broken row. Stack title, then actions. */
+    #tab-speaker .voice-record-panel > .section-bar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+    }
+
+    #tab-speaker .voice-record-panel > .section-bar .inline-actions {
+        align-items: center;
+        justify-content: flex-start;
+    }
+}
+
+
+/* ============================================================
+   polish-music — UI polish pass 2026-07
+   ============================================================ */
+/* ============================================================================
+   Music surfaces polish — search / discover / playlists
+   Scoped to #tab-search, #tab-discover, #tab-playlists and the row primitives
+   those tabs own, so nothing bleeds into speaker/settings/automation.
+   Colours come from existing tokens only, so both host themes stay correct.
+   ========================================================================= */
+
+/* --------------------------------------------------------------------------
+   0. Local tokens for the music lists.
+   -------------------------------------------------------------------------- */
+#tab-search,
+#tab-discover,
+#tab-playlists {
+    --row-pad-x: 12px;
+    --row-pad-y: 10px;
+    --row-art: 44px;
+    --row-gap: 12px;
+}
+
+/* --------------------------------------------------------------------------
+   1. Song rows — hierarchy, alignment rhythm, and titles that stop fighting
+      the action buttons.
+
+   The rows carried four facts (cover, title, byline, provenance) plus four
+   buttons at effectively one visual weight, and the stylesheet forced the
+   buttons onto their own line at every width. On a 1100px-wide results panel
+   that wastes half the vertical space and still leaves the title unanchored.
+
+   Only the two genuinely wide panels — the full-width search results and the
+   ranking song list — get the single-line treatment. The split-view detail
+   panels are ~530px and stay stacked, which is the layout their width supports.
+   -------------------------------------------------------------------------- */
+#tab-search .song-row.media-row,
+#tab-discover .song-row.media-row,
+#tab-playlists .song-row.media-row,
+#tab-search .songlist-row.media-row,
+#tab-discover .songlist-row.media-row,
+#tab-discover .ranking-row.media-row {
+    padding: var(--row-pad-y) var(--row-pad-x);
+    column-gap: var(--row-gap);
+    row-gap: 8px;
+}
+
+/* The cover is the row's anchor: fixed size, its own optical weight, and it
+   never stretches with the text block. */
+#tab-search .media-row > .media-artwork,
+#tab-discover .media-row > .media-artwork,
+#tab-playlists .media-row > .media-artwork {
+    width: var(--row-art);
+    height: var(--row-art);
+    border-radius: var(--radius-sm);
+    align-self: start;
+}
+
+#tab-search .song-check,
+#tab-discover .song-check,
+#tab-playlists .song-check {
+    height: var(--row-art);
+    align-self: start;
+}
+
+/* Three text tiers instead of one flat grey block. */
+#tab-search .media-row .row-main,
+#tab-discover .media-row .row-main,
+#tab-playlists .media-row .row-main {
+    min-width: 0;
+    gap: 3px;
+    align-content: center;
+}
+
+/* Grid items default to a min-content floor; without this the action cluster
+   can refuse to shrink and starve the title track. */
+#tab-search .media-row .row-actions,
+#tab-discover .media-row .row-actions,
+#tab-playlists .media-row .row-actions {
+    min-width: 0;
+}
+
+#tab-search .media-row .row-main > strong,
+#tab-discover .media-row .row-main > strong,
+#tab-playlists .media-row .row-main > strong {
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 620;
+    line-height: 1.35;
+    letter-spacing: -0.005em;
+}
+
+#tab-search .media-row .row-sub,
+#tab-discover .media-row .row-sub,
+#tab-playlists .media-row .row-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+/* Provenance / format / length: three separate facts, so three elements.
+   The format is the one people scan for, so it gets badge treatment. */
+#tab-search .media-row .row-meta,
+#tab-discover .media-row .row-meta,
+#tab-playlists .media-row .row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 1px;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+#tab-search .row-meta-item,
+#tab-discover .row-meta-item,
+#tab-playlists .row-meta-item {
+    color: var(--muted);
+}
+
+#tab-search .row-meta-item + .row-meta-item::before,
+#tab-discover .row-meta-item + .row-meta-item::before,
+#tab-playlists .row-meta-item + .row-meta-item::before {
+    content: "";
+    display: inline-block;
+    width: 3px;
+    height: 3px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.45;
+    vertical-align: middle;
+}
+
+#tab-search .row-meta-quality,
+#tab-discover .row-meta-quality,
+#tab-playlists .row-meta-quality {
+    border-radius: 5px;
+    padding: 1px 6px;
+    background: color-mix(in srgb, var(--accent) 13%, transparent);
+    color: color-mix(in srgb, var(--accent) 78%, var(--text));
+    font-weight: 650;
+    font-size: 10px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+/* The badge already reads as its own block; the leading dot would double up. */
+#tab-search .row-meta-item + .row-meta-quality::before,
+#tab-discover .row-meta-item + .row-meta-quality::before,
+#tab-playlists .row-meta-item + .row-meta-quality::before,
+#tab-search .row-meta-quality + .row-meta-item::before,
+#tab-discover .row-meta-quality + .row-meta-item::before,
+#tab-playlists .row-meta-quality + .row-meta-item::before {
+    display: none;
+}
+
+#tab-search .row-meta-duration,
+#tab-discover .row-meta-duration,
+#tab-playlists .row-meta-duration {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Actions are secondary to the song. They keep their labels but drop to a
+   lighter weight so the title wins the row. */
+#tab-search .media-row .row-actions button,
+#tab-discover .media-row .row-actions button,
+#tab-playlists .media-row .row-actions button {
+    min-height: 30px;
+    padding: 4px 11px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+#tab-search .media-row:hover .row-actions button,
+#tab-discover .media-row:hover .row-actions button,
+#tab-playlists .media-row:hover .row-actions button {
+    border-color: color-mix(in srgb, var(--accent) 22%, var(--surface-line));
+}
+
+/* --- Stacked rows still need a seam between the song and its actions. ----- */
+#tab-search .song-row.media-row .row-actions,
+#tab-discover .song-row.media-row .row-actions,
+#tab-playlists .song-row.media-row .row-actions {
+    margin-top: 2px;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in srgb, var(--surface-line) 60%, transparent);
+    justify-content: flex-start;
+}
+
+/* --- Wide panels: one row, one line. ------------------------------------- */
+@media (min-width: 981px) {
+    #tab-search .song-row.selectable-song-row,
+    #tab-discover [data-role="ranking-songs"] .song-row.selectable-song-row {
+        grid-template-columns: 24px var(--row-art) minmax(0, 1fr) auto;
+        align-items: center;
+    }
+
+    #tab-search .song-row.media-row:not(.selectable-song-row),
+    #tab-discover [data-role="ranking-songs"] .song-row.media-row:not(.selectable-song-row) {
+        grid-template-columns: var(--row-art) minmax(0, 1fr) auto;
+        align-items: center;
+    }
+
+    #tab-search .song-row.media-row .row-actions,
+    #tab-discover [data-role="ranking-songs"] .song-row.media-row .row-actions {
+        grid-column: auto;
+        margin-top: 0;
+        padding-top: 0;
+        border-top: 0;
+        justify-content: flex-end;
+        flex-wrap: nowrap;
+    }
+
+    #tab-search .media-row > .media-artwork,
+    #tab-discover [data-role="ranking-songs"] .media-row > .media-artwork,
+    #tab-search .song-check,
+    #tab-discover [data-role="ranking-songs"] .song-check {
+        align-self: center;
+    }
+
+    /* The button track is auto-sized and the text track is the only flexible
+       one, so long titles truncate instead of shoving actions off the edge. */
+    #tab-search .song-row .row-actions button,
+    #tab-discover [data-role="ranking-songs"] .song-row .row-actions button {
+        white-space: nowrap;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   2. Songlist and ranking rows.
+   -------------------------------------------------------------------------- */
+
+/* Songlist cards keep their three actions but stop letting them eat the title.
+   Gated above the tablet breakpoint: an id-scoped selector outranks the base
+   stylesheet's mobile `grid-template-columns: 1fr`, so leaving it unconditional
+   would silently defeat the stacked mobile layout. */
+@media (min-width: 761px) {
+    #tab-discover .songlist-row.media-row {
+        grid-template-columns: var(--row-art) minmax(0, 1fr) auto;
+        align-items: center;
+    }
+
+    #tab-discover .songlist-row .row-actions {
+        flex-wrap: nowrap;
+    }
+}
+
+#tab-discover .songlist-row .row-main > .row-sub {
+    display: block;
+    -webkit-line-clamp: none;
+}
+
+#tab-discover .row-meta-count {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Boards ship no cover, so every row fell back to the same ♪ tile. The ordinal
+   the renderer now emits needs to look deliberate, not like a broken image. */
+#tab-discover .ranking-row.media-row {
+    min-height: 52px;
+    grid-template-columns: 30px minmax(0, 1fr);
+    align-items: center;
+    padding: 8px 12px;
+}
+
+#tab-discover .ranking-ordinal {
+    width: 30px;
+    height: 30px;
+    display: inline-grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent) 10%, var(--surface-muted));
+    color: color-mix(in srgb, var(--accent) 72%, var(--text));
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+#tab-discover .ranking-row .row-main > strong {
+    font-size: 13.5px;
+}
+
+/* --------------------------------------------------------------------------
+   3. Empty states — framed, centred, and tone-aware.
+
+   These were single sentences sitting flush-left in a dashed box, which reads
+   as leftover debug output. Centring plus a glyph makes an empty list look
+   intentional; the tones separate "nothing here yet" from "still working" and
+   "this failed", which previously looked identical.
+   -------------------------------------------------------------------------- */
+#tab-search .empty-state,
+#tab-discover .empty-state,
+#tab-playlists .empty-state {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 10px;
+    min-height: 132px;
+    padding: 24px 20px;
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--surface-line) 82%, transparent);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--surface-muted) 55%, transparent);
+    color: var(--muted);
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+#tab-search .empty-state::before,
+#tab-discover .empty-state::before,
+#tab-playlists .empty-state::before {
+    content: "♪";
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--accent) 9%, var(--surface-control));
+    color: color-mix(in srgb, var(--accent) 62%, var(--muted));
+    font-size: 18px;
+    line-height: 1;
+}
+
+#tab-search .empty-state[data-empty-tone="loading"]::before,
+#tab-discover .empty-state[data-empty-tone="loading"]::before,
+#tab-playlists .empty-state[data-empty-tone="loading"]::before {
+    content: "";
+    width: 22px;
+    height: 22px;
+    border: 2px solid color-mix(in srgb, var(--surface-line) 90%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    background: none;
+    animation: music-empty-spin 720ms linear infinite;
+}
+
+#tab-search .empty-state[data-empty-tone="error"],
+#tab-discover .empty-state[data-empty-tone="error"],
+#tab-playlists .empty-state[data-empty-tone="error"] {
+    border-color: color-mix(in srgb, var(--danger) 38%, var(--surface-line));
+    background: color-mix(in srgb, var(--danger) 7%, transparent);
+    color: color-mix(in srgb, var(--danger) 72%, var(--text));
+}
+
+#tab-search .empty-state[data-empty-tone="error"]::before,
+#tab-discover .empty-state[data-empty-tone="error"]::before,
+#tab-playlists .empty-state[data-empty-tone="error"]::before {
+    content: "!";
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    color: var(--danger);
+    font-weight: 700;
+}
+
+/* Inline slots (playlist detail, library sub-panels) should not open a 132px
+   crater inside an already-small card. */
+#tab-playlists .list-stack.tight .empty-state,
+#tab-search .songloft-library-section .empty-state,
+#tab-discover .list-stack .empty-state {
+    min-height: 108px;
+    padding: 18px 16px;
+}
+
+@keyframes music-empty-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #tab-search .empty-state[data-empty-tone="loading"]::before,
+    #tab-discover .empty-state[data-empty-tone="loading"]::before,
+    #tab-playlists .empty-state[data-empty-tone="loading"]::before {
+        animation: none;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   4. Pagination — two groups, not five loose controls.
+
+   Previously five siblings in one right-aligned flex row: the page readout sat
+   between two buttons with the same border as the jump field, and on narrow
+   panels 跳转 orphaned onto a second line by itself.
+   -------------------------------------------------------------------------- */
+#tab-search .pagination-bar,
+#tab-discover .pagination-bar,
+#tab-playlists .pagination-bar {
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid color-mix(in srgb, var(--surface-line) 70%, transparent);
+}
+
+#tab-search .pagination-pager,
+#tab-discover .pagination-pager,
+#tab-playlists .pagination-pager {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    border: 1px solid var(--surface-line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-control);
+    overflow: hidden;
+}
+
+#tab-search .pagination-pager > button,
+#tab-discover .pagination-pager > button,
+#tab-playlists .pagination-pager > button {
+    min-height: 32px;
+    border: 0;
+    border-radius: 0;
+    padding: 0 14px;
+    background: transparent;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 550;
+}
+
+#tab-search .pagination-pager > button:hover:not(:disabled),
+#tab-discover .pagination-pager > button:hover:not(:disabled),
+#tab-playlists .pagination-pager > button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+}
+
+#tab-search .pagination-pager > button:disabled,
+#tab-discover .pagination-pager > button:disabled,
+#tab-playlists .pagination-pager > button:disabled {
+    color: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+
+#tab-search .pagination-status,
+#tab-discover .pagination-status,
+#tab-playlists .pagination-status {
+    padding: 0 12px;
+    border-left: 1px solid var(--surface-line);
+    border-right: 1px solid var(--surface-line);
+    align-self: stretch;
+    display: inline-flex;
+    align-items: center;
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+#tab-search .pagination-jump,
+#tab-discover .pagination-jump,
+#tab-playlists .pagination-jump {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#tab-search .pagination-jump label,
+#tab-discover .pagination-jump label,
+#tab-playlists .pagination-jump label {
+    gap: 8px;
+    white-space: nowrap;
+}
+
+#tab-search .pagination-bar input,
+#tab-discover .pagination-bar input,
+#tab-playlists .pagination-bar input {
+    width: 56px;
+    min-height: 32px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-control);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+#tab-search .pagination-jump > button,
+#tab-discover .pagination-jump > button,
+#tab-playlists .pagination-jump > button {
+    min-height: 32px;
+    border-radius: var(--radius-pill);
+    padding: 0 14px;
+    background: var(--surface-control);
+    font-size: 12px;
+    font-weight: 550;
+}
+
+/* --------------------------------------------------------------------------
+   5. Discover layout — even gutters, matched card heights, forms that fit.
+   -------------------------------------------------------------------------- */
+
+/* Left and right panels grew to whatever their content needed, so the pair
+   never lined up at the bottom. Stretching them and letting the list take the
+   slack gives the split view one baseline. */
+#tab-discover .split-view {
+    align-items: stretch;
+    gap: 16px;
+}
+
+#tab-discover .split-view > .surface-section {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    margin-top: 0;
+}
+
+#tab-discover .split-view > .surface-section > .list-stack {
+    flex: 1 1 auto;
+    align-content: start;
+}
+
+#tab-discover .songlist-discovery > .section-bar {
+    margin-bottom: 10px;
+}
+
+/* Every grid override below is gated: `#tab-discover .x` outranks the base
+   stylesheet's `.x { grid-template-columns: 1fr }` inside its mobile media
+   query, so an unconditional override would break the narrow layouts. */
+@media (min-width: 981px) {
+    /* The songlist form has five controls in a four-column grid, so 推荐 wrapped
+       to a second row and stretched into a 245px block that outweighed the real
+       submit. Both submits belong in the same trailing band. */
+    #tab-discover [data-role="songlist-form"] {
+        grid-template-columns:
+            minmax(128px, 180px) minmax(120px, 150px)
+            minmax(200px, 1fr) auto auto;
+    }
+
+    /* The rankings row has three controls in the same four-column grid, so the
+       primary button inherited the 1fr keyword track and spanned ~1100px. */
+    #tab-discover [data-discover-panel="rankings"] > .control-grid.compact {
+        grid-template-columns: minmax(128px, 180px) minmax(120px, 150px) auto;
+        justify-content: start;
+    }
+
+    #tab-discover [data-discover-panel="rankings"] > .control-grid.compact > .primary-button {
+        min-width: 128px;
+    }
+
+    /* Boards need less width than songs; 0.42fr let them float in a half-empty
+       column while the song list stayed cramped. */
+    #tab-discover .ranking-layout {
+        grid-template-columns: minmax(200px, 0.34fr) minmax(0, 1.66fr);
+    }
+}
+
+/* The bulk actions under a detail list were an undifferentiated wrap of six
+   buttons that overflowed the card edge. Give them a footer band. */
+#tab-discover .list-actions-bar {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid color-mix(in srgb, var(--surface-line) 70%, transparent);
+    align-items: center;
+    gap: 8px 6px;
+}
+
+#tab-discover .list-actions-bar > button {
+    min-height: 32px;
+    font-size: 12px;
+}
+
+/* Reordering the submit to the far right pushed it onto a line of its own once
+   the six buttons wrapped. It keeps its source position and just carries more
+   weight than the helpers around it. */
+#tab-discover .list-actions-bar > .primary-button {
+    font-weight: 620;
+}
+
+/* --------------------------------------------------------------------------
+   6. Section counts.
+
+   The lead's count chip only matched counts nested in `.inline-actions`. The
+   discover and library headings put theirs as a bare direct child, so `1752`
+   floated unstyled at the far edge of the page, outside any card.
+   -------------------------------------------------------------------------- */
+#tab-search .section-bar > [data-role$="-total"],
+#tab-discover .section-bar > [data-role$="-total"],
+#tab-playlists .section-bar > [data-role$="-total"] {
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    padding: 0 9px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-muted);
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   7. Batch actions — group the destructive-free selection helpers.
+   -------------------------------------------------------------------------- */
+#tab-search .batch-actions {
+    gap: 6px;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface-line) 70%, transparent);
+}
+
+/* A hairline between "choose things" and "do things" so six pills stop reading
+   as one undifferentiated strip. */
+#tab-search .batch-actions button[data-action^="import-"] {
+    margin-left: 6px;
+    position: relative;
+}
+
+#tab-search .batch-actions button[data-action^="import-"]::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 6px;
+    bottom: 6px;
+    width: 1px;
+    background: var(--surface-line);
+}
+
+/* --------------------------------------------------------------------------
+   8. Playlists tab.
+   -------------------------------------------------------------------------- */
+#tab-playlists .inline-form {
+    align-items: end;
+    gap: 10px;
+}
+
+#tab-playlists .inline-form > label {
+    flex: 1 1 260px;
+    min-width: 0;
+}
+
+#tab-playlists [data-role="custom-playlist-import-form"] > label:first-of-type {
+    flex: 0 1 220px;
+}
+
+/* The target-playlist select and its help text were flush against the create
+   form above with no separation, so the panel read as one long field run. */
+#tab-playlists .surface-section > label {
+    display: grid;
+    gap: 6px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid color-mix(in srgb, var(--surface-line) 70%, transparent);
+}
+
+#tab-playlists .surface-section > label > span {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 650;
+}
+
+@media (min-width: 761px) {
+    #tab-playlists .custom-playlist-row {
+        grid-template-columns: var(--row-art) minmax(0, 1fr) auto;
+        align-items: center;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   9. List scrollers — a soft edge so a clipped list looks scrollable rather
+      than truncated.
+   -------------------------------------------------------------------------- */
+#tab-search .list-scroll,
+#tab-discover .list-scroll,
+#tab-playlists .list-scroll {
+    padding-right: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted) 34%, transparent) transparent;
+}
+
+#tab-search .list-scroll::-webkit-scrollbar,
+#tab-discover .list-scroll::-webkit-scrollbar,
+#tab-playlists .list-scroll::-webkit-scrollbar {
+    width: 8px;
+}
+
+#tab-search .list-scroll::-webkit-scrollbar-thumb,
+#tab-discover .list-scroll::-webkit-scrollbar-thumb,
+#tab-playlists .list-scroll::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--muted) 30%, transparent);
+    background-clip: content-box;
+}
+
+/* --------------------------------------------------------------------------
+   10. Mobile — rows stop wrapping awkwardly and nothing overflows sideways.
+   -------------------------------------------------------------------------- */
+@media (max-width: 760px) {
+    #tab-search,
+    #tab-discover,
+    #tab-playlists {
+        --row-pad-x: 11px;
+        --row-pad-y: 10px;
+        --row-art: 42px;
+        --row-gap: 10px;
+    }
+
+    /* At 390px the actions get their own band under the text. A non-wrapping
+       scroll strip was tried first and is wrong here: `.row-actions` shares the
+       1fr track with `.row-main` in the base mobile grid, so its min-content
+       width crushed the title column to nothing. Wrapping is correct; the band
+       just needs a rule separating it from the metadata above. */
+    #tab-search .song-row .row-actions,
+    #tab-discover .song-row .row-actions,
+    #tab-playlists .song-row .row-actions,
+    #tab-playlists .custom-playlist-song-row .row-actions,
+    #tab-discover .songlist-row .row-actions {
+        min-width: 0;
+        margin-top: 2px;
+        padding-top: 8px;
+        border-top: 1px solid color-mix(in srgb, var(--surface-line) 60%, transparent);
+        justify-content: flex-start;
+    }
+
+    #tab-search .song-row .row-actions > button,
+    #tab-discover .song-row .row-actions > button,
+    #tab-playlists .song-row .row-actions > button,
+    #tab-discover .songlist-row .row-actions > button {
+        white-space: nowrap;
+    }
+
+    /* Three actions cannot sit beside a title on a 366px card. */
+    #tab-discover .songlist-row.media-row {
+        grid-template-columns: var(--row-art) minmax(0, 1fr);
+    }
+
+    #tab-discover .songlist-row .row-actions {
+        grid-column: 1 / -1;
+    }
+
+    /* The jump field was orphaning 跳转 onto its own right-aligned line. */
+    #tab-search .pagination-bar,
+    #tab-discover .pagination-bar,
+    #tab-playlists .pagination-bar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        justify-items: stretch;
+        gap: 8px;
+    }
+
+    #tab-search .pagination-pager,
+    #tab-discover .pagination-pager,
+    #tab-playlists .pagination-pager {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+
+    #tab-search .pagination-status,
+    #tab-discover .pagination-status,
+    #tab-playlists .pagination-status {
+        justify-content: center;
+    }
+
+    #tab-search .pagination-jump,
+    #tab-discover .pagination-jump,
+    #tab-playlists .pagination-jump {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    #tab-search .pagination-jump label,
+    #tab-discover .pagination-jump label,
+    #tab-playlists .pagination-jump label {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    #tab-search .pagination-bar input,
+    #tab-discover .pagination-bar input,
+    #tab-playlists .pagination-bar input {
+        width: 100%;
+    }
+
+    #tab-discover .list-actions-bar {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        padding-bottom: 4px;
+    }
+
+    #tab-discover .list-actions-bar > button {
+        flex: 0 0 auto;
+    }
+
+    #tab-search .batch-actions button[data-action^="import-"] {
+        margin-left: 0;
+    }
+
+    #tab-search .batch-actions button[data-action^="import-"]::before {
+        display: none;
+    }
+
+    #tab-discover .split-view {
+        gap: 12px;
+    }
+
+    #tab-search .empty-state,
+    #tab-discover .empty-state,
+    #tab-playlists .empty-state {
+        min-height: 116px;
+        padding: 20px 16px;
+    }
+}
+
+
+/* ============================================================
+   polish2-density — UI polish pass 2 (2026-07)
+   ============================================================ */
+/* ============================================================================
+   polish2-density — 全局密度与呼吸感 / overall spacing rhythm
+   ----------------------------------------------------------------------------
+   The previous polish pass normalised card headers to 44px, cut ~300px off the
+   mobile panels and shrank section padding. The alignment it bought is worth
+   keeping; the airlessness is not. This file restores the OUTER rhythm only —
+   card padding, card-to-card distance, page padding, heading-to-body distance
+   and label/field/help spacing — and expresses every value through one explicit
+   scale so the result is a system rather than a pile of magic numbers.
+
+   Scope: containers. Row internals (.media-row/.song-row/.list-stack items,
+   .pagination-bar, .batch-actions, .row-actions, the drawer) and the
+   #tab-speaker grid placement belong to other passes and are untouched here.
+
+   Additive only: nothing below contradicts tests/ui/static_layout.test.ts.
+   Colours/radii come from existing tokens, so both host themes stay correct.
+   ========================================================================== */
+
+/* ==========================================================================
+   0. The scale.
+
+   Six steps on a 4px base. The ratio that matters is not the absolute values
+   but the jump between tiers: 4 (attached) → 8 (within a group) → 20 (between
+   groups). A label sitting 8px above its input and 20px away from the next
+   field reads as one object; at 6px/14px it read as porridge.
+
+   Semantic aliases sit on top and are re-pointed at the ≤760px breakpoint, so
+   consumers only ever reference the alias and get the right value per device.
+   ========================================================================== */
+:root {
+    --space-1: 4px;   /* attached: control → its help text, dot → label */
+    --space-2: 8px;   /* within a group: label → control */
+    --space-3: 12px;  /* within a group, horizontally: adjacent field columns */
+    --space-4: 16px;  /* group → group: section heading → body */
+    --space-5: 20px;  /* card padding, card → card, field → field */
+    --space-6: 28px;  /* page level: page gutters */
+
+    /* --- semantic aliases (breakpoint-aware; prefer these) --- */
+    --card-pad-x: var(--space-5);
+    --card-pad-y: var(--space-5);
+    --card-gap: var(--space-5);      /* .surface-section → .surface-section */
+    --section-gap: var(--space-4);   /* .section-bar → its body */
+    --field-gap: var(--space-5);     /* .form-stack row → row */
+    --gap-label: var(--space-2);     /* label → control */
+    --gap-help: var(--space-1);      /* control → help text */
+    --page-pad-x: var(--space-6);
+    --page-pad-y: var(--space-5);
+}
+
+/* ==========================================================================
+   1. Typography — the cheapest breathing room there is.
+
+   body was 14px/1.45 with -0.011em tracking. Negative tracking on a mixed
+   CJK/Latin UI closes up the gaps *inside* every word, which is a large part
+   of why the screen reads as crowded even where the boxes are fine. Taking the
+   tracking back to ~neutral is the single cheapest fix here: it costs no
+   vertical space at all.
+
+   Leading is split rather than raised globally. UI chrome (labels, buttons,
+   single-line rows) gets 1.5 — enough, and every extra 0.05 there multiplies
+   across hundreds of rows on the long pages. Running prose (captions, help
+   text) gets 1.6, which is where leading actually buys readability.
+   ========================================================================== */
+body {
+    line-height: 1.5;
+    letter-spacing: -0.003em;
+}
+
+.panel-heading h1 {
+    line-height: 1.2;
+}
+
+/* ==========================================================================
+   2. Page frame — .tab-panel gutters.
+
+   18px/20px gutters on a 1232px content column made the cards look pasted to
+   the edges. Wider side gutters cost zero vertical scroll, so this is free
+   breathing room on the axis that is not under pressure.
+   ========================================================================== */
+.tab-panel {
+    padding: var(--page-pad-y) var(--page-pad-x) var(--space-6);
+}
+
+/* ==========================================================================
+   3. Page heading — eyebrow / h1 / right-hand slot.
+
+   The 44px-header and bottom-align work from the previous pass is kept as is
+   (align-items, min-height, the trailing rule). Only the rhythm around it
+   changes: the eyebrow gets a hair more room and more tracking so it reads as
+   a label rather than as a smudge, and the heading block stands further off
+   the content it introduces.
+   ========================================================================== */
+.panel-heading {
+    gap: var(--space-5);
+    margin: 0 0 var(--space-5);
+}
+
+.eyebrow {
+    margin: 0 0 var(--space-1);
+    font-size: 11px;
+    letter-spacing: 0.09em;
+}
+
+.tab-panel:not(:has(> .page-subnav)) .panel-heading {
+    padding-bottom: var(--space-4);
+}
+
+.page-subnav {
+    margin: 0 0 var(--space-5);
+}
+
+/* ==========================================================================
+   4. Cards — .surface-section padding and card-to-card distance.
+
+   This is the single biggest contributor. 16px of padding around a 44px
+   control on a card that is 1100px wide is a ratio that reads as "packed";
+   14px between cards is barely more than the internal gaps, so a column of
+   cards read as one striped block instead of as separate objects.
+
+   Card gap == card padding on purpose: the distance between two cards then
+   matches the distance from a card's edge to its content, which is what makes
+   a stack scan as evenly weighted.
+   ========================================================================== */
+.surface-section {
+    padding: var(--card-pad-y) var(--card-pad-x);
+    margin-top: var(--card-gap);
+}
+
+.settings-stack,
+.two-column,
+.split-view {
+    gap: var(--card-gap);
+}
+
+.songlist-discovery {
+    margin-top: var(--card-gap);
+}
+
+#tab-discover .split-view {
+    gap: var(--card-gap);
+}
+
+/* ==========================================================================
+   5. Section heading → body.
+
+   `.section-bar` kept its 44px alignment height; only the space beneath it
+   grows, so a card now reads header / rule of air / body instead of one
+   continuous run of text.
+   ========================================================================== */
+.section-bar {
+    gap: var(--space-3);
+    margin-bottom: var(--section-gap);
+}
+
+.section-caption {
+    margin-top: var(--space-1);
+    line-height: 1.6;
+}
+
+/* Same distance in the two places that had overridden it with tighter values,
+   so every card in the app has one heading→body measurement. The 44px
+   min-height from the alignment pass is deliberately not touched. */
+#tab-speaker .surface-section > .section-bar:not(.compact-bar) {
+    margin-bottom: var(--section-gap);
+}
+
+#tab-discover .songlist-discovery > .section-bar {
+    margin-bottom: var(--section-gap);
+}
+
+/* ==========================================================================
+   6. Forms — label → control → help, and field → field.
+
+   The hierarchy is the point: 8px binds a label to its control, 4px binds help
+   text to the control above it, 20px separates one field group from the next.
+   The help text is pulled back up with a negative margin so a single grid gap
+   can express two different distances without extra markup.
+   ========================================================================== */
+.form-stack,
+#tab-settings .form-stack {
+    gap: var(--field-gap);
+}
+
+/* A login panel nested inside a card is a group, not a page: it stays one step
+   tighter than a page-level form so the card still reads as a single object.
+   (It had chosen 10px on its own; this keeps that intent on the scale.) */
+.auth-login-form {
+    gap: var(--space-3);
+}
+
+label,
+.field-row,
+#tab-settings .field-row,
+#tab-playlists .surface-section > label {
+    gap: var(--gap-label);
+}
+
+label > .field-help,
+.field-row > .field-help,
+#tab-settings label > .field-help {
+    margin-top: calc(var(--gap-help) - var(--gap-label));
+}
+
+.control-grid,
+.toggle-grid {
+    gap: var(--space-4) var(--space-3);
+}
+
+.control-stack {
+    gap: var(--space-3);
+}
+
+/* Help copy was set at 1.35 — tighter than body text it is smaller than, which
+   is backwards: small type needs more leading, not less. */
+.field-help {
+    line-height: 1.6;
+}
+
+#tab-settings p.field-help {
+    line-height: 1.6;
+}
+
+/* Form footer: attached to its form (small margin) but clearly below the last
+   field (rule + generous padding). */
+#tab-settings .form-actions {
+    margin-top: var(--space-1);
+    padding-top: var(--space-4);
+    gap: var(--space-3);
+}
+
+/* The schedule form's own gap (10px) was barely wider than the 8px that binds a
+   label to its input, so ten fields read as one undifferentiated column. Give
+   field-to-field the group-separation step. */
+#tab-settings .schedule-settings-form {
+    gap: var(--space-4);
+}
+
+/* Loose toolbars were given a card in the previous pass; give them the card's
+   rhythm too instead of a tighter one of their own. */
+#tab-settings .settings-section > .inline-actions,
+#tab-settings .source-import-toolbar {
+    gap: var(--space-3);
+    margin: 0 0 var(--card-gap);
+    padding: var(--space-3) var(--space-4);
+}
+
+/* The divider-separated tail sections inside cards follow the card padding, so
+   the rule sits midway between two equal bands rather than off-centre. */
+#tab-speaker [data-role="account-list"],
+#tab-speaker .speaker-device-panel [data-role="device-list"] {
+    margin-top: var(--card-pad-y);
+    padding-top: var(--card-pad-y);
+}
+
+#tab-playlists .surface-section > label {
+    margin-top: var(--card-pad-y);
+    padding-top: var(--card-pad-y);
+}
+
+/* ==========================================================================
+   7. Mobile — the same system, one step down.
+
+   390×844 minus a 128px player bar minus a 64px tab bar leaves ~650px of
+   content, so the aliases are re-pointed one step down rather than reused —
+   the whole mobile layout lives on steps 3 and 4. Card padding and card gap
+   still match each other (16/16), which is what the desktop rhythm is built
+   on; what gives way is the *inside* of a card, where 12px is enough to
+   separate a heading from its body at this width. Side gutters stay at 12px so
+   the rows other passes own keep their horizontal budget. The only place that
+   gains height on purpose is the page tail, which previously let the last card
+   run under the tab bar.
+   ========================================================================== */
+@media (max-width: 760px) {
+    :root {
+        --card-pad-x: var(--space-4);
+        --card-pad-y: var(--space-4);
+        --card-gap: var(--space-4);
+        --section-gap: var(--space-3);
+        --field-gap: var(--space-4);
+        --page-pad-x: var(--space-3);
+        --page-pad-y: var(--space-4);
+    }
+
+    .tab-panel {
+        padding: var(--page-pad-y) var(--page-pad-x) var(--space-5);
+    }
+
+    .panel-heading {
+        gap: var(--space-3);
+        margin-bottom: var(--space-4);
+    }
+
+    .page-subnav {
+        margin-bottom: var(--space-4);
+    }
+
+    /* The speaker page had its own tighter card metrics; fold it back into the
+       shared scale so one measurement holds across every tab. Grid placement
+       on that page is another pass's territory and is not touched. */
+    #tab-speaker .surface-section {
+        margin-top: var(--card-gap);
+        padding: var(--card-pad-y) var(--card-pad-x);
+    }
+
+    /* The rule above outranks `.speaker-top-layout > .surface-section{margin-top:0}`
+       on id alone, which would double the top pair's gap (grid gap + margin).
+       Restore it and let the grid own that distance. */
+    #tab-speaker 
+
+    #tab-speaker 
+
+    #tab-speaker .panel-heading {
+        margin-bottom: var(--space-4);
+    }
+
+    #tab-speaker .surface-section > .section-bar:not(.compact-bar) {
+        margin-bottom: var(--section-gap);
+    }
+
+    #tab-speaker [data-role="account-list"],
+    #tab-speaker .speaker-device-panel [data-role="device-list"] {
+        margin-top: var(--card-pad-y);
+        padding-top: var(--card-pad-y);
+    }
+
+    #tab-discover .split-view {
+        gap: var(--card-gap);
+    }
+
+    #tab-settings .settings-section > .inline-actions,
+    #tab-settings .source-import-toolbar {
+        padding: var(--space-3);
+    }
+
+    /* Pre-existing overflow, not a side effect of this pass: 自动化 is
+       `.settings-stack.two-column.automation-layout`, and the id-qualified
+       `#tab-settings .automation-layout{... minmax(320px,.46fr)}` outranks the
+       `.two-column{1fr}` inside this very media query. On a 390px screen the
+       320px minimum forced 语音口令 into a ~90px column of vertical characters
+       and pushed 定时任务 off-screen. Collapse it like every other layout. */
+    #tab-settings .automation-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+
+/* ============================================================
+   polish2-lists — UI polish pass 2 (2026-07)
+   ============================================================ */
+/* ==========================================================================
+   polish2-lists.css — list & control-cluster density.
+
+   Problem: the previous pass squeezed every list row down to a ~68px shell
+   (measured 80.9px rendered on desktop search) with 8px between rows, 3px
+   between the three text tiers and 6px between action pills. Nothing is
+   broken, but there is no air anywhere: the rows read as one striped block
+   and the text block inside a row reads as a paragraph.
+
+   Approach: give the row back its interior padding and inter-tier rhythm,
+   widen the gutter between rows, and let the artwork be as tall as the text
+   it anchors. Rows still have to be scannable, so the target is ~8-9 rows in
+   a 900px viewport rather than the 5-6 a "comfortable" list would give.
+
+   Spacing comes from the shared --space-N scale (defined by polish2-density
+   .css, which loads first). Fallbacks match the standard 4/8/12/16/24/32
+   ramp so this file is correct on its own.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. List containers.
+   -------------------------------------------------------------------------- */
+
+/* 8px between bordered cards is a hairline, not a gutter — consecutive rows
+   merged into a single ruled band. */
+.list-stack {
+    gap: var(--space-3, 12px);
+}
+
+.list-stack.tight {
+    gap: var(--space-2, 8px);
+    margin-top: var(--space-3, 12px);
+}
+
+.search-results-scroll,
+.songlist-results-scroll,
+.songlist-detail-scroll,
+.ranking-songs-scroll,
+.custom-playlist-detail-scroll {
+    margin-top: var(--space-3, 12px);
+}
+
+/* Taller rows inside an unchanged 62vh window would have cut the visible row
+   count from ~6.3 to ~5.4. Raising the cap keeps the same number of rows in
+   view, and a nested scroller that ends closer to the fold is also less
+   confusing than one that stops two rows early.
+   Scoped to the music tabs: the speaker tab's scrollers sit in a fixed-height
+   grid that another pass owns. */
+#tab-search .list-scroll,
+#tab-discover .list-scroll,
+#tab-playlists .list-scroll {
+    max-height: min(72vh, 760px);
+}
+
+/* --------------------------------------------------------------------------
+   2. Row rhythm tokens.
+
+   The three media tabs already drive their rows off four custom properties,
+   so the whole desktop density change is four numbers.
+   -------------------------------------------------------------------------- */
+#tab-search,
+#tab-discover,
+#tab-playlists {
+    --row-pad-x: var(--space-4, 16px);
+    --row-pad-y: 14px;
+    --row-art: 48px;
+    --row-gap: 14px;
+}
+
+/* The seam between the text block and a stacked action band. */
+#tab-search .song-row.media-row,
+#tab-discover .song-row.media-row,
+#tab-playlists .song-row.media-row,
+#tab-search .songlist-row.media-row,
+#tab-discover .songlist-row.media-row,
+#tab-discover .ranking-row.media-row {
+    row-gap: 10px;
+}
+
+/* --------------------------------------------------------------------------
+   3. Inside a row: three tiers that read as three tiers.
+   -------------------------------------------------------------------------- */
+#tab-search .media-row .row-main,
+#tab-discover .media-row .row-main,
+#tab-playlists .media-row .row-main {
+    gap: 5px;
+}
+
+#tab-search .media-row .row-main > strong,
+#tab-discover .media-row .row-main > strong,
+#tab-playlists .media-row .row-main > strong {
+    line-height: 1.4;
+}
+
+#tab-search .media-row .row-meta,
+#tab-discover .media-row .row-meta,
+#tab-playlists .media-row .row-meta {
+    gap: 7px;
+    margin-top: 3px;
+}
+
+#tab-search .row-meta-item + .row-meta-item::before,
+#tab-discover .row-meta-item + .row-meta-item::before,
+#tab-playlists .row-meta-item + .row-meta-item::before {
+    margin-right: 7px;
+}
+
+/* The badge was 1px of padding around 10px type — a label with no box. */
+#tab-search .row-meta-quality,
+#tab-discover .row-meta-quality,
+#tab-playlists .row-meta-quality {
+    padding: 2px 7px;
+    border-radius: 6px;
+}
+
+/* --------------------------------------------------------------------------
+   4. Row actions.
+   -------------------------------------------------------------------------- */
+.row-actions {
+    gap: var(--space-2, 8px);
+}
+
+#tab-search .media-row .row-actions button,
+#tab-discover .media-row .row-actions button,
+#tab-playlists .media-row .row-actions button {
+    min-height: 32px;
+    padding: 5px 13px;
+}
+
+/* Stacked layouts (mobile, and the narrow split-view panels) put the actions
+   under the text. That band needs its own breathing room, not just a rule. */
+#tab-search .song-row.media-row .row-actions,
+#tab-discover .song-row.media-row .row-actions,
+#tab-playlists .song-row.media-row .row-actions {
+    margin-top: 3px;
+    padding-top: 10px;
+}
+
+/* --------------------------------------------------------------------------
+   5. Rows outside the media tabs — sources, custom-playlist songs.
+   -------------------------------------------------------------------------- */
+.song-row,
+.source-row,
+.songlist-row,
+.ranking-row,
+.custom-playlist-song-row {
+    padding: 12px 14px;
+}
+
+.song-row,
+.source-row {
+    min-height: 60px;
+    gap: var(--space-3, 12px);
+}
+
+.songlist-row,
+.ranking-row {
+    min-height: 58px;
+    gap: var(--space-3, 12px);
+}
+
+/* --------------------------------------------------------------------------
+   6. Ranking boards — the ordinal is the row's anchor, so it gets the same
+      optical weight as an artwork tile would.
+   -------------------------------------------------------------------------- */
+#tab-discover .ranking-row.media-row {
+    min-height: 58px;
+    grid-template-columns: 36px minmax(0, 1fr);
+    padding: 11px var(--row-pad-x);
+    column-gap: 12px;
+}
+
+/* `#tab-discover .media-row > .media-artwork` (id + 2 classes) outranked the
+   single-class `.ranking-ordinal` rule, so the ordinal tile was silently
+   rendered at --row-art and overflowed its own 30px grid track. Matching the
+   winning selector's weight is what makes the declared size take effect. */
+#tab-discover .media-row > .ranking-ordinal {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+}
+
+/* --------------------------------------------------------------------------
+   7. Batch actions and list action bars.
+
+   Six pills at a 6px gap read as one strip. Widening the gap and the band
+   below them separates "pick things" from "the list you are picking from".
+   -------------------------------------------------------------------------- */
+.batch-actions {
+    gap: var(--space-2, 8px) 10px;
+    margin-bottom: var(--space-3, 12px);
+}
+
+.batch-actions button {
+    min-height: 34px;
+}
+
+#tab-search .batch-actions {
+    gap: var(--space-2, 8px);
+    padding-bottom: var(--space-3, 12px);
+    margin-bottom: var(--space-4, 16px);
+}
+
+#tab-search .batch-actions button[data-action^="import-"] {
+    margin-left: var(--space-2, 8px);
+}
+
+#tab-search .batch-actions button[data-action^="import-"]::before {
+    left: -9px;
+    top: 7px;
+    bottom: 7px;
+}
+
+.inline-actions {
+    gap: 10px;
+}
+
+#tab-discover .list-actions-bar {
+    margin-top: var(--space-4, 16px);
+    padding-top: var(--space-3, 12px);
+    gap: 10px var(--space-2, 8px);
+}
+
+#tab-discover .list-actions-bar > button {
+    min-height: 34px;
+}
+
+/* --------------------------------------------------------------------------
+   8. Pagination.
+   -------------------------------------------------------------------------- */
+#tab-search .pagination-bar,
+#tab-discover .pagination-bar,
+#tab-playlists .pagination-bar {
+    gap: var(--space-3, 12px);
+    margin-top: var(--space-4, 16px);
+    padding-top: var(--space-4, 16px);
+}
+
+#tab-search .pagination-pager > button,
+#tab-discover .pagination-pager > button,
+#tab-playlists .pagination-pager > button {
+    min-height: 34px;
+    padding: 0 16px;
+}
+
+#tab-search .pagination-status,
+#tab-discover .pagination-status,
+#tab-playlists .pagination-status {
+    padding: 0 14px;
+}
+
+#tab-search .pagination-bar input,
+#tab-discover .pagination-bar input,
+#tab-playlists .pagination-bar input {
+    min-height: 34px;
+}
+
+#tab-search .pagination-jump > button,
+#tab-discover .pagination-jump > button,
+#tab-playlists .pagination-jump > button {
+    min-height: 34px;
+    padding: 0 16px;
+}
+
+/* --------------------------------------------------------------------------
+   9. Empty states.
+   -------------------------------------------------------------------------- */
+.empty-state {
+    padding: 20px;
+}
+
+#tab-playlists .list-stack.tight .empty-state,
+#tab-search .songloft-library-section .empty-state,
+#tab-discover .list-stack .empty-state {
+    min-height: 112px;
+    padding: 20px 18px;
+}
+
+/* --------------------------------------------------------------------------
+   10. Speaker song-list drawer.
+
+   Rows were pinned at a hard `height: 40px` with 4px of padding, which is a
+   data grid, not a queue you read while music is playing. Unpinning the
+   height also stops a long title from being clipped mid-glyph.
+   -------------------------------------------------------------------------- */
+.speaker-song-list-song-row {
+    height: auto;
+    min-height: 48px;
+    grid-template-columns: 24px 36px minmax(0, 1fr) auto auto 32px;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+}
+
+.speaker-song-list-song-row .media-artwork {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+}
+
+.speaker-song-list-header {
+    padding: 14px 16px;
+}
+
+.speaker-song-list-section .empty-state {
+    padding: 22px 16px;
+}
+
+/* --------------------------------------------------------------------------
+   11. Mobile.
+   -------------------------------------------------------------------------- */
+@media (max-width: 760px) {
+    #tab-search,
+    #tab-discover,
+    #tab-playlists {
+        --row-pad-x: 13px;
+        --row-pad-y: 12px;
+        --row-art: 44px;
+        --row-gap: 12px;
+    }
+
+    .list-stack {
+        gap: 10px;
+    }
+
+    /* A phone shows ~4 rows above the tab bar and the player. The interior
+       padding is where the air has to come from, not the action band — that
+       band only needs enough to stop the pills touching the metadata. */
+    #tab-search .song-row.media-row,
+    #tab-discover .song-row.media-row,
+    #tab-playlists .song-row.media-row,
+    #tab-search .songlist-row.media-row,
+    #tab-discover .songlist-row.media-row {
+        row-gap: 8px;
+    }
+
+    /* `.song-row.media-row .row-actions` above is id + 3 classes, so a two-class
+       mobile selector would lose to it regardless of order. */
+    #tab-search .song-row.media-row .row-actions,
+    #tab-discover .song-row.media-row .row-actions,
+    #tab-playlists .song-row.media-row .row-actions,
+    #tab-playlists .custom-playlist-song-row .row-actions,
+    #tab-discover .songlist-row.media-row .row-actions {
+        margin-top: 2px;
+        padding-top: 9px;
+    }
+
+    #tab-search .pagination-bar,
+    #tab-discover .pagination-bar,
+    #tab-playlists .pagination-bar {
+        gap: 10px;
+    }
+
+    /* The strip stays a horizontal swipe strip — it is the right pattern for
+       six actions on a 390px card. What it lacked was any sign that it moves.
+       These are Komarov scroll shadows: the two opaque "cover" layers are
+       `local`, so they travel with the content, while the two shadow layers
+       are `scroll` and stay pinned to the box. The result is a fade that
+       appears only on a side you can still swipe toward, and disappears once
+       you reach that end. */
+    .batch-actions,
+    #tab-discover .list-actions-bar {
+        padding-left: 2px;
+        padding-right: 2px;
+        background-repeat: no-repeat;
+        background-position: left center, right center, left center, right center;
+        background-size: 26px 100%, 26px 100%, 22px 100%, 22px 100%;
+        background-attachment: local, local, scroll, scroll;
+        background-image:
+            linear-gradient(to right, var(--surface-elevated) 45%, color-mix(in srgb, var(--surface-elevated) 0%, transparent)),
+            linear-gradient(to left, var(--surface-elevated) 45%, color-mix(in srgb, var(--surface-elevated) 0%, transparent)),
+            linear-gradient(to right, color-mix(in srgb, var(--muted) 20%, transparent), color-mix(in srgb, var(--muted) 0%, transparent)),
+            linear-gradient(to left, color-mix(in srgb, var(--muted) 20%, transparent), color-mix(in srgb, var(--muted) 0%, transparent));
+    }
+
+    /* Enough room for a thumb to catch the strip mid-swipe. */
+    .batch-actions {
+        gap: 10px;
+        scroll-padding-inline: 12px;
+    }
+}
+
+
+/* ============================================================
+   polish2-speaker-ia — UI polish pass 2 (2026-07)
+   ============================================================ */
+/* ============================================================================
+   polish2-speaker-ia — 音箱页信息架构（五模块的位置关系）
+   ----------------------------------------------------------------------------
+   Before: two independent 2-column rows. Row 1 = 账号 (368px) | 设备 (559px);
+   row 2 = 播放控制+歌单列表 (1223px) | 索引 (297px). Each row sized its own
+   columns, so the short card in each row left a hole beside the tall one —
+   190px under 账号 (204px to the next row) and 940px under 索引 at 1440x900.
+   Measured after: 102px, and the panel is 2080px -> 1820px tall.
+
+   After: ONE page-level grid. The live surface (播放控制 + 歌单列表) takes the
+   left column and spans every row; the configure-once + status cards
+   (账号 → 设备/设备设置 → 索引) stack in a right rail whose combined height is
+   within ~100px of the player, so the two columns end together. 语音记录 stays
+   a full-width footer band — it is a log, its rows already reflow into
+   `auto-fit minmax(280px, 1fr)` cards, and it is the one module that grows
+   without bound.
+
+   Scope: grid/placement only. No card padding, section gaps or heading sizes —
+   vertical rhythm is deliberately left on `.surface-section { margin-top }` and
+   the column gap on `.two-column { gap }`, so polish2-density.css keeps
+   ownership of both. Colours: none added.
+   ========================================================================== */
+
+#tab-speaker .speaker-layout {
+    /* Live column a little wider than the rail, but the rail still has to hold
+       the 设备 selects and the settings form, hence the 360px floor. */
+    grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr);
+    grid-template-rows: auto auto auto;
+    row-gap: 0; /* rows are spaced by .surface-section's own margin-top */
+    align-items: start;
+}
+
+#tab-speaker .speaker-layout > .speaker-player-panel {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+}
+
+#tab-speaker .speaker-layout > .speaker-account-panel {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+#tab-speaker .speaker-layout > .speaker-device-panel {
+    grid-column: 2;
+    grid-row: 2;
+}
+
+#tab-speaker .speaker-layout > .speaker-side-stack {
+    grid-column: 2;
+    grid-row: 3;
+    min-width: 0;
+}
+
+@media (min-width: 1181px) {
+    /* Both columns must start on the same line: the first card of each column
+       drops the stacking margin that separates the rail's cards. */
+    #tab-speaker .speaker-layout > .speaker-player-panel,
+    #tab-speaker .speaker-layout > .speaker-account-panel {
+        margin-top: 0;
+    }
+
+    /* The rail is ~60px narrower than the old full-width top row, which is
+       enough to squeeze the 账号/设备 selects and force the two device buttons
+       to stack. Two selects on one line, actions on their own — the same shape
+       style.css already uses at its own narrow breakpoint. Two-column mode
+       only: on phones the selects stay full width because device names are
+       long. */
+    #tab-speaker .speaker-layout > .speaker-device-panel .device-selection-grid {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+
+    #tab-speaker .speaker-layout > .speaker-device-panel .speaker-device-actions {
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* 索引 metric rows: this used to come from `.speaker-operations-layout
+   .metric-grid` in style.css, whose wrapper this pass removed. The label-left /
+   value-right treatment in style.css hangs off `.speaker-side-stack`, which is
+   still here, so only the single-column rule needs restating. */
+#tab-speaker .speaker-side-stack .metric-grid {
+    grid-template-columns: 1fr;
+}
+
+/* ---------------------------------------------------------------------------
+   Narrow: one column, DOM order — 账号 → 设备 → 播放控制/歌单列表 → 索引 →
+   语音记录, i.e. exactly the order this page had before, so nothing moves for
+   phone users. Placement is released so the cards flow.
+
+   The collapse is at 1180px rather than the app-wide 980px because the rail has
+   to hold the 设备 form: below ~1180 the viewport minus the nav rail leaves the
+   rail under ~450px and the settings form starts wrapping badly.
+   --------------------------------------------------------------------------- */
+@media (max-width: 1180px) {
+    #tab-speaker .speaker-layout {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: none;
+    }
+
+    #tab-speaker .speaker-layout > .speaker-player-panel,
+    #tab-speaker .speaker-layout > .speaker-account-panel,
+    #tab-speaker .speaker-layout > .speaker-device-panel,
+    #tab-speaker .speaker-layout > .speaker-side-stack {
+        grid-column: auto;
+        grid-row: auto;
+    }
+
+    /* First card of the panel body still sits flush under the page heading. */
+    #tab-speaker .speaker-layout > .speaker-account-panel {
+        margin-top: 0;
     }
 }

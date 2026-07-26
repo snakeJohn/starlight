@@ -139,7 +139,10 @@ export async function loadVoiceCommands() {
     const data = await api.get('/miot/voice-commands');
     const status = $('[data-role="voice-enabled"]');
     renderVoiceCommands(data.commands || asArray(data));
-    if (status) status.textContent = data.enabled ? '已启用' : '未启用';
+    if (status) {
+        status.textContent = data.enabled ? '已启用' : '未启用';
+        if (status.dataset) status.dataset.state = data.enabled ? 'on' : 'off';
+    }
 }
 
 export async function saveVoiceCommands() {
