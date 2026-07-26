@@ -246,4 +246,30 @@ describe('browser player state transitions', () => {
 
     expect(FakeAudio.instances[0].paused).toBe(false);
   });
+
+  it('pauses browser audio after a speaker queue command succeeds', async () => {
+    installBrowserGlobals();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse({
+      state: 'playing',
+      is_playing: true,
+      current_index: 1,
+      queue: [{ title: 'Speaker song' }],
+    })));
+    const browser = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+    };
+    await browser.playBrowserQueue([{ title: 'A', url: 'https://media.test/a.mp3' }]);
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'account-1';
+    state.deviceId = 'speaker-1';
+    const player = await import('../../static/js/speaker_modules/player.js') as {
+      runPlayerAction(action: string): Promise<unknown>;
+    };
+
+    await player.runPlayerAction('next');
+
+    expect(FakeAudio.instances[0].paused).toBe(true);
+  });
 });

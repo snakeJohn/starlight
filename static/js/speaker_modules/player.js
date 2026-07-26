@@ -740,9 +740,16 @@ export async function runPlayerAction(action, options = {}) {
     if ((command === 'toggle' || command === 'next' || command === 'previous') && hasBrowserQueue()) {
         try {
             if (command === 'toggle') {
-                return await togglePlayerPlayback();
+                const result = await togglePlayerPlayback();
+                if (result?.state === 'playing' || result?.is_playing === true) {
+                    pauseBrowserPlayback();
+                }
+                clearPendingTargetHint();
+                setActivePlayingTarget('speaker');
+                return result;
             }
             const result = await api.post(endpoint, selectedPayload());
+            pauseBrowserPlayback();
             clearPendingTargetHint();
             setActivePlayingTarget('speaker');
             await refreshPlayerStatus().catch(() => null);
