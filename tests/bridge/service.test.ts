@@ -577,6 +577,25 @@ describe('BridgeService', () => {
     expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/song.mp3');
   });
 
+  it('waits for a native Songloft download before pushing a single song to the speaker', async () => {
+    const downloader = { downloadSong: vi.fn(async () => ({ song_id: 42, status: 'ok' })) };
+    const { platforms, runtimes, minaService } = createService();
+    const serviceWithDownload = new BridgeService(
+      platforms,
+      runtimes,
+      minaService,
+      undefined,
+      downloader,
+    );
+
+    await serviceWithDownload.playOnSpeaker('acc-1', 'dev-1', song);
+
+    expect(downloader.downloadSong).toHaveBeenCalledWith(song);
+    expect(downloader.downloadSong.mock.invocationCallOrder[0]).toBeLessThan(
+      (minaService.playURL as any).mock.invocationCallOrder[0],
+    );
+  });
+
   it('loads speaker songs into a temporary single-song playlist when a playlist manager is available', async () => {
     const { service, minaService, playlistManager, playlistManagerMap } = createService({ usePlaylistManager: true });
 

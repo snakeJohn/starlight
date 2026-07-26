@@ -113,9 +113,9 @@ async function onInit(): Promise<void> {
   await downloadSourceManager.init();
   downloadRuntimeManager = new RuntimeManager(downloadSourceManager, { runtimeNamespace: 'download' });
   platformRegistry = new PlatformRegistry();
-  bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService, playlistManagerMap);
-  songloftPlaylistService = new SongloftPlaylistService(bridgeService, platformRegistry);
   downloadService = new DownloadService(downloadRuntimeManager);
+  bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService, playlistManagerMap, downloadService);
+  songloftPlaylistService = new SongloftPlaylistService(bridgeService, platformRegistry);
   const customPlaylistStore = new CustomPlaylistStore();
   customPlaylistService = new CustomPlaylistService(customPlaylistStore, bridgeService);
   lxSyncService = new LxSyncService({

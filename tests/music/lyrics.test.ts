@@ -225,6 +225,7 @@ describe('resolveMusicLyric', () => {
 
     expect(result.lyric).toContain('[ti:倾尽天下]');
     expect(result.lyric).toContain('[00:13.10]词：Finale');
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('newlyric.kuwo.cn'))).toBe(false);
   });
 
   it('uses Kuwo newlyric responses when the legacy lrc endpoint has no lyrics', async () => {

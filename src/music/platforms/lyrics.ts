@@ -700,12 +700,15 @@ async function resolveKwLyric(songInfo: LxSongInfo): Promise<MusicLyricResult> {
     throw new Error('酷我音乐缺少 songmid');
   }
   try {
-    return await resolveKwNewLyric(songmid);
+    // Prefer the UTF-8 JSON endpoint in plugin runtimes. LX Desktop can decode
+    // newlyric with iconv-lite, but Songloft's QuickJS TextDecoder may not
+    // support the GB18030 payload used by that endpoint.
+    return await resolveKwLegacyLyric(songInfo, songmid);
   } catch {
-    // Fall through to JSON endpoints; Songloft's plugin fetch runtime may not expose raw binary responses.
+    // Fall through to LX Desktop's encrypted newlyric protocol.
   }
   try {
-    return await resolveKwLegacyLyric(songInfo, songmid);
+    return await resolveKwNewLyric(songmid);
   } catch {
     throw new Error('酷我音乐歌词获取失败');
   }

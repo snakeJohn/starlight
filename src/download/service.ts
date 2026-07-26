@@ -152,13 +152,22 @@ export class DownloadService {
   }
 
   private async resolveDownloadUrl(song: SearchResultSong): Promise<string> {
-    const url = await this.runtimes.getMusicUrl(
-      song.source_data.platform,
-      song.source_data.quality,
-      song.source_data.songInfo,
-      { operation: 'download', title: song.title, artist: song.artist },
-    );
-    if (!url) {
+    const qualityOrder = ['hires', 'flac24bit', 'flac', '320k', '128k'];
+    const selectedIndex = qualityOrder.indexOf(song.source_data.quality);
+    const qualities = selectedIndex >= 0 ? qualityOrder.slice(selectedIndex) : [song.source_data.quality];
+    for (const quality of qualities) {
+      const url = await this.runtimes.getMusicUrl(
+        song.source_data.platform,
+        quality,
+        song.source_data.songInfo,
+        { operation: 'download', title: song.title, artist: song.artist },
+      );
+      if (url) {
+        return url;
+      }
+    }
+
+    {
       const attempt = typeof this.runtimes.getLastMusicUrlAttempt === 'function'
         ? this.runtimes.getLastMusicUrlAttempt()
         : { attemptedSources: 0, lastFailure: null };
@@ -171,8 +180,6 @@ export class DownloadService {
         lastFailure: reason,
       });
     }
-
-    return url;
   }
 
   private async tryDownloadCandidate(

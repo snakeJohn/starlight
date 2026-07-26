@@ -41,6 +41,7 @@ export class BridgeService {
     private readonly runtimes: RuntimeManager,
     private readonly minaService: MinaService,
     private readonly playlistManagerMap?: PlaylistManagerMap,
+    private readonly downloads?: { downloadSong(song: SearchResultSong): Promise<{ song_id: number }> },
   ) {}
 
   /**
@@ -224,6 +225,25 @@ export class BridgeService {
   }
 
   async playOnSpeaker(accountId: string, deviceId: string, song: SearchResultSong): Promise<{ url: string }> {
+    if (this.downloads) {
+      const downloaded = await this.downloads.downloadSong(song);
+      const playerSong = toImportedPlayerSong(song, { id: downloaded.song_id, type: 'local' });
+      if (!playerSong) {
+        throw new StarlightError('INTERNAL_ERROR', 'Songloft 下载未返回可播放歌曲 ID', true);
+      }
+      const played = this.playlistManagerMap
+        ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone(
+          [playerSong],
+          0,
+          'single',
+          { autoAdvance: false },
+        )
+        : await this.minaService.playURL(accountId, deviceId, await URLBuilder.buildSongURL(playerSong));
+      if (!played) {
+        throw new StarlightError('DEVICE_OFFLINE', '音箱播放 Songloft 已下载歌曲失败', true);
+      }
+      return { url: playerSong.url };
+    }
     const attemptedSources = new Set<string>();
     const failures: string[] = [];
     const songloftUrl = await this.tryPlayImportedSongOnSpeaker(accountId, deviceId, song, failures);

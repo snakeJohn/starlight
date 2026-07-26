@@ -331,6 +331,14 @@ function invalidResolvedMusicUrlReason(url: string): string | null {
 }
 
 async function validateResolvedMusicUrl(url: string, timeoutMs: number): Promise<string | null> {
+  try {
+    if (/\.mgg$/i.test(new URL(url).pathname)) {
+      return '音源 URL 不可用：.mgg 不是浏览器可播放的音频格式';
+    }
+  } catch {
+    // URL shape validation is handled before the probe.
+  }
+
   if (typeof globalThis.fetch !== 'function') {
     return null;
   }

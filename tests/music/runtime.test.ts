@@ -1211,6 +1211,34 @@ describe('RuntimeManager', () => {
     }
   });
 
+  test('rejects proprietary mgg playback streams so callers can fall back to browser-compatible audio', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 206,
+      headers: { get: () => 'application/octet-stream' },
+    })) as unknown as typeof fetch;
+
+    try {
+      const manager = new RuntimeManager(fakeSourceManager(() => [], {}));
+      const runtime = {
+        supportsPlatform: vi.fn(() => true),
+        getMusicUrl: vi.fn(async () => 'https://cdn.example/song.mgg?token=valid'),
+        destroy: vi.fn(),
+      };
+      (manager as unknown as { runtimes: SourceRuntime[] }).runtimes = [runtime as unknown as SourceRuntime];
+
+      await expect(manager.getMusicUrl('kw', 'flac24bit', songInfo, {
+        operation: 'playback',
+        title: '第三十八年夏至',
+        artist: '河图',
+      })).resolves.toBeNull();
+      expect(manager.getLastMusicUrlAttempt().lastFailure).toContain('.mgg');
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
   test('getMusicUrl accepts probe responses with plain object headers from Songloft runtime fetch', async () => {
     const previousFetch = globalThis.fetch;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -195,6 +195,26 @@ describe('DownloadService', () => {
     expect(provider.search).not.toHaveBeenCalled();
   });
 
+  it('falls back from an unavailable high-resolution format to a standard downloadable quality', async () => {
+    const runtime = {
+      getMusicUrl: vi.fn(async (_platform: string, quality: string) => quality === 'flac' ? 'https://download.test/song.flac' : null),
+      getLastMusicUrlAttempt: vi.fn(() => ({ attemptedSources: 1, lastFailure: 'unsupported stream' })),
+    } as unknown as RuntimeManager;
+    installRemoteImport(503);
+    const songsApi = songloft.songs as typeof songloft.songs & { download: ReturnType<typeof vi.fn> };
+    songsApi.download = vi.fn(async () => ({ status: 'ok' }));
+    const service = new DownloadService(runtime, createPlatforms([]));
+    const highResolutionSong = {
+      ...song,
+      source_data: { ...song.source_data, quality: 'flac24bit' as const },
+    };
+
+    await expect(service.downloadSong(highResolutionSong)).resolves.toMatchObject({ song_id: 503, status: 'ok' });
+
+    expect(runtime.getMusicUrl).toHaveBeenNthCalledWith(1, 'kw', 'flac24bit', highResolutionSong.source_data.songInfo, expect.any(Object));
+    expect(runtime.getMusicUrl).toHaveBeenNthCalledWith(2, 'kw', 'flac', highResolutionSong.source_data.songInfo, expect.any(Object));
+  });
+
   it('syncs lyrics into Songloft after a successful native download', async () => {
     const runtime = createRuntime();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
