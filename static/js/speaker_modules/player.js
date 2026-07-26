@@ -588,7 +588,10 @@ export async function handoffSpeakerQueueToBrowser() {
     }
 
     clearPendingTargetHint();
-    await playBrowserQueue(songs, { startIndex });
+    await playBrowserQueue(songs, {
+        startIndex,
+        playMode: normalizePlayMode(playback?.play_mode),
+    });
     const status = getBrowserPlaybackStatus();
     renderPlayerStatus(status);
     toast('已在浏览器继续播放');
@@ -842,8 +845,7 @@ export function bindPlaybackTargetHandoff() {
     targetChangeBound = true;
     onPlaybackTargetChange((next, previous) => {
         if (previous === 'browser' && next === 'speaker') {
-            // Keep queue + now-playing card; stop browser audio so two devices don't fight.
-            pauseBrowserPlayback();
+            // Selecting a target only affects the next command; handoff pauses after acceptance.
             const retained = retainedBrowserStatusForSpeaker();
             if (retained) {
                 renderPlayerStatus(retained);

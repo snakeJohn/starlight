@@ -167,6 +167,7 @@ describe('browser player state transitions', () => {
     }));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse({
       state: 'playing',
+      play_mode: 'random',
       current_index: 150,
       queue_offset: 50,
       queue,
@@ -184,5 +185,65 @@ describe('browser player state transitions', () => {
     await player.handoffSpeakerQueueToBrowser();
 
     expect(FakeAudio.instances[0].src).toBe('https://media.test/151.mp3');
+    const browser = await import('../../static/js/speaker_modules/browser_player.js') as {
+      getBrowserPlaybackStatus(): { play_mode: string };
+    };
+    expect(browser.getBrowserPlaybackStatus().play_mode).toBe('random');
+  });
+
+  it('does not resume a pending URL resolution after stop', async () => {
+    installBrowserGlobals();
+    const pending = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn(() => pending.promise));
+    const player = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+      browserPlayerAction(command: string): Promise<unknown>;
+    };
+
+    const play = player.playBrowserQueue([{ title: 'A' }]);
+    await player.browserPlayerAction('stop');
+    pending.resolve(apiResponse({ url: 'https://media.test/a.mp3' }));
+    await play;
+
+    expect(FakeAudio.instances[0].paused).toBe(true);
+    expect(FakeAudio.instances[0].src).toBe('');
+  });
+
+  it('allows manual next in once mode', async () => {
+    installBrowserGlobals();
+    const player = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+      browserPlayerAction(command: string, options?: Record<string, unknown>): Promise<unknown>;
+      getBrowserPlaybackStatus(): { queue_index: number };
+    };
+    await player.playBrowserQueue([
+      { title: 'A', url: 'https://media.test/a.mp3' },
+      { title: 'B', url: 'https://media.test/b.mp3' },
+    ]);
+    await player.browserPlayerAction('mode', { playMode: 'once' });
+
+    await player.browserPlayerAction('next');
+
+    expect(player.getBrowserPlaybackStatus().queue_index).toBe(1);
+  });
+
+  it('does not pause current audio when only selecting the next playback target', async () => {
+    installBrowserGlobals();
+    const browser = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+    };
+    await browser.playBrowserQueue([{ title: 'A', url: 'https://media.test/a.mp3' }]);
+    const player = await import('../../static/js/speaker_modules/player.js') as {
+      bindPlaybackTargetHandoff(): void;
+    };
+    const target = await import('../../static/js/speaker_modules/playback_target.js') as {
+      setSelectedPlaybackTarget(value: 'browser' | 'speaker', options?: { silent?: boolean }): void;
+    };
+    player.bindPlaybackTargetHandoff();
+    target.setSelectedPlaybackTarget('browser', { silent: true });
+
+    target.setSelectedPlaybackTarget('speaker', { silent: true });
+
+    expect(FakeAudio.instances[0].paused).toBe(false);
   });
 });

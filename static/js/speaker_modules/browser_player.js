@@ -133,7 +133,7 @@ async function resolvePlayUrl(song) {
 
 function nextIndex(from, direction = 1) {
     if (!queue.length) return 0;
-    if (playMode === 'single' || playMode === 'once') {
+    if (playMode === 'single') {
         return from;
     }
     if (playMode === 'random') {
@@ -177,7 +177,7 @@ async function handleEnded() {
 
 /**
  * @param {BrowserSong[]} songs
- * @param {{ startIndex?: number }} [options]
+ * @param {{ startIndex?: number, playMode?: 'loop'|'once'|'single'|'random'|'order' }} [options]
  */
 export async function playBrowserQueue(songs, options = {}) {
     if (!Array.isArray(songs) || songs.length === 0) {
@@ -185,6 +185,7 @@ export async function playBrowserQueue(songs, options = {}) {
     }
     queue = songs.slice();
     index = Math.max(0, Math.min(options.startIndex || 0, queue.length - 1));
+    if (options.playMode) playMode = normalizeMode(options.playMode);
     clearPendingTargetHint();
     setActivePlayingTarget('browser');
     await playIndex(index, { restart: true });
@@ -263,6 +264,7 @@ export async function browserPlayerAction(command, options = {}) {
         } else if (el.paused) {
             await el.play();
         } else {
+            playGeneration += 1;
             el.pause();
         }
         clearPendingTargetHint();
@@ -271,6 +273,7 @@ export async function browserPlayerAction(command, options = {}) {
         return getBrowserPlaybackStatus();
     }
     if (cmd === 'stop') {
+        playGeneration += 1;
         el.pause();
         el.currentTime = 0;
         emitStatus();
@@ -342,6 +345,7 @@ export function hasBrowserQueue() {
 
 /** Pause browser audio without clearing the queue (used when switching to speaker). */
 export function pauseBrowserPlayback() {
+    playGeneration += 1;
     if (!audio) return getBrowserPlaybackStatus();
     try {
         audio.pause();
