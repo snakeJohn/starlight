@@ -41,6 +41,106 @@ function createHarness() {
   return { router, playlistManagerMap, play };
 }
 
+/** /player/status 从 req.query 读参数，request() 把 query 写死为空串，故单列。 */
+function statusRequest(): HTTPRequest {
+  return {
+    method: 'GET',
+    path: '/player/status',
+    query: 'account_id=acc-1&device_id=dev-1',
+    headers: {},
+    body: null,
+  } as HTTPRequest;
+}
+
+describe('stop failure must not hide the real device state', () => {
+  /**
+   * 用**真实** PlaylistManager，不用 mock：mock 会把 stopped 与
+   * 「设备确认停了」当成一回事，正好复刻要防的那个盲区。
+   */
+  async function harnessWithRealManager(stopSucceeds: boolean) {
+    const { PlaylistManager } = await import('../../src/player/manager');
+    const minaService = {
+      playURL: vi.fn(async () => true),
+      pausePlay: vi.fn(async () => true),
+      stopPlay: vi.fn(async () => stopSucceeds),
+      resumePlay: vi.fn(async () => true),
+      // 设备探针的真实形状：{ data: { info: JSON 字符串 } }，status 1 = 正在播放
+      getPlayerStatus: vi.fn(async () => ({
+        data: { info: JSON.stringify({ status: 1, volume: 40 }) },
+      })),
+    } as unknown as MinaService;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ force_mp3: false, server_host: 'http://songloft.test:18191', prefetch_next_song: false })),
+      updateDevice: vi.fn(async () => undefined),
+    } as unknown as import('../../src/config/manager').ConfigManager;
+
+    const manager = new PlaylistManager('acc-1', 'dev-1', minaService, configManager);
+    const playlistManagerMap = {
+      get: vi.fn(() => manager),
+      getOrCreate: vi.fn(async () => manager),
+    } as unknown as PlaylistManagerMap;
+
+    const router = createRouter();
+    registerPlaylistHandlers(router, playlistManagerMap, minaService);
+    return { router, manager, minaService };
+  }
+
+  const track = {
+    id: 1, type: 'local', title: 'A', artist: 'a', album: '', duration: 100,
+    file_path: '', url: '/api/v1/songs/1/play', cover_path: '', cover_url: '',
+    lyric_url: '', file_size: 0, format: 'mp3', bit_rate: 0, sample_rate: 0,
+    is_live: false, cache_hash: '',
+  };
+
+  it('lets the real device state through /player/status when the device refused to stop', async () => {
+    const { router, manager } = await harnessWithRealManager(false);
+    await manager.playStandalone([track] as never, 0, 'order');
+
+    const stopResponse = await router.handle(request('POST', '/player/stop', {
+      account_id: 'acc-1', device_id: 'dev-1',
+    }));
+    expect(parseResponseBody(stopResponse).success).toBe(false);
+
+    // 断言接口真实返回值，而不是内部标记：设备探针仍报 playing，
+    // 本地 stopped 不该压制它，否则用户看到 stopped 而音箱还在响，
+    // 且这是永久性的，不是缓存过期问题。
+    const status = await router.handle(statusRequest());
+    expect(parseResponseBody(status).data.state).not.toBe('stopped');
+  });
+
+  it('suppresses a stale device playing state when the stop actually succeeded', async () => {
+    const { router, manager } = await harnessWithRealManager(true);
+    await manager.playStandalone([track] as never, 0, 'order');
+
+    const stopResponse = await router.handle(request('POST', '/player/stop', {
+      account_id: 'acc-1', device_id: 'dev-1',
+    }));
+    expect(parseResponseBody(stopResponse).success).toBe(true);
+
+    // 停止成功时保留原有语义：设备残留的 playing 不该翻回来
+    const status = await router.handle(statusRequest());
+    expect(parseResponseBody(status).data.state).toBe('stopped');
+    expect(parseResponseBody(status).data.position).toBe(0);
+  });
+
+  it('a queue that finishes naturally after a failed stop still reports stopped', async () => {
+    // 重置存在的理由：onSongFinished 会直接把 state 置为 'stopped' 而不经过
+    // stop()，因此不会重新给 deviceStopConfirmed 赋值。若上一次失败的 false
+    // 残留着，队列正常播完后接口会拒绝上报 stopped，一直显示设备的 playing。
+    const { router, manager } = await harnessWithRealManager(false);
+
+    await manager.playStandalone([track] as never, 0, 'order');
+    await manager.stop();
+    expect(manager.isStopAuthoritative()).toBe(false);
+
+    // 重播，然后让队列自然播完（once 模式播完即结束，走 onSongFinished）
+    await manager.playStandalone([track] as never, 0, 'once');
+    await (manager as unknown as { onSongFinished(): Promise<void> }).onSongFinished();
+
+    expect(parseResponseBody(await router.handle(statusRequest())).data.state).toBe('stopped');
+  });
+});
+
 describe('registerPlaylistHandlers input validation', () => {
   it('rejects fractional, negative and overflowing playlist ids before calling the host API', async () => {
     const getSongs = vi.fn(async () => []);

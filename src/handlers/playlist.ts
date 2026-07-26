@@ -521,9 +521,12 @@ export function registerPlaylistHandlers(
         }
       }
 
-      // 本地已 stop 时，不让设备残留的播放状态覆盖
-      const reportState = localStatus.state === 'stopped' ? 'stopped' : realState;
-      const reportPosition = localStatus.state === 'stopped' ? 0 : realPosition;
+      // 本地已 stop 时，不让设备残留的播放状态覆盖。
+      // 但仅限「停止确实成功」：设备拒绝 stop 时本地也是 stopped，若照样压制，
+      // 探针明明回报 playing 也会被盖掉，接口会永久谎报 stopped。
+      const stopAuthoritative = manager.isStopAuthoritative();
+      const reportState = stopAuthoritative ? 'stopped' : realState;
+      const reportPosition = stopAuthoritative ? 0 : realPosition;
 
       return jsonResponse({
         success: true,

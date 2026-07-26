@@ -256,6 +256,15 @@ export class PlaylistManager {
   private autoAdvance = true;
   /** 正在解析歌词的歌曲，避免来回切歌时重复发起 */
   private readonly lyricFillInFlight = new Set<PlayerSong>();
+  /**
+   * 设备是否确认已停止。
+   *
+   * 与 state='stopped' 分开记：本地停止有两层含义——「不再自动推歌」和
+   * 「设备确实不响了」。设备拒绝 stop 时前者成立、后者不成立，而
+   * /player/status 有条「本地 stopped 就压制设备状态」的规则，如果只看 state，
+   * 一次失败的 stop 会让接口永久谎报 stopped，连设备探针明确回 playing 都盖掉。
+   */
+  private deviceStopConfirmed = true;
   private _lastLoadNotFound: boolean = false; // 上次 loadPlaylistSongs 失败是否因歌单不存在(ID 过期)
 
   constructor(
@@ -439,9 +448,20 @@ export class PlaylistManager {
         );
       }
     }
+    this.deviceStopConfirmed = deviceStopped;
 
     songloft.log.info('[PlaylistManager] Playback stopped');
     return deviceStopped;
+  }
+
+  /**
+   * 本地 stopped 是否可信到足以压制设备上报的状态。
+   *
+   * 只有「本地已停」且「设备确认停了」时才为 true。停止失败时返回 false，
+   * 让真实设备状态透出来——否则用户会看到 stopped 而音箱还在响。
+   */
+  isStopAuthoritative(): boolean {
+    return this.state === 'stopped' && this.deviceStopConfirmed;
   }
 
   /**
@@ -953,6 +973,9 @@ export class PlaylistManager {
     this.state = 'playing';
     this.playStartTimeMs = Date.now();
     this.pausedElapsedSec = 0;
+    // 重新播起来了，上一次 stop 失败的标记不该再影响后续状态上报。
+    // 放在这里是因为所有播放入口最终都会走到 playCurrentOnce。
+    this.deviceStopConfirmed = true;
 
     // 如果歌曲时长有效，注册定时器播放下一首
     if (this.autoAdvance && song.duration > 0) {
