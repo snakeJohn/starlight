@@ -35,6 +35,32 @@ const QUALITY_RANK: Record<string, number> = {
   '128k': 1,
 };
 
+/**
+ * 已经解析好播放地址的歌曲。
+ *
+ * 音箱队列交接给浏览器、再切回音箱时会走这条路：状态接口的 queue 条目只带
+ * 标题/时长/可播 URL，不带 source_data（带上会让 5 秒轮询驮着整个 songInfo，
+ * 200 条队列不可接受）。这些歌本来就有宿主可播地址，不该也不必再解析一次音源。
+ */
+export interface ResolvedSpeakerSong {
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  cover_url: string;
+  /** 已可直接推给音箱的地址 */
+  playback_url: string;
+  /** 宿主歌曲 ID（能从 /api/v1/songs/{id}/play 解析出来时），用于歌词端点 */
+  song_id: number;
+}
+
+export type SpeakerQueueEntry = SearchResultSong | ResolvedSpeakerSong;
+
+export function isResolvedSpeakerSong(entry: SpeakerQueueEntry): entry is ResolvedSpeakerSong {
+  return typeof (entry as ResolvedSpeakerSong).playback_url === 'string'
+    && (entry as ResolvedSpeakerSong).playback_url !== '';
+}
+
 export class BridgeService {
   constructor(
     private readonly platforms: PlatformRegistry,
@@ -49,15 +75,24 @@ export class BridgeService {
    * (does not lock to the song's declared quality).
    */
   async previewUrl(song: SearchResultSong): Promise<string> {
+    return (await this.resolvePlaybackTarget(song)).url;
+  }
+
+  /**
+   * Playable URL plus the Songloft song id behind it (0 when the URL is a direct
+   * source stream). Keeping the id is what lets the player payload carry
+   * `/api/v1/songs/{id}/lyric` instead of an empty lyric reference.
+   */
+  private async resolvePlaybackTarget(song: SearchResultSong): Promise<{ url: string; songId: number }> {
     if (this.downloads) {
       const downloaded = await this.downloads.downloadSong(song);
       if (!downloaded.song_id) {
         throw new StarlightError('INTERNAL_ERROR', 'Songloft 下载未返回可播放歌曲 ID', true);
       }
-      return `/api/v1/songs/${downloaded.song_id}/play`;
+      return { url: `/api/v1/songs/${downloaded.song_id}/play`, songId: downloaded.song_id };
     }
     const resolved = await this.resolvePlayback(song);
-    return resolved.url;
+    return { url: resolved.url, songId: 0 };
   }
 
   async previewLyric(song: SearchResultSong) {
@@ -277,7 +312,7 @@ export class BridgeService {
     return { url: fallbackUrl };
   }
 
-  async playSonglistOnSpeaker(accountId: string, deviceId: string, songs: SearchResultSong[]): Promise<{ urls: string[] }> {
+  async playSonglistOnSpeaker(accountId: string, deviceId: string, songs: SpeakerQueueEntry[]): Promise<{ urls: string[] }> {
     if (songs.length === 0) {
       throw new StarlightError('BAD_REQUEST', 'songs must not be empty');
     }
@@ -285,9 +320,12 @@ export class BridgeService {
     const playerSongs: PlayerSong[] = [];
     const urls: string[] = [];
     for (const song of songs) {
-      const url = await this.previewUrl(song);
-      playerSongs.push(toPlayerSong(song, url));
-      urls.push(url);
+      // 已带播放地址的条目直接用，跳过一次多余（且缺 source_data 时不可能成功）的音源解析
+      const target = isResolvedSpeakerSong(song)
+        ? { url: song.playback_url, songId: song.song_id }
+        : await this.resolvePlaybackTarget(song);
+      playerSongs.push(toPlayerSong(song, target.url, target.songId));
+      urls.push(target.url);
     }
 
     const played = this.playlistManagerMap
@@ -295,6 +333,22 @@ export class BridgeService {
       : await this.minaService.playURL(accountId, deviceId, urls[0]);
     if (!played) {
       throw new StarlightError('DEVICE_OFFLINE', '音箱播放 URL 失败', true);
+    }
+
+    if (this.playlistManagerMap) {
+      // 只有带 source_data 的条目才能解析歌词；已解析条目要么已有 /songs/{id}/lyric，
+      // 要么是外链直播流，没有可查的音源信息。两侧必须按下标成对过滤。
+      const fillPlayerSongs: PlayerSong[] = [];
+      const fillSourceSongs: SearchResultSong[] = [];
+      songs.forEach((song, index) => {
+        if (!isResolvedSpeakerSong(song)) {
+          fillPlayerSongs.push(playerSongs[index]);
+          fillSourceSongs.push(song);
+        }
+      });
+      if (fillSourceSongs.length > 0) {
+        startPlayerSongLyricFill(fillPlayerSongs, fillSourceSongs);
+      }
     }
 
     return { urls };
@@ -323,6 +377,14 @@ export class BridgeService {
     return resolved?.song ?? null;
   }
 
+  /**
+   * 自建歌单 dynamic 曲目的解析入口（PlaylistManager.playCurrentOnce → dynamicSongResolver）。
+   *
+   * 调用方用 `Object.assign(song, resolved)` 把结果并进队列对象，是一次即时拷贝，
+   * 所以这里不能异步回填歌词——写在返回对象上同步不到队列。改为把 source_data 一并
+   * 带出去：合并之后队列对象自己就带上了音源信息，PlaylistManager 会在切歌时
+   * 按需解析歌词并写回它自己持有的对象。
+   */
   async resolvePlayableSong(title: string, artist = ''): Promise<PlayerSong | null> {
     const resolved = await this.findPlayableSearchSong(title, artist);
     return resolved ? toPlayerSong(resolved.song, resolved.url) : null;
@@ -410,21 +472,28 @@ export class BridgeService {
   ): Promise<string | null> {
     attemptedSources.add(song.source_data.platform);
     try {
-      const url = resolvedUrl ?? await this.previewUrl(song);
+      // Candidates resolved through the quality ladder have no Songloft id (songId 0);
+      // their lyrics are filled in after playback starts.
+      const target = resolvedUrl ? { url: resolvedUrl, songId: 0 } : await this.resolvePlaybackTarget(song);
+      const playerSong = toPlayerSong(song, target.url, target.songId);
       const played = this.playlistManagerMap
         ? await (await this.playlistManagerMap.getOrCreate(accountId, deviceId)).playStandalone(
-          [toPlayerSong(song, url)],
+          [playerSong],
           0,
           'single',
           { autoAdvance: false },
         )
-        : await this.minaService.playURL(accountId, deviceId, url);
+        : await this.minaService.playURL(accountId, deviceId, target.url);
       if (!played) {
         failures.push('音箱播放 URL 失败');
         return null;
       }
 
-      return url;
+      if (this.playlistManagerMap) {
+        startPlayerSongLyricFill([playerSong], [song]);
+      }
+
+      return target.url;
     } catch (error) {
       failures.push(sanitizeProviderError(error));
       return null;
@@ -557,9 +626,13 @@ function withPlaybackQuality(song: SearchResultSong, quality: MusicQuality): Sea
   };
 }
 
-function toPlayerSong(song: SearchResultSong, url: string): PlayerSong {
+/**
+ * @param songId Songloft 歌曲 ID；0 表示直连音源 URL，宿主没有这首歌，
+ *   此时 lyric_url 只能留空，改由 startPlayerSongLyricFill 异步补 lyric_text。
+ */
+function toPlayerSong(song: Omit<SpeakerQueueEntry, 'source_data' | 'playback_url' | 'song_id'>, url: string, songId = 0): PlayerSong {
   return {
-    id: 0,
+    id: songId,
     type: 'remote',
     title: song.title,
     artist: song.artist,
@@ -569,13 +642,17 @@ function toPlayerSong(song: SearchResultSong, url: string): PlayerSong {
     url,
     cover_path: '',
     cover_url: song.cover_url,
-    lyric_url: '',
+    lyric_url: songId > 0 ? `/api/v1/songs/${songId}/lyric` : '',
     file_size: 0,
     format: '',
     bit_rate: 0,
     sample_rate: 0,
     is_live: false,
     cache_hash: '',
+    // 带上音源信息，PlaylistManager 才能在切歌时按需补歌词（不进 getStatus 投影）
+    ...(isResolvedSpeakerSong(song as SpeakerQueueEntry)
+      ? {}
+      : { source_data: (song as SearchResultSong).source_data as unknown as PlayerSong['source_data'] }),
   };
 }
 
@@ -891,6 +968,105 @@ type ImportedSongPair = {
   song: SearchResultSong;
   imported: SongloftRemoteSong;
 };
+
+type PlayerSongLyricPair = {
+  playerSong: PlayerSong;
+  song: SearchResultSong;
+};
+
+/**
+ * 一次播放最多补几首歌词：整条队列一起抓会打爆音源接口，
+ * 而且用户看得见的只有当前这首和紧随其后的几首。
+ */
+const PLAYER_SONG_LYRIC_FILL_LIMIT = 3;
+
+/**
+ * 播放已被音箱接受之后，为没有宿主歌词端点（lyric_url 为空，即 songId 0 的直连音源）
+ * 的 PlayerSong 异步补内联歌词。PlaylistManager 持有同一批对象引用，
+ * 写回 song.lyric_text 后下一次 getStatus() 轮询即可带上。
+ *
+ * 绝不阻塞播放：调用方不 await，失败只告警，歌词缺失不能影响播放。
+ */
+function startPlayerSongLyricFill(playerSongs: PlayerSong[], songs: SearchResultSong[]): void {
+  const pending: PlayerSongLyricPair[] = [];
+  for (const [index, playerSong] of playerSongs.entries()) {
+    const song = songs[index];
+    if (!song || playerSong.lyric_url || playerSong.lyric_text) {
+      continue;
+    }
+    pending.push({ playerSong, song });
+    if (pending.length >= PLAYER_SONG_LYRIC_FILL_LIMIT) {
+      break;
+    }
+  }
+  if (pending.length === 0) {
+    return;
+  }
+
+  void fillPlayerSongLyrics(pending).catch((error) => {
+    songloft.log.warn(`[BridgeService] Deferred player lyric fill failed: ${sanitizeProviderError(error)}`);
+  });
+}
+
+async function fillPlayerSongLyrics(pending: PlayerSongLyricPair[]): Promise<void> {
+  for (const pair of pending) {
+    try {
+      const lyric = await resolveMusicLyric(pair.song.source_data.platform, pair.song.source_data.songInfo);
+      const text = playerLyricText(lyric.lyric);
+      if (!text) {
+        songloft.log.warn(`[BridgeService] Player lyric fill got no usable LRC for "${pair.song.title}"`);
+        continue;
+      }
+      pair.playerSong.lyric_text = text;
+    } catch (error) {
+      songloft.log.warn(`[BridgeService] Player lyric fill failed for "${pair.song.title}": ${sanitizeProviderError(error)}`);
+    }
+  }
+}
+
+/**
+ * 归一化时间标签为 `[MM:SS.mmm]` 后再下发。
+ * 前端 parseLrc 只认 `[\d{2}:\d{2}(.\d{2,3})?]`：一位分钟（`[0:12.34]`）
+ * 或一位小数（`[00:12.5]`）都会让整行被丢掉，等于没有歌词。
+ * 没有任何时间标签的纯文本歌词无法逐行滚动，直接当作没拿到。
+ */
+/**
+ * 解析单曲歌词，供 PlaylistManager 在切歌时按需调用。
+ * 拿不到就返回空串——歌词永远不该影响播放。
+ */
+export async function resolvePlayerSongLyric(song: PlayerSong): Promise<string> {
+  const source = song.source_data;
+  if (!source?.platform || !source.songInfo) {
+    return '';
+  }
+  try {
+    const lyric = await resolveMusicLyric(
+      source.platform as SearchResultSong['source_data']['platform'],
+      source.songInfo as unknown as SearchResultSong['source_data']['songInfo'],
+    );
+    return playerLyricText(lyric?.lyric || '');
+  } catch {
+    return '';
+  }
+}
+
+function playerLyricText(lyric: string): string {
+  const text = String(lyric || '').replace(/\r\n?/g, '\n').trim();
+  if (!text) {
+    return '';
+  }
+
+  let hasTimeTag = false;
+  const normalized = text.replace(/\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g, (_match, minute: string, second: string, fraction?: string) => {
+    hasTimeTag = true;
+    const mm = String(Number(minute)).padStart(2, '0');
+    const ss = String(Number(second)).padStart(2, '0');
+    const ms = String(fraction || '0').padEnd(3, '0').slice(0, 3);
+    return `[${mm}:${ss}.${ms}]`;
+  });
+
+  return hasTimeTag ? normalized : '';
+}
 
 export async function postRemoteSongs(host: string, token: string, payloads: RemoteSongPayload[]): Promise<RemoteImportResult> {
   const baseHost = normalizeHostBaseUrl(host);

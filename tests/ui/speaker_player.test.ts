@@ -4,6 +4,7 @@ interface SpeakerPlayerModule {
   renderPlayerStatus(status: Record<string, unknown>): void;
   runPlayerAction(action: string, options?: Record<string, unknown>): Promise<unknown>;
   refreshPlayerStatus(): Promise<unknown>;
+  handoffSpeakerQueueToBrowser(): Promise<unknown>;
   bindProgressInteraction(): void;
 }
 
@@ -364,6 +365,160 @@ describe('speaker player module', () => {
     expect(elements.get('[data-role="fullscreen-player-play-icon"]')?.className).toContain('fa-pause');
     expect(toggleButton.textContent).toBe('');
     expect(globalToggleButton.textContent).toBe('');
+  });
+
+  it('keeps the real progress after toggle instead of zeroing it from the toggle reply', async () => {
+    const { elements } = installPlayerRenderDom();
+
+    // /miot/player/toggle answers with only { message, state } — no position/duration.
+    // Rendering that reply directly made `Number(undefined) || 0` blank the progress bar
+    // for a full poll interval, which reads as "playback restarted from the beginning".
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/player/toggle')) {
+        return okResponse({ message: 'playlist resumed', state: 'playing' });
+      }
+      if (url.includes('/player/status')) {
+        return okResponse({
+          state: 'playing',
+          is_playing: true,
+          play_mode: 'loop',
+          position: 65,
+          duration: 245,
+          current_song: { title: '夜曲', artist: '周杰伦' },
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string; speakerPlayerPlaylistId: string };
+    };
+    state.accountId = 'acc-1';
+    state.deviceId = 'speaker-1';
+    state.speakerPlayerPlaylistId = '12';
+
+    const modulePath = '../../static/js/speaker_modules/player.js';
+    const { runPlayerAction } = await import(modulePath) as SpeakerPlayerModule;
+    await runPlayerAction('speaker-player-toggle');
+
+    expect(elements.get('[data-role="global-player-current-time"]')?.textContent).toBe('1:05');
+    expect(elements.get('[data-role="global-player-total-time"]')?.textContent).toBe('4:05');
+    expect(elements.get('[data-role="global-player-progress"]')?.style.width).toBe('26.5%');
+  });
+
+  it('pauses a playing speaker when handing its queue to the browser', async () => {
+    // 复现：音箱正在播 → 切到浏览器点播放 → 两端同时出声。
+    installPlayerRenderDom();
+
+    const posted: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === 'POST') posted.push(url);
+      if (url.includes('/player/status')) {
+        return okResponse({
+          state: 'playing',
+          is_playing: true,
+          play_mode: 'order',
+          position: 20,
+          duration: 300,
+          current_index: 0,
+          queue_offset: 0,
+          current_song: { id: 1256, title: '风起天阑', artist: '河图' },
+          queue: [{ id: 1256, title: '风起天阑', artist: '河图', duration: 300, url: 'http://songloft.test/api/v1/songs/1256/play' }],
+        });
+      }
+      if (url.includes('/player/toggle')) return okResponse({ state: 'paused' });
+      if (url.includes('/bridge/preview-url')) return okResponse({ url: '/api/v1/songs/1256/play' });
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('Audio', class {
+      src = '';
+      paused = true;
+      currentTime = 0;
+      duration = 300;
+      preload = '';
+      addEventListener(): void {}
+      async play(): Promise<void> { this.paused = false; }
+      pause(): void { this.paused = true; }
+      load(): void {}
+      removeAttribute(): void {}
+    });
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'acc-1';
+    state.deviceId = 'dev-1';
+
+    const modulePath = '../../static/js/speaker_modules/player.js';
+    const { handoffSpeakerQueueToBrowser } = await import(modulePath) as SpeakerPlayerModule;
+    await handoffSpeakerQueueToBrowser();
+
+    expect(posted.some((url) => url.includes('/miot/mina/pause'))).toBe(true);
+  });
+
+  it('never uses flip-semantics toggle to stop the speaker, even if its state changes mid-handoff', async () => {
+    // 竞态：若实现是「先查状态、再发 /player/toggle」，查询与翻转之间音箱状态
+    // 一旦变化（自动切歌 / 语音口令 / 智能续播都会改它），toggle 就会把已暂停的
+    // 音箱反过来唤醒。这里让状态在两次请求之间翻转，断言实现不依赖状态读取，
+    // 只发幂等的 /mina/pause。
+    installPlayerRenderDom();
+
+    const posted: string[] = [];
+    let statusReads = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === 'POST') posted.push(url);
+      if (url.includes('/player/status')) {
+        statusReads += 1;
+        // 第一次报「播放中」，之后翻成「已暂停」——模拟请求间状态漂移
+        const playing = statusReads === 1;
+        return okResponse({
+          state: playing ? 'playing' : 'paused',
+          is_playing: playing,
+          play_mode: 'order',
+          position: 20,
+          duration: 300,
+          current_index: 0,
+          queue_offset: 0,
+          current_song: { id: 1256, title: '风起天阑', artist: '河图' },
+          queue: [{ id: 1256, title: '风起天阑', artist: '河图', duration: 300, url: 'http://songloft.test/api/v1/songs/1256/play' }],
+        });
+      }
+      if (url.includes('/mina/pause')) return okResponse({ state: 'paused' });
+      if (url.includes('/player/toggle')) return okResponse({ state: 'playing' });
+      if (url.includes('/bridge/preview-url')) return okResponse({ url: '/api/v1/songs/1256/play' });
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('Audio', class {
+      src = '';
+      paused = true;
+      currentTime = 0;
+      duration = 300;
+      preload = '';
+      addEventListener(): void {}
+      async play(): Promise<void> { this.paused = false; }
+      pause(): void { this.paused = true; }
+      load(): void {}
+      removeAttribute(): void {}
+    });
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'acc-1';
+    state.deviceId = 'dev-1';
+
+    const modulePath = '../../static/js/speaker_modules/player.js';
+    const { handoffSpeakerQueueToBrowser } = await import(modulePath) as SpeakerPlayerModule;
+    await handoffSpeakerQueueToBrowser();
+
+    expect(posted.some((url) => url.includes('/miot/player/toggle'))).toBe(false);
+    expect(posted.some((url) => url.includes('/miot/mina/pause'))).toBe(true);
   });
 
   it('sets the selected play mode instead of cycling modes implicitly', async () => {

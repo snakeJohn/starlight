@@ -89,6 +89,10 @@ export interface PluginConfig {
   voice_command_enabled: boolean;
   scheduled_tasks_enabled: boolean;
   force_mp3: boolean;
+  /** 自动切歌偏移（秒，-30~+30）：正数延后切歌、负数提前，用于补偿音箱缓冲差异 */
+  song_transition_offset: number;
+  /** 播放当前曲目后预取下一首（宿主 `?prefetch=1`，返回 202 表示已受理预热） */
+  prefetch_next_song: boolean;
   external_search_enabled: boolean; // 是否启用外部搜索
   external_search_url: string;      // 外部搜索 API 地址
   external_search_token: string;    // 外部搜索 Token 认证
@@ -277,7 +281,15 @@ export interface PlayerStatus {
   play_mode: PlayMode;
   playlist_id: number;
   current_index: number;
-  current_song?: { id: number; title: string; artist: string; cover_url?: string; lyric_url?: string };
+  current_song?: {
+    id: number;
+    title: string;
+    artist: string;
+    cover_url?: string;
+    lyric_url?: string;
+    /** 内联 LRC：无宿主歌曲 ID 时的歌词兜底（前端 lyric_url 缺失时使用） */
+    lyric_text?: string;
+  };
   /** Full in-memory queue for target handoff (may be truncated if huge). */
   queue?: PlayerQueueSong[];
   /** Absolute index represented by queue[0] when the queue is windowed. */

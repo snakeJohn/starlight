@@ -16,7 +16,7 @@ import { SourceStore } from './music/source_store';
 import { SourceManager } from './music/source_manager';
 import { RuntimeManager } from './music/runtime_manager';
 import { PlatformRegistry } from './music/platforms/registry';
-import { BridgeService } from './bridge/service';
+import { BridgeService, resolvePlayerSongLyric } from './bridge/service';
 import { DownloadService } from './download/service';
 import { CustomPlaylistStore } from './custom_playlists/store';
 import { CustomPlaylistService } from './custom_playlists/service';
@@ -126,6 +126,7 @@ async function onInit(): Promise<void> {
   playlistManagerMap.setDynamicPlaylistOptions({
     dynamicPlaylistLoader: (playlistId) => customPlaylistService.loadDynamicPlayerSongs(playlistId),
     dynamicSongResolver: (song) => bridgeService.resolvePlayableSong(song.title, song.artist),
+    songLyricResolver: (song) => resolvePlayerSongLyric(song),
   });
   indexingManager.setCustomPlaylistService(customPlaylistService);
 

@@ -79,7 +79,9 @@ function standaloneSongToPlayerSong(song: { id: number; url: string; title: stri
     url,
     cover_path: '',
     cover_url: '',
-    lyric_url: '',
+    // 独立远程歌曲来自宿主曲库（findStandaloneSongByName 回查得到真实 song id），
+    // 直接回落到统一歌词端点，避免全屏播放器拿不到歌词。
+    lyric_url: song.id > 0 ? `/api/v1/songs/${song.id}/lyric` : '',
     file_size: 0,
     format: '',
     bit_rate: 0,

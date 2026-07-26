@@ -8,6 +8,7 @@ import { ConfigManager } from '../config/manager';
 import { MinaService } from '../service/service';
 import { URLBuilder } from './url_builder';
 import { getHostBaseUrl, setHostBaseUrl, callHostAPI } from '../utils/http';
+import { fetchWithTimeout } from '../utils/fetch_timeout';
 import type { PlayState, PlayMode, PlayerStatus } from '../types';
 import { sourceDiagnostics } from '../diagnostics/source_logs';
 
@@ -26,6 +27,18 @@ export interface PlayerSong {
   cover_path: string;
   cover_url: string;
   lyric_url: string;  // 歌词URL（后端统一端点）
+  /** 内联 LRC 歌词：没有宿主歌曲 ID（外部音源直推）时的兜底，播放后异步补齐 */
+  lyric_text?: string;
+  /**
+   * 音源信息，仅用于按需解析歌词。
+   * 不会出现在 getStatus() 的 queue 投影里（那里是显式字段列表），
+   * 所以放在这里不会让 5 秒轮询驮上整个 songInfo。
+   */
+  source_data?: {
+    platform: string;
+    quality: string;
+    songInfo: Record<string, unknown>;
+  };
   file_size: number;
   format: string;
   bit_rate: number;
@@ -37,10 +50,40 @@ export interface PlayerSong {
 export interface DynamicPlaylistOptions {
   dynamicPlaylistLoader?: (playlistId: number) => Promise<PlayerSong[] | null>;
   dynamicSongResolver?: (song: PlayerSong) => Promise<PlayerSong | null>;
+  /**
+   * 解析单曲歌词（返回规范化后的 LRC，取不到返回空串）。
+   * 由 PlaylistManager 在切歌时按需调用——歌词补全必须由持有队列的一方驱动，
+   * 放在建队列的一侧只能补到最初那几首，之后自动切歌就再也补不上了。
+   */
+  songLyricResolver?: (song: PlayerSong) => Promise<string>;
 }
 
 export interface PlayStandaloneOptions {
   autoAdvance?: boolean;
+}
+
+/** 预热请求超时：宿主只回 202，不应为它等太久 */
+const PREFETCH_TIMEOUT_MS = 5000;
+
+/** 切歌偏移允许范围（秒），与设置页保持一致 */
+const MAX_TRANSITION_OFFSET_SEC = 30;
+
+/** 两个地址是否同源（按 origin 比较，避免前缀域名误判） */
+function isSameOrigin(url: string, base: string): boolean {
+  if (!base) return false;
+  try {
+    return new URL(url).origin === new URL(base).origin;
+  } catch {
+    return false;
+  }
+}
+
+/** 把配置里的切歌偏移收敛到 [-30, +30]，非法值按 0 处理 */
+function normalizeTransitionOffset(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(-MAX_TRANSITION_OFFSET_SEC, Math.min(MAX_TRANSITION_OFFSET_SEC, value));
 }
 
 function recordSpeakerPlaybackDiagnostic(
@@ -174,7 +217,8 @@ function normalizePlayerSongs(value: unknown): PlayerSong[] {
         url,
         cover_path: firstString(record, 'cover_path', 'coverPath'),
         cover_url: firstString(record, 'cover_url', 'coverUrl', 'picUrl', 'img'),
-        lyric_url: firstString(record, 'lyric_url', 'lyricUrl'),
+        // 宿主列表接口不一定回填 lyric_url，有歌曲 ID 时回落到统一歌词端点
+        lyric_url: firstString(record, 'lyric_url', 'lyricUrl') || (id > 0 ? `/api/v1/songs/${id}/lyric` : ''),
         file_size: firstNumber(record, 'file_size', 'fileSize'),
         format: firstString(record, 'format'),
         bit_rate: firstNumber(record, 'bit_rate', 'bitRate'),
@@ -210,6 +254,8 @@ export class PlaylistManager {
   private randomPlayed: Set<number> = new Set(); // 随机模式已播放索引
   private voiceSuspendedAt: number = 0; // suspendForVoiceInteraction 首次调用时间戳
   private autoAdvance = true;
+  /** 正在解析歌词的歌曲，避免来回切歌时重复发起 */
+  private readonly lyricFillInFlight = new Set<PlayerSong>();
   private _lastLoadNotFound: boolean = false; // 上次 loadPlaylistSongs 失败是否因歌单不存在(ID 过期)
 
   constructor(
@@ -451,11 +497,19 @@ export class PlaylistManager {
    * 获取播放状态
    */
   getStatus(): PlayerStatus {
-    let currentSong: { id: number; title: string; artist: string; cover_url?: string; lyric_url?: string } | undefined;
+    let currentSong: PlayerStatus['current_song'];
     let duration = 0;
     if (this.currentIndex >= 0 && this.currentIndex < this.songs.length) {
       const song = this.songs[this.currentIndex];
-      currentSong = { id: song.id, title: song.title, artist: song.artist, cover_url: song.cover_url, lyric_url: song.lyric_url };
+      currentSong = {
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        cover_url: song.cover_url,
+        lyric_url: song.lyric_url,
+        // 内联歌词只随当前歌曲下发，避免整条队列重复携带大段 LRC 文本
+        ...(song.lyric_text ? { lyric_text: song.lyric_text } : {}),
+      };
       duration = song.duration;
     }
 
@@ -877,14 +931,108 @@ export class PlaylistManager {
 
     // 如果歌曲时长有效，注册定时器播放下一首
     if (this.autoAdvance && song.duration > 0) {
-      this.startCheckTimer(song.duration);
+      // 切歌偏移用于补偿音箱缓冲差异：正数延后、负数提前。
+      // 下限 1 秒，避免偏移大于曲长时立刻触发切歌。
+      this.startCheckTimer(Math.max(1, song.duration + normalizeTransitionOffset(config.song_transition_offset)));
     } else if (!this.autoAdvance) {
       songloft.log.info('[PlaylistManager] Auto-next timer disabled for standalone playback');
     } else {
       songloft.log.warn('[PlaylistManager] Song duration invalid, no auto-next timer: ' + song.duration);
     }
 
+    if (config.prefetch_next_song !== false) {
+      this.prefetchNextSong(forceMp3);
+    }
+
+    // 每次切歌都补一次：只在建队列时补的话，队列靠后的歌永远等不到歌词。
+    this.fillLyricsAround();
+
     return 'played';
+  }
+
+  /**
+   * 为当前曲（及下一曲）按需补内联歌词。
+   *
+   * 只覆盖「当前 + 下一首」两首，所以不需要对长队列做截断——不像一次性批量补全，
+   * 那样要么截断、要么对整个队列发请求。已有 lyric_url 或 lyric_text 的直接跳过。
+   * 结果写回 this.songs 里的对象本身，getStatus() 下一次轮询就能带出去。
+   */
+  private fillLyricsAround(): void {
+    const resolve = this.dynamicOptions.songLyricResolver;
+    if (!resolve) return;
+
+    const targets: PlayerSong[] = [];
+    const current = this.getCurrentSong();
+    if (current) targets.push(current);
+
+    if (this.songs.length > 1 && this.playMode !== 'single') {
+      const nextIdx = this.getNextIndex();
+      if (nextIdx >= 0 && nextIdx !== this.currentIndex) {
+        targets.push(this.songs[nextIdx]);
+      }
+    }
+
+    for (const song of targets) {
+      if (!song || song.lyric_url || song.lyric_text || !song.source_data) {
+        continue;
+      }
+      // 打标记避免同一首歌被反复解析（切歌来回跳时会重复进入本函数）
+      if (this.lyricFillInFlight.has(song)) continue;
+      this.lyricFillInFlight.add(song);
+
+      void resolve(song)
+        .then((lyric) => {
+          if (lyric) song.lyric_text = lyric;
+        })
+        .catch((e) => {
+          songloft.log.info('[PlaylistManager] lyric fill skipped: ' + String(e));
+        })
+        .finally(() => {
+          this.lyricFillInFlight.delete(song);
+        });
+    }
+  }
+
+  /**
+   * 预热下一首：让宿主提前准备好音频（转码/缓存），减少切歌时的冷启动。
+   * 宿主对 `?prefetch=1` 返回 202 且不回传音频体，所以这里只发不读。
+   *
+   * 严格 best-effort：不 await、不改任何播放状态、失败只记日志。
+   * 播放命令此时已被音箱接受，预取绝不能反过来影响它。
+   */
+  private prefetchNextSong(forceMp3: boolean): void {
+    if (!this.autoAdvance || this.songs.length < 2) {
+      return;
+    }
+
+    // 单曲循环时下一首就是当前曲，宿主已在放，无需预热。
+    const nextIndex = this.playMode === 'single' ? -1 : this.getNextIndex();
+    if (nextIndex < 0 || nextIndex === this.currentIndex) {
+      return;
+    }
+
+    const nextSong = this.songs[nextIndex];
+    if (!nextSong?.url) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        const url = await URLBuilder.buildSongURL(nextSong, { forceMp3 });
+        // 外部音源直链由对方 CDN 提供，预热无意义也不该替用户打对方流量。
+        // 按 origin 比较而不是字符串前缀：前缀匹配会把 host 的近似域名
+        // （如 songloft.test.evil.com）误判成同源。
+        if (!url || !isSameOrigin(url, getHostBaseUrl())) {
+          return;
+        }
+        await fetchWithTimeout(url + (url.includes('?') ? '&' : '?') + 'prefetch=1', {
+          method: 'GET',
+          timeoutMs: PREFETCH_TIMEOUT_MS,
+        });
+      } catch (e) {
+        songloft.log.info('[PlaylistManager] prefetch next song skipped: ' + String(e));
+      }
+    })();
   }
 
   /**

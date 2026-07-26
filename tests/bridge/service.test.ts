@@ -26,6 +26,17 @@ const song = {
   },
 } satisfies SearchResultSong;
 
+/** QQ 音乐返回的是原始 LRC（base64），用来验证下发前的时间标签归一化。 */
+const txSong = {
+  ...song,
+  title: '风起天阑',
+  source_data: {
+    platform: 'tx',
+    quality: '320k',
+    songInfo: { source: 'tx', name: '风起天阑', singer: 'Singer', album: 'Album', duration: 200, songmid: 'tx-1' },
+  },
+} satisfies SearchResultSong;
+
 const secondSong = {
   ...song,
   title: 'Second Song',
@@ -845,6 +856,90 @@ describe('BridgeService', () => {
     expect(minaService.playURL).not.toHaveBeenCalled();
   });
 
+  it('gives speaker-pushed songs the Songloft lyric endpoint behind their play URL', async () => {
+    const downloads = { downloadSong: vi.fn(async () => ({ song_id: 1256 })) };
+    const { service, playlistManager } = createService({ usePlaylistManager: true, downloads });
+
+    await expect(service.playSonglistOnSpeaker('acc-1', 'dev-1', [song])).resolves.toEqual({
+      urls: ['/api/v1/songs/1256/play'],
+    });
+
+    // 修复前这里是 `{ id: 0, lyric_url: '' }`：播放地址已经带着 1256，
+    // 队列条目却把它丢了，全屏播放器无从拉歌词。
+    expect(playlistManager.playStandalone).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 1256,
+        url: '/api/v1/songs/1256/play',
+        lyric_url: '/api/v1/songs/1256/lyric',
+      }),
+    ], 0, 'order');
+  });
+
+  it('fills parseable inline lyrics after pushing a direct source stream to the speaker', async () => {
+    // 一位分钟 / 一位小数的时间标签前端 parseLrc 认不出来，必须归一化后再下发。
+    const rawLrc = '[ti:风起天阑]\n[0:01.5]第一句\n[00:12.34]第二句';
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('fcg_query_lyric_new.fcg')) {
+        return responseJson({ lyric: Buffer.from(rawLrc, 'utf8').toString('base64'), trans: '' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    const { service, playlistManager } = createService({ usePlaylistManager: true });
+
+    await expect(service.playSonglistOnSpeaker('acc-1', 'dev-1', [txSong])).resolves.toEqual({
+      urls: ['https://audio.test/song.mp3'],
+    });
+    await flushBackgroundSync();
+
+    const [queue] = playlistManager.playStandalone.mock.calls[0] as unknown as [Array<Record<string, unknown>>];
+    // 直连音源没有宿主歌曲 ID，只能靠内联歌词兜底。
+    expect(queue[0]).toMatchObject({ id: 0, lyric_url: '' });
+    expect(queue[0].lyric_text).toBe('[ti:风起天阑]\n[00:01.500]第一句\n[00:12.340]第二句');
+    // 与 static/js/speaker_modules/lrc_parser.js 的 parseLrc 时间标签保持一致。
+    const parserTimeTag = /\[(\d{2}):(\d{2})(?:\.(\d{2,3}))?\]/;
+    for (const line of String(queue[0].lyric_text).split('\n').slice(1)) {
+      expect(line).toMatch(parserTimeTag);
+    }
+  });
+
+  it('does not wait for the deferred lyric fill before reporting speaker playback', async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('fcg_query_lyric_new.fcg')) {
+        return await new Promise<Response>(() => {});
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    const { service } = createService({ usePlaylistManager: true });
+
+    const result = Promise.race([
+      service.playSonglistOnSpeaker('acc-1', 'dev-1', [txSong]).then(() => 'resolved'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 10)),
+    ]);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(result).resolves.toBe('resolved');
+    vi.useRealTimers();
+  });
+
+  it('keeps speaker playback working when the deferred lyric fill fails', async () => {
+    const warnSpy = vi.spyOn(songloft.log, 'warn');
+    globalThis.fetch = vi.fn(async () => responseJson({ message: 'lyric upstream down' }, 500));
+    const { service, playlistManager } = createService({ usePlaylistManager: true });
+
+    await expect(service.playSonglistOnSpeaker('acc-1', 'dev-1', [txSong])).resolves.toEqual({
+      urls: ['https://audio.test/song.mp3'],
+    });
+    await flushBackgroundSync();
+
+    const [queue] = playlistManager.playStandalone.mock.calls[0] as unknown as [Array<Record<string, unknown>>];
+    expect(queue[0].lyric_text).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Player lyric fill failed'));
+  });
+
   it('throws DEVICE_OFFLINE when MIoT speaker playback fails', async () => {
     const { service } = createService({ playResult: false });
 
@@ -1171,6 +1266,74 @@ describe('registerBridgeHandlers', () => {
     expect(parseResponseBody(response).data).toEqual({ urls: ['https://audio.test/1.mp3', 'https://audio.test/2.mp3'] });
     expect(bridge.playSonglistOnSpeaker).toHaveBeenCalledWith('acc-1', 'dev-1', [song, secondSong]);
     expect(bridge.playOnSpeaker).not.toHaveBeenCalled();
+  });
+
+  it('accepts speaker queue songs that carry a playable url but no source_data', async () => {
+    // 复现：同一首歌先在音箱播放 → 暂停 → 切浏览器 → 暂停 → 切回音箱。
+    // 状态接口的 queue 条目不带 source_data，只带 /api/v1/songs/{id}/play，
+    // 以前会被 requireSong 以 "song.source_data is required" 拒成 400。
+    const bridge = {
+      previewUrl: vi.fn(),
+      importSongs: vi.fn(),
+      playOnSpeaker: vi.fn(),
+      playSonglistOnSpeaker: vi.fn(async () => ({ urls: ['/api/v1/songs/1256/play'] })),
+      externalSearch: vi.fn(),
+    } as unknown as BridgeService;
+    const router = createRouter();
+    registerBridgeHandlers(router, bridge);
+
+    const response = await router.handle(request('POST', '/api/bridge/play-songlist', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+      songs: [{
+        id: 0,
+        title: '风起天阑',
+        artist: '河图',
+        album: '倾尽天下',
+        duration: 328,
+        cover_url: 'https://img4.kuwo.cn/star/albumcover/800/x.jpg',
+        url: '/api/v1/songs/1256/play',
+        play_url: '/api/v1/songs/1256/play',
+      }],
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(bridge.playSonglistOnSpeaker).toHaveBeenCalledWith('acc-1', 'dev-1', [
+      expect.objectContaining({
+        title: '风起天阑',
+        artist: '河图',
+        duration: 328,
+        playback_url: '/api/v1/songs/1256/play',
+        // id 从播放地址里回捞出来，歌词端点才能用
+        song_id: 1256,
+      }),
+    ]);
+  });
+
+  it('still rejects a song with neither source_data nor a playable url', async () => {
+    const bridge = {
+      previewUrl: vi.fn(),
+      importSongs: vi.fn(),
+      playOnSpeaker: vi.fn(),
+      playSonglistOnSpeaker: vi.fn(),
+      externalSearch: vi.fn(),
+    } as unknown as BridgeService;
+    const router = createRouter();
+    registerBridgeHandlers(router, bridge);
+
+    for (const bad of [
+      { title: '无源无地址', artist: 'x' },
+      { title: '相对地址但不是歌曲端点', url: '/etc/passwd' },
+      { title: '协议不允许', url: 'file:///etc/passwd' },
+    ]) {
+      const response = await router.handle(request('POST', '/api/bridge/play-songlist', {
+        account_id: 'acc-1',
+        device_id: 'dev-1',
+        songs: [bad],
+      }));
+      expect(response.statusCode).toBe(400);
+    }
+    expect(bridge.playSonglistOnSpeaker).not.toHaveBeenCalled();
   });
 
   it('rejects missing or non-array import songs without calling the service', async () => {

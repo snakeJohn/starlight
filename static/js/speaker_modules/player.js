@@ -602,6 +602,24 @@ export async function handoffBrowserQueueToSpeaker() {
 /**
  * Load the last speaker queue into the browser player and start playback.
  */
+/**
+ * 浏览器开始播放时把音箱停下来，否则两端会同时出声。
+ *
+ * 用幂等的 /miot/mina/pause，而不是「先查状态再发 /player/toggle」：
+ * toggle 是翻转语义，查询与翻转之间音箱状态一旦变化（自动切歌、语音口令、
+ * 智能续播都会改它），就会把已暂停的音箱反过来唤醒。pause 无论当前状态如何
+ * 都只会暂停，天然没有这个竞态，也保留播放位置便于切回。
+ * 停不下来不应中断浏览器播放，因此失败只吞掉。
+ */
+async function pauseSpeakerForBrowserPlayback() {
+    if (!state.accountId || !state.deviceId) return;
+    try {
+        await api.post('/miot/mina/pause', selectedDevicePayload());
+    } catch {
+        // 音箱可能离线或未选设备，忽略
+    }
+}
+
 export async function handoffSpeakerQueueToBrowser() {
     // Prefer a fresh speaker status (includes queue) when device is selected.
     let playback = lastSpeakerPlayback;
@@ -635,6 +653,8 @@ export async function handoffSpeakerQueueToBrowser() {
         startIndex,
         playMode: normalizePlayMode(playback?.play_mode),
     });
+    // 与「浏览器 → 音箱」对称：新目标接受播放后，再停掉旧目标。
+    await pauseSpeakerForBrowserPlayback();
     const status = getBrowserPlaybackStatus();
     renderPlayerStatus(status);
     toast('已在浏览器继续播放');
@@ -718,9 +738,20 @@ export function closeFullscreenPlayer() {
     document.body?.classList?.remove?.('fullscreen-player-open');
 }
 
+/**
+ * /miot/player/toggle 只回 { message, state }，不带 position/duration。
+ * 直接把它渲染出去会让 `Number(undefined) || 0` 把进度条和时间清零，
+ * 看起来就像暂停后从头开始播（音箱其实是原地续播的）。
+ * 所以这里改为拉一次真实状态；拉取失败才退回只用 state 更新按钮。
+ */
 async function togglePlayerPlayback() {
     const result = await api.post('/miot/player/toggle', selectedPayload());
-    renderPlayerStatus(result || {});
+    const status = await refreshPlayerStatus().catch(() => null);
+    if (!status) {
+        const nextState = result?.state || state.speakerPlayerState;
+        setState({ speakerPlayerState: nextState });
+        updatePlayerToggleButton(nextState);
+    }
     return result || {};
 }
 
@@ -758,6 +789,10 @@ export async function runPlayerAction(action, options = {}) {
             clearPendingTargetHint();
             if (command === 'stop') explicitlyStoppedTarget = 'browser';
             else if (result?.state === 'playing' || result?.is_playing) explicitlyStoppedTarget = null;
+            // 浏览器队列已存在时直接按播放也会走到这里，同样要确保音箱不再出声。
+            if (result?.state === 'playing' || result?.is_playing === true) {
+                await pauseSpeakerForBrowserPlayback();
+            }
             renderPlayerStatus(result);
             return result;
         } catch (error) {
@@ -828,9 +863,8 @@ export async function runPlayerAction(action, options = {}) {
         renderPlayerStatus({ state: 'stopped', play_mode: modeSelect?.value || 'order', position: 0, duration: 0, target: 'speaker' });
     } else if (command !== 'toggle') {
         await refreshPlayerStatus().catch(() => null);
-    } else if (result) {
-        renderPlayerStatus({ ...result, target: 'speaker' });
     }
+    // toggle 已在 togglePlayerPlayback() 内刷新过真实状态，不能再用那份缺 position 的响应覆盖。
     return result || {};
 }
 

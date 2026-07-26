@@ -109,6 +109,22 @@ describe('PlaylistManager standalone queue', () => {
     });
   });
 
+  it('exposes late-filled inline lyrics on the current song only', async () => {
+    const queued: PlayerSong = { ...song };
+    const { manager } = createManager();
+
+    await expect(manager.playStandalone([queued], 0, 'single')).resolves.toBe(true);
+    expect(manager.getStatus().current_song).not.toHaveProperty('lyric_text');
+
+    // BridgeService 播放后异步补词写回的是同一个对象引用，下一次状态轮询就能带上。
+    queued.lyric_text = '[00:01.000]第一句';
+
+    const status = manager.getStatus();
+    expect(status.current_song).toMatchObject({ lyric_text: '[00:01.000]第一句' });
+    // 队列条目不重复携带大段 LRC 文本。
+    expect(status.queue?.[0]).not.toHaveProperty('lyric_text');
+  });
+
   it('returns a capped queue window containing the active song with an offset', async () => {
     const songs = Array.from({ length: 251 }, (_, index) => ({
       ...song,

@@ -31,6 +31,8 @@ function pluginConfig(): PluginConfig {
     voice_command_enabled: false,
     scheduled_tasks_enabled: false,
     force_mp3: false,
+    song_transition_offset: 0,
+    prefetch_next_song: true,
     external_search_enabled: false,
     external_search_url: '',
     external_search_token: '',
