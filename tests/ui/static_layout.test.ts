@@ -189,18 +189,30 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('.input-with-actions');
   });
 
-  it('shows QR, password, and token login modes in the speaker account panel', () => {
+  it('shows only QR and token login modes in the speaker account panel', () => {
     const html = indexHtml();
 
     expect(html).toContain('data-auth-panel="qrcode"');
     expect(html).toContain('data-action="qr-start"');
-    expect(html).toContain('data-auth-mode="password"');
     expect(html).toContain('data-auth-mode="token"');
-    expect(html).toContain('data-role="password-login-form"');
     expect(html).toContain('data-role="token-login-form"');
     expect(html).toContain('data-action="auth-tab"');
-    expect(html).toContain('data-action="auth-captcha-submit"');
-    expect(html).toContain('data-action="auth-verify-submit"');
+    expect(html).not.toContain('data-auth-mode="password"');
+    expect(html).not.toContain('data-role="password-login-form"');
+    expect(html).not.toContain('data-action="auth-captcha-submit"');
+    expect(html).not.toContain('data-action="auth-verify-submit"');
+    expect(html).not.toContain('批量推送音箱');
+    expect(html).toContain('批量播放');
+    expect(readFileSync(resolve(process.cwd(), 'static/css/style.css'), 'utf8')).not.toContain('.auth-captcha-row');
+  });
+
+  it('defaults search to flac24bit quality', () => {
+    const html = indexHtml();
+    const stateJs = readFileSync(resolve(process.cwd(), 'static/js/state.js'), 'utf8');
+
+    expect(html).toMatch(/<option value="flac24bit" selected>flac24bit<\/option>/);
+    expect(html).not.toMatch(/<option value="320k" selected>320k<\/option>/);
+    expect(stateJs).toContain("quality: 'flac24bit'");
   });
 
   it('mounts pagination controls for every paged music surface', () => {
@@ -226,7 +238,7 @@ describe('static UI layout copy', () => {
     expect(html).not.toContain('加入SL歌单');
     expect(html).toContain('data-action="download-selected-search"');
     expect(html).toContain('data-action="speaker-selected-search"');
-    expect(html).toContain('批量推送音箱');
+    expect(html).toContain('批量播放');
   });
 
   it('passes the selected quality through search requests', () => {

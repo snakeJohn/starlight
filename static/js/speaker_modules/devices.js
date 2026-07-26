@@ -153,7 +153,7 @@ function renderAccounts(accounts) {
     if (list) {
         list.innerHTML = accounts.length
             ? accounts.map(account => renderAccountRow(account)).join('')
-            : '<div class="empty-state">暂无米家账号。可使用扫码、账密或 Token 登录。</div>';
+            : '<div class="empty-state">暂无米家账号。可使用扫码或 Token 登录。</div>';
     }
 
     const authSummary = $('[data-role="auth-summary"]');

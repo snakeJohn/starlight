@@ -16,7 +16,7 @@ export const state = {
     speakerPlayerPlaylistId: '',
     speakerPlayerCurrentIndex: -1,
     platform: 'kw',
-    quality: '320k',
+    quality: 'flac24bit',
     searchQuery: null,
     searchResults: [],
     searchPage: 1,

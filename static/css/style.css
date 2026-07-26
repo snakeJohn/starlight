@@ -2620,35 +2620,6 @@ body.playback-target-browser .speaker-device-field {
     gap: 10px;
 }
 
-.auth-extra {
-    display: grid;
-    gap: 8px;
-    padding: 10px;
-    border: 1px solid var(--surface-line);
-    border-radius: var(--radius);
-    background: color-mix(in srgb, var(--surface-muted) 80%, transparent);
-}
-
-.auth-captcha-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-}
-
-.auth-captcha-row img {
-    height: 40px;
-    border-radius: 8px;
-    border: 1px solid var(--surface-line);
-    background: #fff;
-}
-
-.auth-captcha-row input,
-.auth-extra input {
-    flex: 1 1 140px;
-    min-width: 120px;
-}
-
 .inline-actions,
 .player-actions,
 .inline-form {

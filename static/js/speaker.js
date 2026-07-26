@@ -25,7 +25,7 @@ import {
 } from './speaker_modules/player.js';
 import { bindPlaybackTargetSelector } from './speaker_modules/playback_target.js';
 import { bindSpeakerPlaylists, loadSpeakerPlaylists, openSpeakerSongListDrawer } from './speaker_modules/playlists.js';
-import { bindPasswordTokenLogin } from './speaker_modules/auth_login.js';
+import { bindTokenLogin } from './speaker_modules/auth_login.js';
 import { bindQrLogin } from './speaker_modules/qrcode.js';
 import { recentVoiceRecords, renderVoiceRecordList } from './speaker_modules/voice_records.js';
 import { $, $$, toast } from './state.js';
@@ -204,7 +204,7 @@ function bindRefresh() {
 export async function initSpeakerUI() {
     if (!speakerBindingsBound) {
         bindQrLogin({ refreshSpeaker });
-        bindPasswordTokenLogin({ refreshSpeaker });
+        bindTokenLogin({ refreshSpeaker });
         bindDeviceSelection();
         bindSpeakerPlayer();
         bindSpeakerPlaylists({ refreshPlayerStatus });

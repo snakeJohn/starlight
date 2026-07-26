@@ -45,7 +45,7 @@ describe('music media rendering', () => {
     expect(html).toContain('晴天');
     expect(html).toContain('周杰伦');
     expect(html).not.toContain('data-action="preview"');
-    expect(html).not.toContain('>播放</button>');
+    expect(html).toContain('>播放</button>');
     expect(html).toContain('data-action="download"');
     expect(html).toContain('>下载</button>');
     expect(html).toContain('加入歌曲库');
@@ -74,9 +74,9 @@ describe('music media rendering', () => {
     expect(html).toContain('data-role="search-song-check"');
     expect(html).toContain('data-index="3"');
     expect(html).not.toContain('data-action="preview"');
-    expect(html).not.toContain('>播放</button>');
+    expect(html).toContain('>播放</button>');
     expect(html).toContain('data-action="speaker"');
-    expect(html).toContain('>推送音箱</button>');
+    expect(html).not.toContain('>推送音箱</button>');
   });
 
   it('wraps long list content in a stable scroll container', async () => {

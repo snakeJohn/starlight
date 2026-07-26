@@ -287,7 +287,7 @@ describe('custom playlist music UI helpers', () => {
     expect(html).toContain('酷我');
     expect(html).toContain('刷新');
     expect(html).not.toContain('同步到SL歌单');
-    expect(html).toContain('推送音箱');
+    expect(html).toContain('>播放</button>');
     expect(html).toContain('查看歌曲');
     expect(html).toContain('data-action="view-custom-playlist"');
     expect(html).not.toContain('data-action="sync-custom-playlist"');
@@ -326,13 +326,13 @@ describe('custom playlist music UI helpers', () => {
     expect(html).toContain('稻花香');
     expect(html).toContain('加入歌单');
     expect(html).not.toContain('加入SL歌单');
-    expect(html).toContain('推送音箱');
+    expect(html).toContain('>播放</button>');
     expect(html).toContain('data-role="custom-playlist-song-check"');
     expect(html).toContain('data-action="add-selected-custom-playlist-songs"');
     expect(html).not.toContain('data-action="add-selected-custom-playlist-songs-to-songloft"');
     expect(html).not.toContain('data-action="add-custom-playlist-song-to-songloft"');
     expect(html).toContain('data-action="speaker-custom-playlist-song"');
-    expect(html).not.toContain('>播放</button>');
+    expect(html).not.toContain('推送音箱');
     expect(html).not.toContain('kw-1');
   });
 

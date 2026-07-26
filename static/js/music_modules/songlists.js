@@ -60,7 +60,7 @@ export async function loadSongListDetailPage(page = 1) {
         ? `${renderListScroller(songs.map((song, index) => renderSongRow(song, index, '', {
             selectable: true,
             checkboxRole: 'songlist-detail-song-check',
-        })).join(''), 'songlist-detail-scroll')}<div class="inline-actions"><button class="ghost-button" type="button" data-action="select-songlist-detail-page">全选当前页</button><button class="ghost-button" type="button" data-action="clear-songlist-detail-selection">取消选择</button><button class="ghost-button" type="button" data-action="add-selected-songlist-detail-to-playlist">加入选中到歌单</button><button class="primary-button" type="button" data-action="speaker-songlist">推送整个歌单</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button><button class="ghost-button" type="button" data-action="download-songlist">下载当前歌单</button></div>`
+        })).join(''), 'songlist-detail-scroll')}<div class="inline-actions"><button class="ghost-button" type="button" data-action="select-songlist-detail-page">全选当前页</button><button class="ghost-button" type="button" data-action="clear-songlist-detail-selection">取消选择</button><button class="ghost-button" type="button" data-action="add-selected-songlist-detail-to-playlist">加入选中到歌单</button><button class="primary-button" type="button" data-action="speaker-songlist">播放</button><button class="ghost-button" type="button" data-action="import-songlist">导入当前歌单</button><button class="ghost-button" type="button" data-action="download-songlist">下载当前歌单</button></div>`
         : '<div class="empty-state">歌单没有可显示歌曲。</div>';
     renderPaginationInto('songlist-detail-pagination', { scope: 'songlist-detail', page, total, pageSize: pageSizes.songlistDetail });
 }

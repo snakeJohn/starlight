@@ -193,7 +193,7 @@ export function renderSongRow(song, index, extraActions = '', options = {}) {
             <div class="row-actions">
                 ${actionButton('import', index, '加入歌曲库')}
                 ${actionButton('download', index, '下载')}
-                ${actionButton('speaker', index, '推送音箱')}
+                ${actionButton('speaker', index, '播放')}
                 ${customPlaylistAction(index)}
                 ${extraActions}
             </div>
@@ -303,7 +303,7 @@ export function renderSongloftSongRow(song, index) {
                 <span class="row-meta">${escapeHtml([songloftTypeLabel(song), durationLabel(song?.duration)].filter(Boolean).join(' · '))}</span>
             </div>
             <div class="row-actions">
-                <button type="button" data-action="speaker-songloft-song" data-index="${index}">推送音箱</button>
+                <button type="button" data-action="speaker-songloft-song" data-index="${index}">播放</button>
             </div>
         </article>
     `;

@@ -63,7 +63,7 @@ function renderCustomPlaylistSongRow(song, index) {
             </div>
             <div class="row-actions">
                 ${hasSourceData ? `<button type="button" data-action="download-custom-playlist-song" data-index="${index}">下载</button>` : ''}
-                <button type="button" data-action="speaker-custom-playlist-song" data-index="${index}">推送音箱</button>
+                <button type="button" data-action="speaker-custom-playlist-song" data-index="${index}">播放</button>
                 <button type="button" data-action="add-custom-playlist-song" data-index="${index}">加入歌单</button>
             </div>
         </article>
@@ -97,7 +97,7 @@ export function renderCustomPlaylistItem(playlist) {
             <div class="row-actions">
                 <button type="button" class="${viewed ? 'selected-action' : ''}" data-action="view-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">${viewed ? '正在查看' : '查看歌曲'}</button>
                 ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="refresh-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">刷新</button>` : ''}
-                ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="speaker-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">推送音箱</button>` : ''}
+                ${playlist?.source && playlist?.sourceListId ? `<button type="button" data-action="speaker-custom-playlist" data-playlist-id="${escapeHtml(playlist.id)}">播放</button>` : ''}
                 <button type="button" data-action="delete-custom-playlist" data-playlist-id="${escapeHtml(playlist?.id || '')}">删除</button>
             </div>
         </article>
