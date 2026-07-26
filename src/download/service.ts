@@ -11,6 +11,7 @@ import { StarlightError } from '../system/errors';
 import { sourceDiagnostics } from '../diagnostics/source_logs';
 import { requireHostBaseUrl } from '../utils/http';
 import {
+  normalizeSongText,
   sanitizeProviderError,
   scoreResolvedCandidate,
 } from '../utils/song_match';
@@ -94,6 +95,9 @@ export class DownloadService {
   }
 
   async downloadSong(song: SearchResultSong): Promise<DownloadResult> {
+    const existing = await this.findExistingSong(song);
+    if (existing) return existing;
+
     const settings = await this.getSettings();
     const attemptedSources = new Set<string>();
     const failures: DownloadFailure[] = [];
@@ -179,6 +183,31 @@ export class DownloadService {
         attempts: attempt.attemptedSources,
         lastFailure: reason,
       });
+    }
+  }
+
+  private async findExistingSong(song: SearchResultSong): Promise<DownloadResult | null> {
+    const expectedTitle = normalizeSongText(song.title);
+    const expectedArtist = normalizeSongText(song.artist);
+    if (!expectedTitle || !expectedArtist) return null;
+
+    try {
+      const raw = await songloft.songs.list({ limit: 10000 });
+      const rows = songRows(raw);
+      const matched = rows.find((entry) => (
+        normalizeSongText(songRecordField(entry, 'title', 'name', 'songName')) === expectedTitle
+        && normalizeSongText(songRecordField(entry, 'artist', 'singer', 'author', 'singerName')) === expectedArtist
+      ));
+      const songId = matched ? numericSongId(matched) : 0;
+      if (!matched || !songId) return null;
+      return {
+        song_id: songId,
+        path: songRecordField(matched, 'file_path', 'filePath') || undefined,
+        status: 'existing',
+      };
+    } catch (error) {
+      songloft.log.warn(`[DownloadService] Existing song lookup failed: ${errorMessage(error)}`);
+      return null;
     }
   }
 
@@ -374,6 +403,30 @@ function safeJson(value: string): unknown {
 function numericSongId(song: SongloftRemoteSong): number {
   const id = Number(song.id);
   return Number.isFinite(id) && id > 0 ? id : 0;
+}
+
+function songRows(value: unknown): SongloftRemoteSong[] {
+  if (Array.isArray(value)) return value as SongloftRemoteSong[];
+  if (!value || typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  for (const key of ['items', 'songs', 'list', 'data']) {
+    const nested = record[key];
+    if (Array.isArray(nested)) return nested as SongloftRemoteSong[];
+    if (nested && typeof nested === 'object') {
+      const rows = songRows(nested);
+      if (rows.length) return rows;
+    }
+  }
+  return [];
+}
+
+function songRecordField(song: SongloftRemoteSong, ...keys: string[]): string {
+  const record = song as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
 }
 
 function errorMessage(error: unknown): string {

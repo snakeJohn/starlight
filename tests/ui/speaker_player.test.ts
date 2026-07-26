@@ -25,6 +25,10 @@ class FakeElement {
   style: Record<string, string> = {};
   parentElement: FakeElement | null = null;
   disabled = false;
+  clientHeight = 0;
+  offsetHeight = 0;
+  offsetTop = 0;
+  scrollTop = 0;
   hidden = false;
   innerHTML = '';
   src = '';
@@ -469,8 +473,13 @@ describe('speaker player module', () => {
   it('scrolls the fullscreen lyric only when the active line changes', async () => {
     const { elements } = installPlayerRenderDom();
     const lyricList = new FakeElement();
+    lyricList.clientHeight = 200;
     const lines = [new FakeElement(), new FakeElement()];
     lines.forEach((line, index) => { line.dataset.lyricIndex = String(index); });
+    lines[0].offsetTop = 100;
+    lines[0].offsetHeight = 40;
+    lines[1].offsetTop = 300;
+    lines[1].offsetHeight = 40;
     lyricList.querySelector = vi.fn((selector: string) => {
       if (selector === '.active') return lines.find(line => line.classList.contains('active')) || null;
       const match = selector.match(/data-lyric-index="(\d+)"/);
@@ -492,16 +501,17 @@ describe('speaker player module', () => {
       state: 'playing', is_playing: true, position: 1, duration: 30,
       current_song: { title: '测试歌曲', lyric_text: '[00:01.00]第一句\n[00:05.00]第二句' },
     });
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).not.toHaveBeenCalled();
 
     now = 2000;
     frame?.();
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).not.toHaveBeenCalled();
 
     now = 6000;
     frame?.();
-    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(scrollIntoView).not.toHaveBeenCalled();
     expect(lines[1].classList.contains('active')).toBe(true);
+    expect(lyricList.scrollTop).toBe(220);
   });
 
   it('does not render a stale current song for stopped status', async () => {

@@ -202,7 +202,10 @@ function renderActiveLyric(position = currentPosition) {
     previous?.classList?.remove?.('active');
     const line = list.querySelector?.(`[data-lyric-index="${index}"]`);
     line?.classList?.add?.('active');
-    line?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    if (line) {
+        const targetTop = line.offsetTop - Math.max((list.clientHeight - line.offsetHeight) / 2, 0);
+        list.scrollTop = Math.max(0, targetTop);
+    }
     currentLyricIndex = index;
 }
 

@@ -49,6 +49,13 @@ export class BridgeService {
    * (does not lock to the song's declared quality).
    */
   async previewUrl(song: SearchResultSong): Promise<string> {
+    if (this.downloads) {
+      const downloaded = await this.downloads.downloadSong(song);
+      if (!downloaded.song_id) {
+        throw new StarlightError('INTERNAL_ERROR', 'Songloft 下载未返回可播放歌曲 ID', true);
+      }
+      return `/api/v1/songs/${downloaded.song_id}/play`;
+    }
     const resolved = await this.resolvePlayback(song);
     return resolved.url;
   }

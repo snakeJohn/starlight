@@ -75,6 +75,7 @@ function createService(options: {
   playResults?: boolean[];
   usePlaylistManager?: boolean;
   providers?: MusicPlatformProvider[];
+  downloads?: { downloadSong(song: SearchResultSong): Promise<{ song_id: number }> };
 } = {}) {
   const runtimes = {
     getMusicUrl: vi.fn(async () => ('url' in options ? options.url : 'https://audio.test/song.mp3')),
@@ -101,6 +102,7 @@ function createService(options: {
     runtimes,
     minaService,
     options.usePlaylistManager ? playlistManagerMap : undefined,
+    options.downloads,
   );
 
   return {
@@ -575,6 +577,15 @@ describe('BridgeService', () => {
     });
 
     expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/song.mp3');
+  });
+
+  it('downloads or reuses a Songloft song before browser preview playback', async () => {
+    const downloads = { downloadSong: vi.fn(async () => ({ song_id: 88 })) };
+    const { service, runtimes } = createService({ downloads });
+
+    await expect(service.previewUrl(song)).resolves.toBe('/api/v1/songs/88/play');
+    expect(downloads.downloadSong).toHaveBeenCalledWith(song);
+    expect(runtimes.getMusicUrl).not.toHaveBeenCalled();
   });
 
   it('resolves preview lyrics through the platform lyric provider', async () => {
