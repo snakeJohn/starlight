@@ -209,6 +209,47 @@ describe('browser player state transitions', () => {
     expect(FakeAudio.instances[0].src).toBe('');
   });
 
+  it('clears the browser queue and current song when stopped', async () => {
+    installBrowserGlobals();
+    const player = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+      browserPlayerAction(command: string): Promise<unknown>;
+      hasBrowserQueue(): boolean;
+      getBrowserPlaybackStatus(): { state: string; current_song?: unknown; queue_length: number };
+    };
+    await player.playBrowserQueue([{ title: 'A', url: 'https://media.test/a.mp3' }]);
+
+    await player.browserPlayerAction('stop');
+
+    expect(player.hasBrowserQueue()).toBe(false);
+    expect(player.getBrowserPlaybackStatus()).toMatchObject({ state: 'idle', queue_length: 0 });
+    expect(player.getBrowserPlaybackStatus().current_song).toBeUndefined();
+    await expect(player.browserPlayerAction('toggle')).rejects.toThrow('浏览器暂无播放内容');
+  });
+
+  it('loads platform lyrics for browser search-result playback', async () => {
+    installBrowserGlobals();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'api/bridge/preview-url') return apiResponse({ url: 'https://media.test/a.flac' });
+      if (url === 'api/bridge/preview-lyric') return apiResponse({ lyric: '[00:01.00]风起天阑' });
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const player = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+      getBrowserPlaybackStatus(): { current_song?: { lyric_text?: string } };
+    };
+
+    await player.playBrowserQueue([{
+      title: '风起天阑',
+      source_data: { platform: 'kw', quality: 'flac', songInfo: { songmid: '51415073' } },
+    }]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(player.getBrowserPlaybackStatus().current_song?.lyric_text).toContain('风起天阑');
+  });
+
   it('allows manual next in once mode', async () => {
     installBrowserGlobals();
     const player = await import('../../static/js/speaker_modules/browser_player.js') as {
@@ -273,14 +314,53 @@ describe('browser player state transitions', () => {
     expect(FakeAudio.instances[0].paused).toBe(true);
   });
 
-  it('keeps the browser active when speaker toggle returns paused', async () => {
+  it('pauses browser audio after a search result is pushed directly to the speaker', async () => {
     installBrowserGlobals();
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse({
-      state: 'paused',
-      is_playing: false,
-      current_index: 1,
-      queue: [{ title: 'Speaker song' }],
-    })));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse({ url: '/api/v1/songs/42/play' })));
+    const browser = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+    };
+    await browser.playBrowserQueue([{ title: 'A', url: 'https://media.test/a.mp3' }]);
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'account-1';
+    state.deviceId = 'speaker-1';
+    const target = await import('../../static/js/speaker_modules/playback_target.js') as {
+      setSelectedPlaybackTarget(value: 'browser' | 'speaker', options?: { silent?: boolean }): void;
+    };
+    target.setSelectedPlaybackTarget('speaker', { silent: true });
+    const music = await import('../../static/js/music.js') as {
+      playOnSpeaker(song: unknown): Promise<unknown>;
+    };
+
+    await music.playOnSpeaker({
+      title: '风起天阑',
+      source_data: { platform: 'kw', quality: 'flac', songInfo: { songmid: '51415073' } },
+    });
+
+    expect(FakeAudio.instances[0].paused).toBe(true);
+  });
+
+  it('hands off the browser queue instead of resuming a stale speaker session', async () => {
+    installBrowserGlobals();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'api/bridge/play-songlist') return apiResponse({ urls: ['/api/v1/songs/42/play'] });
+      if (url.includes('/miot/player/status')) return apiResponse({
+        state: 'playing',
+        is_playing: true,
+        current_index: 0,
+        queue: [{ title: 'A' }],
+      });
+      if (url === 'api/miot/player/toggle') return apiResponse({
+        state: 'paused',
+        current_index: 1,
+        queue: [{ title: 'Stale speaker song' }],
+      });
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
     const browser = await import('../../static/js/speaker_modules/browser_player.js') as {
       playBrowserQueue(songs: unknown[]): Promise<void>;
     };
@@ -299,7 +379,9 @@ describe('browser player state transitions', () => {
 
     await player.runPlayerAction('toggle');
 
-    expect(FakeAudio.instances[0].paused).toBe(false);
-    expect(target.getActivePlayingTarget()).toBe('browser');
+    expect(FakeAudio.instances[0].paused).toBe(true);
+    expect(target.getActivePlayingTarget()).toBe('speaker');
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === 'api/bridge/play-songlist')).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === 'api/miot/player/toggle')).toBe(false);
   });
 });

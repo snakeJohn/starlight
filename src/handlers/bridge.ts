@@ -98,6 +98,12 @@ export function registerBridgeHandlers(router: Router, bridge: BridgeService): v
       return { url: await bridge.previewUrl(requireSong(body.song)) };
     }));
 
+  router.post('/api/bridge/preview-lyric', async (req) =>
+    runApi(() => {
+      const body = parseJsonBody<SongBody>(req);
+      return bridge.previewLyric(requireSong(body.song));
+    }));
+
   router.post('/api/bridge/songs/import', async (req) =>
     runApi(() => {
       const body = parseJsonBody<SongsBody>(req);

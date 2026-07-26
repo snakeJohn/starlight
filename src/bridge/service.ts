@@ -53,6 +53,10 @@ export class BridgeService {
     return resolved.url;
   }
 
+  async previewLyric(song: SearchResultSong) {
+    return resolveMusicLyric(song.source_data.platform, song.source_data.songInfo);
+  }
+
   /**
    * Resolve playback URL + the quality that actually worked.
    * Tries flac24bit → flac → 320k → 128k for the song's platform.
@@ -571,7 +575,7 @@ function toImportedPlayerSong(sourceSong: SearchResultSong, importedSong: Songlo
     url: `/api/v1/songs/${songId}/play`,
     cover_path: remoteSongField(native, 'cover_path', 'coverPath'),
     cover_url: remoteSongField(native, 'cover_url', 'coverUrl') || sourceSong.cover_url,
-    lyric_url: remoteSongField(native, 'lyric_url', 'lyricUrl'),
+    lyric_url: remoteSongField(native, 'lyric_url', 'lyricUrl') || `/api/v1/songs/${songId}/lyric`,
     file_size: remoteSongNumberField(native, 'file_size', 'fileSize'),
     format: remoteSongField(native, 'format') || sourceSong.source_data.quality,
     bit_rate: remoteSongNumberField(native, 'bit_rate', 'bitRate'),

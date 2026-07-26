@@ -577,6 +577,22 @@ describe('BridgeService', () => {
     expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/song.mp3');
   });
 
+  it('resolves preview lyrics through the platform lyric provider', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('openapi/v1/www/lyric/getlyric')) {
+        return responseJson({ code: 200, data: { lrclist: [{ time: '1.0', lineLyric: '第三十八年夏至' }] } });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const { service } = createService();
+
+    await expect(service.previewLyric(song)).resolves.toMatchObject({
+      lyric: expect.stringContaining('第三十八年夏至'),
+    });
+  });
+
   it('waits for a native Songloft download before pushing a single song to the speaker', async () => {
     const downloader = { downloadSong: vi.fn(async () => ({ song_id: 42, status: 'ok' })) };
     const { platforms, runtimes, minaService } = createService();
@@ -660,6 +676,7 @@ describe('BridgeService', () => {
         title: 'Song',
         artist: 'Singer',
         url: '/api/v1/songs/777/play',
+        lyric_url: '/api/v1/songs/777/lyric',
       }),
     ], 0, 'single', { autoAdvance: false });
     expect(minaService.playURL).not.toHaveBeenCalled();

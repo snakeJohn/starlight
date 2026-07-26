@@ -1,8 +1,8 @@
 import { api } from './api.js';
 import { asArray } from './shared/arrays.js';
 import { $, $$, escapeHtml, selectedDevicePayload, setState, state, toast } from './state.js';
-import { getBrowserPlaybackStatus, playBrowserQueue } from './speaker_modules/browser_player.js';
-import { clearPendingTargetHint, getSelectedPlaybackTarget } from './speaker_modules/playback_target.js';
+import { getBrowserPlaybackStatus, pauseBrowserPlayback, playBrowserQueue } from './speaker_modules/browser_player.js';
+import { clearPendingTargetHint, getSelectedPlaybackTarget, setActivePlayingTarget } from './speaker_modules/playback_target.js';
 import { renderPlayerStatus } from './speaker_modules/player.js';
 import {
     bindCustomPlaylists,
@@ -142,7 +142,7 @@ async function importSongs(songs, options = {}) {
     return result;
 }
 
-async function playOnSpeaker(song) {
+export async function playOnSpeaker(song) {
     if (getSelectedPlaybackTarget() === 'browser') {
         clearPendingTargetHint();
         await playBrowserQueue([song]);
@@ -155,6 +155,9 @@ async function playOnSpeaker(song) {
         throw new Error('请先在音箱页选择账号和设备');
     }
     const result = await api.post('/bridge/play-url', { ...payload, song });
+    pauseBrowserPlayback();
+    setActivePlayingTarget('speaker');
+    clearPendingTargetHint();
     toast('已推送到音箱');
     return result;
 }

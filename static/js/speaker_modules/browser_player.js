@@ -6,7 +6,7 @@ import {
     setActivePlayingTarget,
 } from './playback_target.js';
 
-/** @typedef {{ title?: string, artist?: string, name?: string, cover?: string, cover_url?: string, lyric?: string, lyric_url?: string, id?: string|number, song_id?: string|number, url?: string, play_url?: string }} BrowserSong */
+/** @typedef {{ title?: string, artist?: string, name?: string, cover?: string, cover_url?: string, lyric?: string, lyric_url?: string, lyric_text?: string, source_data?: object, id?: string|number, song_id?: string|number, url?: string, play_url?: string }} BrowserSong */
 
 let audio = null;
 /** @type {BrowserSong[]} */
@@ -131,6 +131,16 @@ async function resolvePlayUrl(song) {
     return url;
 }
 
+async function resolveLyricText(song) {
+    if (!song?.source_data || song.lyric_text || song.lyric_url || song.lyric) return;
+    try {
+        const result = await api.post('/bridge/preview-lyric', { song });
+        song.lyric_text = String(result?.lyric || result?.data?.lyric || '').trim();
+    } catch {
+        song.lyric_text = '';
+    }
+}
+
 function nextIndex(from, direction = 1) {
     if (!queue.length) return 0;
     if (playMode === 'single') {
@@ -200,6 +210,7 @@ async function playIndex(next, options = {}) {
     let url = '';
     try {
         url = await resolvePlayUrl(song);
+        await resolveLyricText(song);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`浏览器播放失败: ${message}`);
@@ -276,6 +287,12 @@ export async function browserPlayerAction(command, options = {}) {
         playGeneration += 1;
         el.pause();
         el.currentTime = 0;
+        el.removeAttribute?.('src');
+        el.load?.();
+        queue = [];
+        index = 0;
+        lastError = '';
+        setActivePlayingTarget(null);
         emitStatus();
         return getBrowserPlaybackStatus();
     }

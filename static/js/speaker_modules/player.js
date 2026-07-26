@@ -12,6 +12,7 @@ import {
 } from './browser_player.js';
 import {
     clearPendingTargetHint,
+    getActivePlayingTarget,
     getSelectedPlaybackTarget,
     onPlaybackTargetChange,
     setActivePlayingTarget,
@@ -23,6 +24,7 @@ let currentPosition = 0;
 let currentDuration = 0;
 let currentLyrics = [];
 let currentLyricUrl = '';
+let currentLyricText = '';
 let currentCoverUrl = '';
 let currentCoverObjectUrl = '';
 let lastUpdateTime = 0;
@@ -294,17 +296,25 @@ function lyricTextFrom(rawText) {
     return rawText;
 }
 
-function loadLyrics(lyricUrl) {
-    if (lyricUrl === currentLyricUrl) {
+function loadLyrics(lyricUrl, lyricText = '') {
+    const inlineText = String(lyricText || '');
+    if (lyricUrl === currentLyricUrl && inlineText === currentLyricText) {
         renderActiveLyric();
         return;
     }
 
     currentLyricUrl = lyricUrl || '';
+    currentLyricText = inlineText;
     currentLyrics = [];
     renderFullscreenLyrics([]);
     renderActiveLyric();
 
+    if (currentLyricText) {
+        currentLyrics = parseLrc(currentLyricText);
+        renderFullscreenLyrics(currentLyrics);
+        renderActiveLyric();
+        return;
+    }
     if (!currentLyricUrl) return;
 
     fetchWithAuth(currentLyricUrl)
@@ -401,7 +411,7 @@ export function renderPlayerStatus(status = {}) {
     renderProgress(currentPosition, currentDuration);
     updateProgressSeekState();
     loadCover(song.cover_url || '');
-    loadLyrics(song.lyric_url || '');
+    loadLyrics(song.lyric_url || '', song.lyric_text || '');
     setPlayIcon('[data-role="speaker-player-play-icon"]', isCurrentlyPlaying);
     setPlayIcon('[data-role="global-player-play-icon"]', isCurrentlyPlaying);
     setPlayIcon('[data-role="fullscreen-player-play-icon"]', isCurrentlyPlaying);
@@ -738,6 +748,9 @@ export async function runPlayerAction(action, options = {}) {
 
     // Browser → speaker: toggle/next/previous with no speaker playlist should hand off the browser queue.
     if ((command === 'toggle' || command === 'next' || command === 'previous') && hasBrowserQueue()) {
+        if (command === 'toggle' && getActivePlayingTarget() === 'browser') {
+            return await handoffBrowserQueueToSpeaker();
+        }
         try {
             if (command === 'toggle') {
                 const result = await togglePlayerPlayback();
