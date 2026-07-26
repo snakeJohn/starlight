@@ -203,7 +203,12 @@ function renderActiveLyric(position = currentPosition) {
     const line = list.querySelector?.(`[data-lyric-index="${index}"]`);
     line?.classList?.add?.('active');
     if (line) {
-        const targetTop = line.offsetTop - Math.max((list.clientHeight - line.offsetHeight) / 2, 0);
+        const listRect = list.getBoundingClientRect?.();
+        const lineRect = line.getBoundingClientRect?.();
+        const relativeTop = Number.isFinite(lineRect?.top) && Number.isFinite(listRect?.top)
+            ? lineRect.top - listRect.top + list.scrollTop
+            : line.offsetTop - list.offsetTop;
+        const targetTop = relativeTop - Math.max((list.clientHeight - line.offsetHeight) / 2, 0);
         list.scrollTop = Math.max(0, targetTop);
     }
     currentLyricIndex = index;

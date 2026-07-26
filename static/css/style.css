@@ -2437,9 +2437,9 @@ body.playback-target-browser .speaker-device-field {
     height: min(58vh, 520px);
     overflow-y: auto;
     display: grid;
-    align-content: center;
+    align-content: start;
     gap: 4px;
-    padding: 24px 0;
+    padding: clamp(24px, calc(29vh - 22px), 260px) 0;
     scrollbar-width: none;
     mask-image: linear-gradient(to bottom, transparent 0%, black 16%, black 84%, transparent 100%);
 }

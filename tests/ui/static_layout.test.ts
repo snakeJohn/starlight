@@ -809,4 +809,10 @@ describe('static UI layout copy', () => {
     expect(stylesheet).toContain('--radius-lg');
     expect(stylesheet).toContain('backdrop-filter');
   });
+
+  it('lays out overflowing fullscreen lyrics from the top so every line remains scrollable', () => {
+    const stylesheet = css();
+    expect(stylesheet).toMatch(/\.fullscreen-player-lyrics\s*\{[^}]*align-content:\s*start/s);
+    expect(stylesheet).not.toMatch(/\.fullscreen-player-lyrics\s*\{[^}]*align-content:\s*center/s);
+  });
 });
