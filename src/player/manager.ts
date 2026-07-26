@@ -456,9 +456,11 @@ export class PlaylistManager {
       duration = song.duration;
     }
 
-    // Cap queue size for status payload; handoff only needs the active window in practice.
+    // Cap queue size while keeping the active item inside the returned window.
     const queueLimit = 200;
-    const queue = this.songs.slice(0, queueLimit).map((song) => ({
+    const maxOffset = Math.max(0, this.songs.length - queueLimit);
+    const queueOffset = Math.max(0, Math.min(this.currentIndex - Math.floor(queueLimit / 2), maxOffset));
+    const queue = this.songs.slice(queueOffset, queueOffset + queueLimit).map((song) => ({
       id: song.id,
       title: song.title,
       artist: song.artist,
@@ -476,6 +478,7 @@ export class PlaylistManager {
       current_index: this.currentIndex,
       current_song: currentSong,
       queue,
+      queue_offset: queueOffset,
       position: this.getPosition(),
       duration: duration,
       is_playing: this.state === 'playing',

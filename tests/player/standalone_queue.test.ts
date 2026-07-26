@@ -109,6 +109,27 @@ describe('PlaylistManager standalone queue', () => {
     });
   });
 
+  it('returns a capped queue window containing the active song with an offset', async () => {
+    const songs = Array.from({ length: 251 }, (_, index) => ({
+      ...song,
+      id: index + 1,
+      title: `Song ${index + 1}`,
+      url: `https://audio.test/${index + 1}.mp3`,
+    }));
+    const { manager } = createManager();
+
+    await expect(manager.playStandalone(songs, 250, 'order')).resolves.toBe(true);
+
+    const status = manager.getStatus();
+    expect(status.queue).toHaveLength(200);
+    expect(status.queue_offset).toBe(51);
+    expect(status.current_index).toBe(250);
+    expect(status.queue?.[status.current_index - status.queue_offset!]).toMatchObject({
+      id: 251,
+      title: 'Song 251',
+    });
+  });
+
   it('does not simulate seek by replaying the current URL and shifting local position', async () => {
     const seekableSong = { ...song, duration: 180 };
     const { manager, minaService } = createManager();

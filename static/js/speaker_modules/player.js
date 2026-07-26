@@ -579,7 +579,9 @@ export async function handoffSpeakerQueueToBrowser() {
         throw new Error('浏览器暂无播放内容，请先选择歌曲播放');
     }
 
-    const startIndex = Math.max(0, Math.min(Number(playback?.current_index) || 0, songs.length - 1));
+    const absoluteIndex = Number(playback?.current_index) || 0;
+    const queueOffset = Number(playback?.queue_offset) || 0;
+    const startIndex = Math.max(0, Math.min(absoluteIndex - queueOffset, songs.length - 1));
     const modeSelect = $('[data-role="speaker-player-mode"]');
     if (modeSelect && playback?.play_mode) {
         modeSelect.value = normalizePlayMode(playback.play_mode);

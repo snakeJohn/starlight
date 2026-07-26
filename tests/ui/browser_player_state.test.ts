@@ -67,12 +67,15 @@ function installBrowserGlobals(): void {
   vi.stubGlobal('document', {
     querySelector: vi.fn(() => null),
     querySelectorAll: vi.fn(() => []),
+    createElement: vi.fn(() => ({ className: '', textContent: '', remove: vi.fn() })),
+    body: { appendChild: vi.fn() },
   });
   vi.stubGlobal('window', {
     location: { origin: 'http://songloft.test' },
     localStorage: { getItem: vi.fn(() => null), setItem: vi.fn() },
     SongloftPlugin: { getAuthToken: () => '' },
     dispatchEvent: vi.fn(),
+    setTimeout: vi.fn(),
   });
   vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
 }
@@ -153,5 +156,33 @@ describe('browser player state transitions', () => {
 
     await expect(player.handoffBrowserQueueToSpeaker()).rejects.toThrow('speaker offline');
     expect(FakeAudio.instances[0].paused).toBe(false);
+  });
+
+  it('applies the queue offset when handing a windowed speaker queue to the browser', async () => {
+    installBrowserGlobals();
+    const queue = Array.from({ length: 200 }, (_, index) => ({
+      id: index + 51,
+      title: `Song ${index + 51}`,
+      url: `https://media.test/${index + 51}.mp3`,
+    }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(apiResponse({
+      state: 'playing',
+      current_index: 150,
+      queue_offset: 50,
+      queue,
+    })));
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'account-1';
+    state.deviceId = 'speaker-1';
+    const player = await import('../../static/js/speaker_modules/player.js') as {
+      handoffSpeakerQueueToBrowser(): Promise<unknown>;
+    };
+
+    await player.handoffSpeakerQueueToBrowser();
+
+    expect(FakeAudio.instances[0].src).toBe('https://media.test/151.mp3');
   });
 });

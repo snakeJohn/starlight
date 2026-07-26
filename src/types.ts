@@ -280,6 +280,8 @@ export interface PlayerStatus {
   current_song?: { id: number; title: string; artist: string; cover_url?: string; lyric_url?: string };
   /** Full in-memory queue for target handoff (may be truncated if huge). */
   queue?: PlayerQueueSong[];
+  /** Absolute index represented by queue[0] when the queue is windowed. */
+  queue_offset?: number;
   position: number;
   duration: number;
   is_playing: boolean;
