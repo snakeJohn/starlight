@@ -3,7 +3,6 @@ import { fetchBytes, fetchJson, fetchText } from './http';
 import type { LxSongInfo, MusicPlatform } from '../types';
 import { stringValue } from './types';
 import { neteaseEapiRequest } from './netease_eapi';
-import { decodeGbkBytes } from './gbk_decode';
 
 export interface MusicLyricResult {
   lyric: string;
@@ -70,14 +69,9 @@ function decodeWithEncoding(bytes: Uint8Array, encoding: string): string {
         // Some runtimes silently fall back / produce garbage; scoring picks the best later.
         if (text) return text;
       } catch {
-        // try next label / pure decoder
+        // try the next native encoding label
       }
     }
-  }
-
-  // 2) Pure-JS GBK for Songloft QuickJS (often only has utf-8 TextDecoder).
-  if (normalized === 'gbk' || normalized === 'gb18030' || normalized === 'gb2312') {
-    return decodeGbkBytes(bytes);
   }
 
   if (normalized === 'utf-8' && typeof TextDecoder !== 'undefined') {

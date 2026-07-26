@@ -4,6 +4,7 @@
 node_modules/
 dist/
 build/
+.build-stage-*/
 coverage/
 *.log
 .env

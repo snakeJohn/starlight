@@ -49,15 +49,3 @@ export function lookupHoliday(date: Date | string): HolidayDay | undefined {
   const key = typeof date === 'string' ? date : formatLocalDate(date);
   return buildIndex().get(key);
 }
-
-/** 是否为法定放假日(含春节、国庆等) */
-export function isLegalHoliday(date: Date | string): boolean {
-  const h = lookupHoliday(date);
-  return !!h && h.isOffDay === true;
-}
-
-/** 是否为调休补班日(原本是周末但被调成上班) */
-export function isWorkdayMakeup(date: Date | string): boolean {
-  const h = lookupHoliday(date);
-  return !!h && h.isOffDay === false;
-}

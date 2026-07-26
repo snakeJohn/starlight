@@ -40,7 +40,7 @@ describe('holiday data release contract', () => {
     const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
-    expect(pkg.scripts?.prebuild).toBeUndefined();
+    expect(pkg.scripts?.prebuild).not.toContain('fetch-holidays');
     expect(pkg.scripts?.predev).toBeUndefined();
     expect(pkg.scripts?.['fetch:holidays']).toBe('node scripts/fetch-holidays.mjs');
   });

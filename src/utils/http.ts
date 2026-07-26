@@ -1,7 +1,7 @@
 // MIoT 智能音箱插件 - HTTP 工具（真异步：基于 globalThis.fetch）
 //
 // 提供两组工具：
-//  1. httpFetch / fetchJSON：常规 JSON 请求；
+//  1. httpFetch：常规 HTTP 请求；
 //  2. fetchWithRedirects：带 Cookie 跟踪的手动重定向链
 //     （小米登录流程涉及多次 3xx，需要逐步收集 Set-Cookie 并在下一跳带回）。
 //
@@ -237,27 +237,6 @@ function resolveUrl(base: string, relative: string): string {
   const lastSlash = basePath.lastIndexOf('/');
   const dir = basePath.slice(0, lastSlash + 1);
   return origin + dir + relative;
-}
-
-/** 快速 JSON 请求（不跟踪 Cookie）。 */
-export async function fetchJSON<T = unknown>(url: string, options: FetchOptions = {}): Promise<T> {
-  const headers: Record<string, string> = {
-    'Accept': 'application/json',
-    ...(options.headers || {}),
-  };
-  if (options.body && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
-  }
-  const response = await httpFetch(url, {
-    method: options.method || 'GET',
-    headers,
-    body: options.body,
-  });
-  if (!response.ok) {
-    const text = response.text();
-    throw new Error(`HTTP ${response.status}: ${text}`);
-  }
-  return JSON.parse(response.text()) as T;
 }
 
 // ===== 宿主 API 调用 =====
