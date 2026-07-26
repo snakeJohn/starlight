@@ -153,13 +153,13 @@ export function registerDeviceHandlers(
       const manager = playlistManagerMap
         ? await playlistManagerMap.getOrCreate(account_id, device_id)
         : null;
-      if (manager) {
-        await manager.pause();
-      } else {
-        const ok = await minaService.pausePlay(account_id, device_id);
-        if (!ok) {
-          return jsonResponse({ success: false, error: 'failed to pause' });
-        }
+      const ok = manager
+        ? await manager.pause()
+        : await minaService.pausePlay(account_id, device_id);
+      if (!ok) {
+        // 设备没停下就不能上报成功，也不能把缓存写成 paused：调用方会据此
+        // 开始浏览器播放，而音箱其实还在响。缓存说谎还会让后续排查跑偏。
+        return jsonResponse({ success: false, error: 'failed to pause' });
       }
       updateDeviceStatusCache(account_id, device_id, { state: 'paused' });
       return jsonResponse({ success: true, data: { message: 'paused' } });

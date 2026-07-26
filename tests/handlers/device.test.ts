@@ -35,7 +35,8 @@ describe('registerDeviceHandlers', () => {
     const minaService = {
       pausePlay: vi.fn(async () => true),
     } as unknown as MinaService;
-    const manager = { pause: vi.fn(async () => undefined) };
+    // 真实 PlaylistManager.pause() 返回「设备是否确实暂停」
+    const manager = { pause: vi.fn(async () => true) };
     const playlistManagerMap = {
       getOrCreate: vi.fn(async () => manager),
     };
@@ -57,6 +58,38 @@ describe('registerDeviceHandlers', () => {
     expect(manager.pause).toHaveBeenCalledTimes(1);
     // manager.pause() 内部会停设备，handler 不该再自己调一次
     expect(minaService.pausePlay).not.toHaveBeenCalled();
+  });
+
+  it('reports failure and does not mark the cache paused when the device refuses to pause', async () => {
+    // pausePlay() 契约上返回 boolean 且不抛异常。以前返回值被丢掉，于是设备
+    // 还在响、接口却回 success:true、缓存也写成 paused，前端据此开始浏览器播放
+    // → 两端同时出声，而且状态还在说谎。
+    const router = createRouter();
+    const minaService = {
+      pausePlay: vi.fn(async () => false),
+    } as unknown as MinaService;
+    const manager = {
+      // 真实 PlaylistManager.pause() 在设备拒绝时返回 false（但仍会清定时器）
+      pause: vi.fn(async () => false),
+    };
+    const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
+
+    updateDeviceStatusCache('acc-fail', 'dev-fail', { state: 'playing', position: 12 });
+
+    (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+      router,
+      minaService,
+      {} as AccountManager,
+      playlistManagerMap,
+    );
+
+    const response = await router.handle(request('POST', '/mina/pause', {
+      account_id: 'acc-fail',
+      device_id: 'dev-fail',
+    }));
+
+    expect(parseResponseBody(response).success).toBe(false);
+    expect(getDeviceStatusCache('acc-fail', 'dev-fail')?.state).not.toBe('paused');
   });
 
   it('falls back to a bare device pause when no PlaylistManagerMap is wired', async () => {

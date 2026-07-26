@@ -378,7 +378,17 @@ export class PlaylistManager {
    * 暂停播放（保持状态，可恢复）
    * 冻结已播秒数，恢复时用它重建时间基准，避免把暂停墙钟时间算进进度。
    */
-  async pause(): Promise<void> {
+  /**
+   * @returns 物理设备是否确实暂停成功。
+   *
+   * `minaService.pausePlay()` 契约上返回 boolean 且**不抛异常**：账号无客户端、
+   * 请求失败、设备拒绝都只是返回 false。以前这里丢掉了返回值，于是设备还在响、
+   * 上层却一路上报 paused —— 切到浏览器后两端同时出声，且状态缓存也在说谎。
+   *
+   * 无论设备暂停成败，定时器和内部状态都要落到 paused：定时器不清的话，
+   * 本地还会继续把下一首推给一台我们已经控制不住的音箱，只会更糟。
+   */
+  async pause(): Promise<boolean> {
     this.stopCheckTimer();
     this.clearVoiceSuspend();
 
@@ -395,28 +405,43 @@ export class PlaylistManager {
     // playStartTimeMs 在暂停期间不参与进度计算；恢复时按 pausedElapsedSec 重置
 
     // 调用设备暂停
+    let devicePaused = true;
     if (this.accountId && this.deviceId) {
-      await this.minaService.pausePlay(this.accountId, this.deviceId);
+      devicePaused = await this.minaService.pausePlay(this.accountId, this.deviceId);
+      if (!devicePaused) {
+        songloft.log.warn(
+          `[PlaylistManager] Device refused to pause account=${this.accountId} device=${this.deviceId}; speaker may still be audible`,
+        );
+      }
     }
 
     songloft.log.info(`[PlaylistManager] Playback paused at ${this.pausedElapsedSec.toFixed(1)}s`);
+    return devicePaused;
   }
 
   /**
    * 停止播放
    */
-  async stop(): Promise<void> {
+  /** @returns 物理设备是否确实停止成功（与 pause() 同理，stopPlay 返回 boolean 而非抛错）。 */
+  async stop(): Promise<boolean> {
     this.stopCheckTimer();
     this.clearVoiceSuspend();
     this.state = 'stopped';
     this.playStartTimeMs = 0;
     this.pausedElapsedSec = 0;
 
+    let deviceStopped = true;
     if (this.accountId && this.deviceId) {
-      await this.minaService.stopPlay(this.accountId, this.deviceId);
+      deviceStopped = await this.minaService.stopPlay(this.accountId, this.deviceId);
+      if (!deviceStopped) {
+        songloft.log.warn(
+          `[PlaylistManager] Device refused to stop account=${this.accountId} device=${this.deviceId}; speaker may still be audible`,
+        );
+      }
     }
 
     songloft.log.info('[PlaylistManager] Playback stopped');
+    return deviceStopped;
   }
 
   /**

@@ -171,7 +171,11 @@ export function registerPlaylistHandlers(
         return jsonResponse({ success: false, error: 'no active playlist for this device' });
       }
       const lastPosition = manager.getStatus().position;
-      await manager.stop();
+      const stopped = await manager.stop();
+      if (!stopped) {
+        // 同 pause：设备没停就别谎报成功，也别把缓存写成 stopped。
+        return jsonResponse({ success: false, error: 'failed to stop' });
+      }
       updateDeviceStatusCache(account_id, device_id, { state: 'stopped', position: lastPosition });
       return jsonResponse({ success: true, data: { message: 'playlist stopped' } });
     } catch (e: any) {
@@ -197,7 +201,11 @@ export function registerPlaylistHandlers(
       if (manager.isPlaying()) {
         // 正在播放，暂停
         const lastPosition = manager.getStatus().position;
-        await manager.pause();
+        const paused = await manager.pause();
+        if (!paused) {
+          // 设备没停下就不能上报成功，也不能把缓存写成 paused —— 音箱其实还在响。
+          return jsonResponse({ success: false, error: 'failed to pause' });
+        }
         updateDeviceStatusCache(account_id, device_id, { state: 'paused', position: lastPosition });
         return jsonResponse({ success: true, data: { message: 'playlist paused', state: 'paused' } });
       }

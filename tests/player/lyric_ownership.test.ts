@@ -158,6 +158,26 @@ describe('pausing the speaker stops the auto-advance timer', () => {
     }
   });
 
+  it('reports the device pause failure but still stops the auto-advance timer', async () => {
+    // 设备拒绝暂停时：必须如实返回 false（否则上层谎报成功），
+    // 但定时器仍要清掉——本地继续给一台控制不住的音箱推歌只会更糟。
+    vi.useFakeTimers();
+    try {
+      const minaService = fakeMina();
+      (minaService.pausePlay as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+      const manager = new PlaylistManager('acc', 'dev', minaService, fakeConfig());
+      await manager.playStandalone([song(1, 'A'), song(2, 'B')], 0, 'order');
+
+      await expect(manager.pause()).resolves.toBe(false);
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(minaService.playURL).toHaveBeenCalledTimes(1);
+      manager.cleanup();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not advance to the next track after the manager is paused', async () => {
     vi.useFakeTimers();
     try {

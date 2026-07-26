@@ -707,12 +707,20 @@ export async function handoffBrowserQueueToSpeaker() {
  * 停不下来不应中断浏览器播放，因此失败只吞掉。
  */
 async function pauseSpeakerForBrowserPlayback() {
-    if (!state.accountId || !state.deviceId) return;
+    if (!state.accountId || !state.deviceId) return true;
     try {
         await api.post('/miot/mina/pause', selectedDevicePayload());
+        return true;
     } catch {
-        // 音箱可能离线或未选设备，忽略
+        // 设备拒绝暂停或不可达时接口会返回失败（api.post 抛错）。
+        // 这时不能假装已经停了——调用方要据此提示用户，否则两端会同时出声。
+        return false;
     }
+}
+
+/** 音箱没停下时告知用户，避免以为「切过去了」实际两边都在响。 */
+function warnSpeakerStillAudible() {
+    toast('音箱未能暂停，可能仍在播放，请手动停止', 'error');
 }
 
 export async function handoffSpeakerQueueToBrowser() {
@@ -749,7 +757,9 @@ export async function handoffSpeakerQueueToBrowser() {
         playMode: normalizePlayMode(playback?.play_mode),
     });
     // 与「浏览器 → 音箱」对称：新目标接受播放后，再停掉旧目标。
-    await pauseSpeakerForBrowserPlayback();
+    if (!await pauseSpeakerForBrowserPlayback()) {
+        warnSpeakerStillAudible();
+    }
     const status = getBrowserPlaybackStatus();
     renderPlayerStatus(status);
     toast('已在浏览器继续播放');
@@ -886,7 +896,9 @@ export async function runPlayerAction(action, options = {}) {
             else if (result?.state === 'playing' || result?.is_playing) explicitlyStoppedTarget = null;
             // 浏览器队列已存在时直接按播放也会走到这里，同样要确保音箱不再出声。
             if (result?.state === 'playing' || result?.is_playing === true) {
-                await pauseSpeakerForBrowserPlayback();
+                if (!await pauseSpeakerForBrowserPlayback()) {
+                    warnSpeakerStillAudible();
+                }
             }
             renderPlayerStatus(result);
             return result;
