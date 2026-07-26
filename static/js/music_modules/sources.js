@@ -156,6 +156,16 @@ async function importSource(file) {
     toast(`${sourceImportSummary('播放音源', playbackResult)}；${sourceImportSummary('下载音源', downloadResult)}`);
 }
 
+async function importOnlineSource(url) {
+    const payload = { url };
+    const [playbackResult, downloadResult] = await Promise.all([
+        api.post('/music/sources/import-url', payload),
+        api.post('/download/sources/import-url', payload),
+    ]);
+    await loadSources(1);
+    toast(`${sourceImportSummary('播放音源', playbackResult)}；${sourceImportSummary('下载音源', downloadResult)}`);
+}
+
 export function bindSources() {
     const input = $('[data-role="source-file"]');
     if (input) {
@@ -171,6 +181,31 @@ export function bindSources() {
             }
         });
     }
+
+    const onlineInput = $('[data-role="online-source-input"]');
+    const onlineButton = $('[data-action="import-online-source"]');
+    const submitOnlineSource = async () => {
+        const url = String(onlineInput?.value || '').trim();
+        if (!url) {
+            toast('请输入 GitHub 在线音源地址', 'error');
+            return;
+        }
+        if (onlineButton) onlineButton.disabled = true;
+        try {
+            await importOnlineSource(url);
+            onlineInput.value = '';
+        } catch (error) {
+            toast(error.message, 'error');
+        } finally {
+            if (onlineButton) onlineButton.disabled = false;
+        }
+    };
+    onlineButton?.addEventListener('click', submitOnlineSource);
+    onlineInput?.addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        submitOnlineSource();
+    });
 
     $('[data-action="refresh-sources"]')?.addEventListener('click', () => {
         loadSources().catch(error => toast(error.message, 'error'));

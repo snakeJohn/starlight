@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 interface SpeakerPlayerModule {
   renderPlayerStatus(status: Record<string, unknown>): void;
   runPlayerAction(action: string, options?: Record<string, unknown>): Promise<unknown>;
+  refreshPlayerStatus(): Promise<unknown>;
   bindProgressInteraction(): void;
 }
 
@@ -435,6 +436,47 @@ describe('speaker player module', () => {
     expect(elements.get('[data-role="speaker-player-cover"]')?.src).toBe('blob:cover-url');
     expect(elements.get('[data-role="global-player-lyric"]')?.textContent).toBe('到这里都是你');
     expect(elements.get('[data-role="speaker-player-lyric"]')?.textContent).toBe('到这里都是你');
+  });
+
+  it('advances timed lyrics while playback is running', async () => {
+    const { elements } = installPlayerRenderDom();
+    let now = 1000;
+    let frame = null as null | (() => void);
+    vi.stubGlobal('performance', { now: () => now });
+    Object.assign(window, {
+      requestAnimationFrame: vi.fn((callback: () => void) => {
+        frame = callback;
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+    });
+
+    const { renderPlayerStatus } = await import('../../static/js/speaker_modules/player.js') as SpeakerPlayerModule;
+    renderPlayerStatus({
+      state: 'playing',
+      is_playing: true,
+      position: 1,
+      duration: 120,
+      current_song: { title: '测试歌曲', lyric_text: '[00:01.00]第一句\n[00:05.00]第二句' },
+    });
+
+    expect(elements.get('[data-role="global-player-lyric"]')?.textContent).toBe('第一句');
+    now = 6000;
+    frame?.();
+    expect(elements.get('[data-role="global-player-lyric"]')?.textContent).toBe('第二句');
+  });
+
+  it('does not render a stale current song for stopped status', async () => {
+    const { elements } = installPlayerRenderDom();
+    const { renderPlayerStatus } = await import('../../static/js/speaker_modules/player.js') as SpeakerPlayerModule;
+
+    renderPlayerStatus({
+      state: 'stopped',
+      current_song: { title: '不应回填的歌曲', artist: '歌手' },
+    });
+
+    expect(elements.get('[data-role="global-player-title"]')?.textContent).toBe('暂无播放');
+    expect(elements.get('[data-role="speaker-player-title"]')?.textContent).toBe('暂无播放信息');
   });
 
   it('does not send a seek request when the speaker transport is not seekable', async () => {

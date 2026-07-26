@@ -925,6 +925,25 @@ textarea:focus {
     margin-bottom: 12px;
 }
 
+.online-source-import {
+    display: grid;
+    grid-template-columns: minmax(220px, 520px) auto;
+    gap: 8px;
+    flex: 1 1 420px;
+    min-width: 0;
+}
+
+.online-source-import input {
+    min-width: 0;
+}
+
+@media (max-width: 620px) {
+    .online-source-import {
+        grid-template-columns: minmax(0, 1fr);
+        flex-basis: 100%;
+    }
+}
+
 .songloft-target-panel {
     width: min(560px, 100%);
     max-height: min(720px, calc(100vh - 32px));

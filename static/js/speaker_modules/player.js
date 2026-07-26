@@ -35,6 +35,7 @@ let currentCanSeek = false;
 
 /** Last non-empty speaker status (for speaker → browser handoff). */
 let lastSpeakerPlayback = null;
+let explicitlyStoppedTarget = null;
 
 function selectedPayload(extra = {}) {
     const payload = { ...selectedDevicePayload(), ...extra };
@@ -350,11 +351,12 @@ function startProgressAnimation() {
         }
         const now = nowMs();
         const elapsed = lastUpdateTime ? (now - lastUpdateTime) / 1000 : 0;
-        const position = currentDuration > 0
+        currentPosition = currentDuration > 0
             ? Math.min(currentPosition + elapsed, currentDuration)
             : currentPosition + elapsed;
-        renderProgress(position, currentDuration);
-        renderActiveLyric(position);
+        lastUpdateTime = now;
+        renderProgress(currentPosition, currentDuration);
+        renderActiveLyric(currentPosition);
         progressAnimationFrame = requestFrame(tick);
     };
 
@@ -363,12 +365,13 @@ function startProgressAnimation() {
 
 export function renderPlayerStatus(status = {}) {
     const nextState = status.state || state.speakerPlayerState || 'idle';
-    const song = status.current_song || {
+    const stopped = nextState === 'stopped' || nextState === 'idle';
+    const song = stopped ? {} : (status.current_song || {
         title: status.title,
         artist: status.artist,
         cover_url: status.cover_url,
         lyric_url: status.lyric_url,
-    };
+    });
     const titleText = song.title
         ? `${song.title}${song.artist ? ` - ${song.artist}` : ''}`
         : '暂无播放信息';
@@ -616,7 +619,7 @@ export async function refreshPlayerStatus() {
             return browserStatus;
         }
         // Empty browser queue: keep showing retained speaker track until handoff play.
-        const retained = retainedSpeakerStatusForBrowser();
+        const retained = explicitlyStoppedTarget === 'browser' ? null : retainedSpeakerStatusForBrowser();
         if (retained) {
             renderPlayerStatus(retained);
             return retained;
@@ -631,6 +634,11 @@ export async function refreshPlayerStatus() {
         return retained;
     }
     const result = await api.get(`/miot/player/status?account_id=${encodeURIComponent(state.accountId)}&device_id=${encodeURIComponent(state.deviceId)}`);
+    if (explicitlyStoppedTarget === 'speaker' && result?.state !== 'playing' && result?.is_playing !== true) {
+        renderPlayerStatus({ state: 'stopped', target: 'speaker' });
+        return { state: 'stopped', target: 'speaker' };
+    }
+    if (result?.state === 'playing' || result?.is_playing === true) explicitlyStoppedTarget = null;
     // Avoid wiping the now-playing card when speaker has no session yet but browser still has a queue.
     if (speakerStatusLooksEmpty(result) && hasBrowserQueue()) {
         const retained = retainedBrowserStatusForSpeaker();
@@ -718,6 +726,8 @@ export async function runPlayerAction(action, options = {}) {
                 position: options.position,
             });
             clearPendingTargetHint();
+            if (command === 'stop') explicitlyStoppedTarget = 'browser';
+            else if (result?.state === 'playing' || result?.is_playing) explicitlyStoppedTarget = null;
             renderPlayerStatus(result);
             return result;
         } catch (error) {
@@ -783,6 +793,8 @@ export async function runPlayerAction(action, options = {}) {
     clearPendingTargetHint();
     setActivePlayingTarget('speaker');
     if (command === 'stop') {
+        explicitlyStoppedTarget = 'speaker';
+        lastSpeakerPlayback = null;
         renderPlayerStatus({ state: 'stopped', play_mode: modeSelect?.value || 'order', position: 0, duration: 0, target: 'speaker' });
     } else if (command !== 'toggle') {
         await refreshPlayerStatus().catch(() => null);

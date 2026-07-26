@@ -5,11 +5,16 @@ import { parseJsonBody } from '../system/body';
 import { boolField, objectField, requireId } from '../system/fields';
 import { StarlightError } from '../system/errors';
 import { runApi } from '../system/response';
+import { fetchGithubSource } from '../music/online_source';
 
 interface SourceImportBody {
   filename?: unknown;
   content?: unknown;
   files?: unknown;
+}
+
+interface SourceImportUrlBody {
+  url?: unknown;
 }
 
 interface SourceToggleBody {
@@ -89,6 +94,13 @@ export function registerSourceCrudRoutes(router: Router, options: SourceCrudOpti
         throw new StarlightError('BAD_REQUEST', 'content is required');
       }
       return sources.importFromJS(filename, content);
+    }, 201));
+
+  router.post(`${prefix}/import-url`, async (req) =>
+    runApi(async () => {
+      const body = parseJsonBody<SourceImportUrlBody>(req);
+      const source = await fetchGithubSource(body.url);
+      return sources.importFromJS(source.filename, source.content);
     }, 201));
 
   router.post(`${prefix}/toggle`, async (req) =>

@@ -172,13 +172,35 @@ describe('registerMusicHandlers', () => {
     });
   });
 
-  test('does not register the removed online source URL import endpoint', async () => {
-    const { router } = createHarness();
+  test('imports a GitHub blob URL as an online JavaScript source', async () => {
+    const { router, sources } = createHarness();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe('https://raw.githubusercontent.com/guoyue2010/lxmusic-/main/V260716/%E6%8E%A8%E8%8D%90/xinghai-music-sourcev2.3.7.js');
+      return new Response('/*! @name 星海音源 */\nglobalThis.lx.send();', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': '45' },
+      });
+    });
+    globalThis.fetch = fetchMock;
+    (sources.importFromJS as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'xinghai', name: '星海音源' });
     const response = await router.handle(request('POST', '/api/music/sources/import-url', {
-      url: 'https://example.test/source.js',
-      enable_mode: 'playback',
+      url: 'https://github.com/guoyue2010/lxmusic-/blob/main/V260716/%E6%8E%A8%E8%8D%90/xinghai-music-sourcev2.3.7.js',
     }));
-    expect(response.statusCode).toBe(404);
+
+    expect(response.statusCode).toBe(201);
+    expect(sources.importFromJS).toHaveBeenCalledWith(
+      'xinghai-music-sourcev2.3.7.js',
+      expect.stringContaining('星海音源'),
+    );
+  });
+
+  test('rejects non-GitHub and private online source URLs', async () => {
+    const { router, sources } = createHarness();
+    for (const url of ['https://example.com/source.js', 'http://127.0.0.1/source.js']) {
+      const response = await router.handle(request('POST', '/api/music/sources/import-url', { url }));
+      expect(response.statusCode).toBe(400);
+    }
+    expect(sources.importFromJS).not.toHaveBeenCalled();
   });
 
   test('toggles source, reloads runtimes, and returns updated source data', async () => {

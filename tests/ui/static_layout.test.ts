@@ -316,20 +316,17 @@ describe('static UI layout copy', () => {
     expect(sourcesModule).toContain('/download/sources/batch-toggle');
   });
 
-  it('does not expose the removed online source URL import feature', () => {
+  it('exposes the restricted GitHub online source import feature', () => {
     const html = indexHtml();
     const sourcesModule = musicSourcesJs();
     const sourcesHtml = settingsSection(html, 'sources');
     const stylesheet = css();
 
-    expect(sourcesHtml).not.toContain('data-role="online-source-input"');
-    expect(sourcesHtml).not.toContain('data-action="open-online-source-import"');
-    expect(html).not.toContain('data-role="online-source-dialog"');
-    expect(html).not.toContain('data-action="online-import-playback"');
-    expect(sourcesModule).not.toContain('/music/sources/import-url');
-    expect(sourcesModule).not.toContain('bindOnlineSourceImport');
-    expect(stylesheet).not.toContain('.online-source-dialog');
-    expect(stylesheet).not.toContain('.online-source-import');
+    expect(sourcesHtml).toContain('data-role="online-source-input"');
+    expect(sourcesHtml).toContain('data-action="import-online-source"');
+    expect(sourcesModule).toContain('/music/sources/import-url');
+    expect(sourcesModule).toContain('/download/sources/import-url');
+    expect(stylesheet).toContain('.online-source-import');
   });
 
   it('imports zip packages by extracting contained JavaScript source files', () => {
