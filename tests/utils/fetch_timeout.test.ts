@@ -31,6 +31,23 @@ describe('fetchWithTimeout', () => {
     expect(seenSignal?.aborted).toBe(true);
   });
 
+  it('surfaces a caller-driven abort as-is instead of a timeout error', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new DOMException('Aborted', 'AbortError'));
+      });
+    })));
+
+    const parent = new AbortController();
+    const pending = fetchWithTimeout('https://example.invalid/slow', {
+      timeoutMs: 60000,
+      signal: parent.signal,
+    });
+    parent.abort();
+
+    await expect(pending).rejects.not.toBeInstanceOf(FetchTimeoutError);
+  });
+
   it('clears timer on successful response', async () => {
     const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));

@@ -17,6 +17,11 @@ import {
 } from '../utils/song_match';
 
 const SETTINGS_KEY = 'starlight:download:settings';
+/**
+ * 整库列表用于"歌曲已存在"判重。批量下载会对每一首歌调用一次，
+ * 未加缓存时 N 首歌就是 N × 10000 条的宿主查询，这里用短 TTL 复用同一份快照。
+ */
+const SONG_LIBRARY_TTL_MS = 30000;
 const DEFAULT_SETTINGS: DownloadSettings = {
   path_template: 'downloads/{artist}-{album}/{title}',
   embed_metadata: true,
@@ -67,6 +72,7 @@ interface DownloadFailure {
 
 export class DownloadService {
   private batchTask: BatchTask | null = null;
+  private songLibrary: { rows: SongloftRemoteSong[]; expiresAt: number } | null = null;
 
   constructor(
     private readonly runtimes: RuntimeManager,
@@ -124,6 +130,8 @@ export class DownloadService {
 
     const task: BatchTask = { current: 0, total: songs.length, done: false, results: [] };
     this.batchTask = task;
+    // 每个批次从一份新的整库快照开始，避免沿用上一批次的过期数据。
+    this.songLibrary = null;
     this.runBatch(task, songs).catch((error) => {
       songloft.log.warn(`[DownloadService] batch download stopped: ${String(error)}`);
       task.done = true;
@@ -192,8 +200,7 @@ export class DownloadService {
     if (!expectedTitle || !expectedArtist) return null;
 
     try {
-      const raw = await songloft.songs.list({ limit: 10000 });
-      const rows = songRows(raw);
+      const rows = await this.librarySongs();
       const matched = rows.find((entry) => (
         normalizeSongText(songRecordField(entry, 'title', 'name', 'songName')) === expectedTitle
         && normalizeSongText(songRecordField(entry, 'artist', 'singer', 'author', 'singerName')) === expectedArtist
@@ -209,6 +216,29 @@ export class DownloadService {
       songloft.log.warn(`[DownloadService] Existing song lookup failed: ${errorMessage(error)}`);
       return null;
     }
+  }
+
+  /** 读取宿主整库歌曲列表（短 TTL 缓存，批量下载共享同一份快照）。 */
+  private async librarySongs(): Promise<SongloftRemoteSong[]> {
+    const now = Date.now();
+    if (this.songLibrary && this.songLibrary.expiresAt > now) {
+      return this.songLibrary.rows;
+    }
+
+    const rows = songRows(await songloft.songs.list({ limit: 10000 }));
+    this.songLibrary = { rows, expiresAt: now + SONG_LIBRARY_TTL_MS };
+    return rows;
+  }
+
+  /** 下载成功后补进缓存，保证同一批次里的重复歌曲仍能命中"已存在"判重。 */
+  private rememberLibrarySong(song: SearchResultSong, result: DownloadResult): void {
+    if (!this.songLibrary) return;
+    this.songLibrary.rows = this.songLibrary.rows.concat({
+      id: result.song_id,
+      title: song.title,
+      artist: song.artist,
+      ...(result.path ? { file_path: result.path } : {}),
+    });
   }
 
   private async tryDownloadCandidate(
@@ -254,11 +284,13 @@ export class DownloadService {
           message: '下载成功',
         });
 
-        return {
+        const downloaded: DownloadResult = {
           song_id: songId,
           path: result?.path,
           status: result?.status || 'ok',
         };
+        this.rememberLibrarySong(song, downloaded);
+        return downloaded;
       } catch (error) {
         sourceDiagnostics.record({
           operation: 'download',

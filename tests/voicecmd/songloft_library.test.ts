@@ -96,9 +96,16 @@ function createEngine(options?: {
   };
   platforms?: PlatformRegistry;
   commands?: VoiceCommand[];
+  aiAnalyzer?: { analyze: ReturnType<typeof vi.fn> };
 }) {
   const configManager = {
-    getAIConfig: vi.fn(async () => ({ enabled: false, api_url: '', api_key: '', model: '', timeout: 6 })),
+    getAIConfig: vi.fn(async () => ({
+      enabled: Boolean(options?.aiAnalyzer),
+      api_url: 'https://ai.test/v1',
+      api_key: 'key',
+      model: 'test-model',
+      timeout: 6,
+    })),
     getConfig: vi.fn(async () => ({
       interrupt_tts_hint_enabled: false,
       interrupt_tts_hint_text: '',
@@ -118,6 +125,8 @@ function createEngine(options?: {
   const minaService = {
     stopPlay: vi.fn(async () => true),
     textToSpeech: vi.fn(async () => true),
+    getVolume: vi.fn(async () => 40),
+    setVolume: vi.fn(async () => true),
   } as unknown as MinaService;
   const playlistManager = {
     hasPlaylist: vi.fn(() => false),
@@ -155,7 +164,7 @@ function createEngine(options?: {
     minaService,
     playlistManagerMap,
     indexingManager,
-    undefined,
+    options?.aiAnalyzer as never,
     options?.bridgeService as never,
     customPlaylistService,
     platforms,
@@ -649,5 +658,93 @@ describe('VoiceEngine Songloft library matching', () => {
     expect(customPlaylistService.addSong).toHaveBeenCalledWith('收藏', resolvedSong);
     expect(indexingManager.refresh).toHaveBeenCalled();
     expect(minaService.textToSpeech).toHaveBeenCalledWith('acc-1', 'speaker-1', '已加入歌单：收藏');
+  });
+
+  it('does not split a song title on its own "到" when an explicit separator follows', async () => {
+    const songloft = testSongloft();
+    const resolvedSong = createSearchResultSong({ title: '回到过去', artist: '周杰伦' });
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => resolvedSong),
+    };
+    songloft.songs.list = vi.fn(async () => []);
+    const { engine, customPlaylistService } = createEngine({ bridgeService });
+
+    await engine.handleMessage(message('加入歌单 回到过去加到收藏'));
+
+    expect(bridgeService.resolveSearchSong).toHaveBeenCalledWith('回到过去', '');
+    expect(customPlaylistService.addSong).toHaveBeenCalledWith('收藏', resolvedSong);
+  });
+
+  it('still matches a shorter keyword after a longer generic play keyword is rejected', async () => {
+    const songloft = testSongloft();
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => null),
+    };
+    songloft.songs.list = vi.fn(async () => []);
+    const { engine } = createEngine({
+      bridgeService,
+      indexedSongLocation: null,
+      standaloneSong: null,
+      commands: [
+        { type: 'play_song', keywords: ['播放一下', '我想听'], enabled: true },
+      ],
+    });
+
+    await engine.handleMessage(message('帮我播放一下我想听宿敌'));
+
+    expect(bridgeService.resolveSearchSong).toHaveBeenCalledWith('宿敌', '');
+  });
+
+  it('skips Songloft playlists without a usable id instead of giving up on the match', async () => {
+    const songloft = testSongloft();
+    songloft.playlists.list = vi.fn(async () => [{ name: '雨夜' }, { id: 301, name: '雨夜' }]);
+    const { engine, playlistManager, minaService } = createEngine({
+      customPlaylists: [],
+      indexedPlaylist: null,
+    });
+
+    await engine.handleMessage(message('播放歌单 雨夜'));
+
+    expect(playlistManager.play).toHaveBeenCalledWith(301, 0, 'order');
+    expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌单：雨夜');
+  });
+
+  it('keeps the AI-extracted artist when searching for a song', async () => {
+    const songloft = testSongloft();
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => null),
+    };
+    songloft.songs.list = vi.fn(async () => []);
+    const { engine } = createEngine({
+      bridgeService,
+      indexedSongLocation: null,
+      standaloneSong: null,
+      aiAnalyzer: {
+        analyze: vi.fn(async () => ({
+          action: 'play_song',
+          params: { name: '晴天', artist: '周杰伦' },
+          confidence: 'high',
+          rawText: '晴天 周杰伦',
+        })),
+      },
+    });
+
+    await engine.handleMessage(message('播放周杰伦的晴天'));
+
+    expect(bridgeService.resolveSearchSong).toHaveBeenCalledWith('晴天', '周杰伦');
+  });
+
+  it('ignores a bare "百分之" instead of reading it as volume 100', async () => {
+    const { engine, minaService } = createEngine({
+      commands: [
+        { type: 'set_volume', keywords: ['音量调到'], param: 'absolute', enabled: true },
+      ],
+    });
+
+    await engine.handleMessage(message('音量调到百分之'));
+    expect(minaService.setVolume).not.toHaveBeenCalled();
+
+    await engine.handleMessage(message('音量调到百分之五十'));
+    expect(minaService.setVolume).toHaveBeenCalledWith('acc-1', 'speaker-1', 50);
   });
 });

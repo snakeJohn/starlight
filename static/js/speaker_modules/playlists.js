@@ -86,12 +86,16 @@ async function loadDrawerPlaylists() {
     }
 }
 
+/** 快速切换歌单时用来丢弃过期响应，避免旧歌单覆盖新选择。 */
+let drawerSongsRequestId = 0;
+
 // 加载歌曲列表到 drawer
 async function loadDrawerSongs(plId) {
     const container = $('[data-role="speaker-song-list-songs"]');
     const summary = $('[data-role="speaker-song-list-summary"]');
     const title = $('[data-role="speaker-song-list-title"]');
     if (!container) return;
+    const requestId = ++drawerSongsRequestId;
     if (!plId) {
         container.innerHTML = '<div class="empty-state">请选择歌单。</div>';
         if (summary) summary.textContent = '请选择歌单';
@@ -101,6 +105,7 @@ async function loadDrawerSongs(plId) {
     try {
         container.innerHTML = '<div class="empty-state">加载歌曲中...</div>';
         const songs = await fetchSongloftPlaylistSongs(plId);
+        if (requestId !== drawerSongsRequestId) return songs;
         setState({ speakerPlaylistSongs: songs, speakerPlaylistId: String(plId) });
         const currentIndex = String(state.speakerPlayerPlaylistId || '') === String(plId)
             ? Number(state.speakerPlayerCurrentIndex)
@@ -114,6 +119,7 @@ async function loadDrawerSongs(plId) {
         return songs;
     } catch (e) {
         console.error('[Starlight] 歌曲加载失败:', plId, e.message || e);
+        if (requestId !== drawerSongsRequestId) throw e;
         const message = String(e.message || e || '加载失败');
         container.innerHTML = `<div class="empty-state">歌曲加载失败<br><small style="font-size:11px;margin-top:4px;display:block;">${escapeHtml(message)}</small></div>`;
         throw e;
@@ -282,7 +288,15 @@ export async function loadSpeakerPlaylistSongs(id = state.speakerPlaylistId) {
         return [];
     }
     list.innerHTML = '<div class="empty-state">正在加载歌单歌曲...</div>';
-    const songs = await fetchSongloftPlaylistSongs(id);
+    let songs;
+    try {
+        songs = await fetchSongloftPlaylistSongs(id);
+    } catch (error) {
+        // 失败时必须替换掉“加载中”占位，否则列表会永远停在加载态。
+        list.innerHTML = `<div class="empty-state">歌单歌曲加载失败：${escapeHtml(error?.message || error)}</div>`;
+        setSummary('加载失败');
+        throw error;
+    }
     setState({ speakerPlaylistSongs: songs, speakerPlaylistId: String(id) });
     renderSongList(songs);
     setSummary(`${songs.length} 首`);
@@ -295,14 +309,22 @@ export async function loadSpeakerPlaylists() {
     if (!select && !list) return [];
     setSummary('加载中');
     if (list) list.innerHTML = '<div class="empty-state">正在加载 Songloft 歌单...</div>';
-    const allPlaylists = await fetchSongloftPlaylists();
-    const normalPlaylists = await fetchSongloftPlaylists({ normalOnly: true });
+    let allPlaylists;
+    try {
+        // 一次请求后本地过滤：之前拉了两遍同一份歌单列表。
+        allPlaylists = await fetchSongloftPlaylists();
+    } catch (error) {
+        if (list) list.innerHTML = `<div class="empty-state">歌单加载失败：${escapeHtml(error?.message || error)}</div>`;
+        setSummary('加载失败');
+        throw error;
+    }
+    const normalPlaylists = allPlaylists.filter(isSpeakerNormalPlaylist);
     const currentId = state.speakerPlaylistId;
     const nextId = normalPlaylists.some(p => playlistId(p) === currentId) ? currentId : playlistId(normalPlaylists[0]);
     setState({ speakerPlaylists: normalPlaylists, speakerPlaylistId: nextId || '' });
     renderPlaylistOptions(allPlaylists);
     renderPlaylistList(allPlaylists);
-    setSummary(`${allPlaylists.length} 个歌单`);
+    setSummary(`${normalPlaylists.length} 个歌单`);
     if (nextId) await loadSpeakerPlaylistSongs(nextId);
     else await loadSpeakerPlaylistSongs('');
     return normalPlaylists;

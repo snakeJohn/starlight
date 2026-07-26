@@ -123,6 +123,11 @@ export class SessionManager {
     this.sessions.delete(accountId);
   }
 
+  /** 清空所有会话（插件卸载时释放登录中间态：MD5 密码、MinaAuth CookieJar） */
+  clear(): void {
+    this.sessions.clear();
+  }
+
   /** 清理所有过期会话 */
   cleanExpiredSessions(): void {
     const now = Date.now();

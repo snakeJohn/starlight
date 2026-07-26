@@ -156,7 +156,8 @@ export class MinaHTTPClient {
   async getDeviceList(): Promise<MinaDevice[]> {
     const apiUrl = `${MINA_API_BASE_URL}/admin/v2/device_list?master=1`;
     const result = await this.doGetRequest<DeviceListResponse>(apiUrl);
-    if (!result || result.code !== 0 || !result.data) {
+    // data 偶尔会是 null/对象（账号无设备或上游异常），非数组时直接返回空列表，避免 .map 抛错
+    if (!result || result.code !== 0 || !Array.isArray(result.data)) {
       return [];
     }
 
@@ -248,7 +249,8 @@ export class MinaHTTPClient {
       queryType: '1',
       offset: '0',
       count: '6',
-      timestamp: String(Math.floor(Date.now() * 1000)),
+      // xiaomusic 用的是毫秒时间戳 int(time.time() * 1000)，Date.now() 本身即毫秒，不能再乘 1000
+      timestamp: String(Date.now()),
       requestId: this.generateRequestId(),
     };
     const body = Object.entries(params)
@@ -262,7 +264,8 @@ export class MinaHTTPClient {
       this.preserveMusicSearchIDStrings,
     );
     const songList = result?.data?.songList;
-    if (!songList || songList.length === 0) {
+    // 上游偶尔把 songList 返成对象/null，必须先判数组，否则 slice 抛错会中断整条播放链路
+    if (!Array.isArray(songList) || songList.length === 0) {
       songloft.log.info(`[MinaClient] searchAudioId no match for: ${query}, using default audioID=${audioId}`);
       return audioId;
     }

@@ -9,6 +9,21 @@ import { parseJsonBody } from '../system/body';
 import { StarlightError } from '../system/errors';
 import { validateOutboundWebhookUrl } from '../utils/url_safety';
 
+const DEFAULT_MESSAGE_LIMIT = 50;
+const MAX_MESSAGE_LIMIT = 500;
+
+/** 解析 limit 查询参数：非法值（NaN/负数/0）会让 getMessages 退化成"返回全部"，必须回落到默认值 */
+function parseMessageLimit(raw: string | undefined): number {
+  if (raw === undefined || raw === '') {
+    return DEFAULT_MESSAGE_LIMIT;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return DEFAULT_MESSAGE_LIMIT;
+  }
+  return Math.min(parsed, MAX_MESSAGE_LIMIT);
+}
+
 /**
  * 注册对话监听相关路由
  * GET    /conversation/messages  → 获取对话记录
@@ -28,8 +43,9 @@ export function registerConversationHandlers(
   router.get('/conversation/messages', async (req: HTTPRequest) => {
     try {
       const query = parseQuery(req.query);
-      const limit = query.limit ? Number(query.limit) : 50;
-      const sinceMs = query.since ? Number(query.since) : 0;
+      const limit = parseMessageLimit(query.limit);
+      const rawSince = query.since ? Number(query.since) : 0;
+      const sinceMs = Number.isFinite(rawSince) && rawSince > 0 ? rawSince : 0;
 
       const messages = conversationMonitor.getMessages(limit, sinceMs);
       return jsonResponse({ success: true, data: messages, count: messages.length });

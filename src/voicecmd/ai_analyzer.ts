@@ -178,21 +178,13 @@ export class AIAnalyzer {
 
     // 优先尝试直接解析（reasoning_split=true 时 content 直接是 JSON）
     try {
-      const parsed = JSON.parse(trimmed);
-      return {
-        action: parsed.action || 'unknown',
-        params: parsed.params || {},
-        confidence: (parsed.confidence === 'high' || parsed.confidence === 'medium' || parsed.confidence === 'low')
-          ? parsed.confidence
-          : 'low',
-        rawText: parsed.rawText || '',
-      };
+      return this.toAnalysisResult(JSON.parse(trimmed));
     } catch {
       songloft.log.warn(`[AIAnalyzer] Direct JSON parse failed, content: ${content.slice(0, 300)}`);
     }
 
     // 兜底：去掉思考标签后再提取 JSON
-    let cleaned = trimmed
+    const cleaned = trimmed
       .replace(/[\[\]/?]*(?:think|思考|THINK)[\[\]/?]*/gi, '');
 
     const firstBrace = cleaned.indexOf('{');
@@ -200,27 +192,36 @@ export class AIAnalyzer {
       throw new Error('No JSON found in response');
     }
 
-    let end = cleaned.lastIndexOf('}');
-    while (end > firstBrace) {
-      const after = cleaned.slice(end + 1);
-      if (/^[\s]*$/.test(after)) break;
-      end = cleaned.lastIndexOf('}', end - 1);
+    // 从最后一个 '}' 逐个往前试着解析：模型常在 JSON 后面再补一段说明文字，
+    // 只认"后面全是空白"的收尾会把这种响应整个丢掉。
+    let lastCandidate = '';
+    for (let end = cleaned.lastIndexOf('}'); end > firstBrace; end = cleaned.lastIndexOf('}', end - 1)) {
+      lastCandidate = cleaned.slice(firstBrace, end + 1);
+      try {
+        return this.toAnalysisResult(JSON.parse(lastCandidate));
+      } catch {
+        // 继续回退到上一个 '}'
+      }
     }
 
-    const jsonStr = cleaned.slice(firstBrace, end + 1);
-    try {
-      const parsed = JSON.parse(jsonStr);
-      return {
-        action: parsed.action || 'unknown',
-        params: parsed.params || {},
-        confidence: (parsed.confidence === 'high' || parsed.confidence === 'medium' || parsed.confidence === 'low')
-          ? parsed.confidence
-          : 'low',
-        rawText: parsed.rawText || '',
-      };
-    } catch {
-      songloft.log.warn(`[AIAnalyzer] Fallback JSON parse also failed, extracted: ${jsonStr.slice(0, 300)}`);
-      throw new Error(`Failed to parse AI response: ${jsonStr.slice(0, 100)}`);
+    songloft.log.warn(`[AIAnalyzer] Fallback JSON parse also failed, extracted: ${lastCandidate.slice(0, 300)}`);
+    throw new Error(`Failed to parse AI response: ${lastCandidate.slice(0, 100)}`);
+  }
+
+  /** 把已解析的 JSON 规整成 AIAnalysisResult（字段缺失时取安全默认值） */
+  private toAnalysisResult(parsed: unknown): AIAnalysisResult {
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('AI response is not a JSON object');
     }
+    const record = parsed as Record<string, unknown>;
+    const confidence = record.confidence;
+    return {
+      action: typeof record.action === 'string' && record.action ? record.action : 'unknown',
+      params: (record.params && typeof record.params === 'object' ? record.params : {}) as AIAnalysisResult['params'],
+      confidence: (confidence === 'high' || confidence === 'medium' || confidence === 'low')
+        ? confidence
+        : 'low',
+      rawText: typeof record.rawText === 'string' ? record.rawText : '',
+    };
   }
 }

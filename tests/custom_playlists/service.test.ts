@@ -193,6 +193,38 @@ describe('CustomPlaylistService', () => {
     expect(playlist.songs).toHaveLength(1);
   });
 
+  it('keeps both songs when two addSong calls race on the same playlist', async () => {
+    const { service } = createService();
+
+    const [first, second] = await Promise.all([
+      service.addSong('并发歌单', kwSong),
+      service.addSong('并发歌单', kgSong),
+    ]);
+
+    expect(first.id).toBe(second.id);
+    const stored = await service.list();
+    expect(stored).toHaveLength(1);
+    // 两次并发追加都必须落盘（整对象覆盖式写入会丢掉先写的那一首）。
+    expect(stored[0].songs.map((song) => song.title).sort()).toEqual(['为龙', '稻花香'].sort());
+  });
+
+  it('does not re-add a song already stored under a portable text key', async () => {
+    const { bridge, service } = createService();
+    const imported = await service.importNetworkPlaylist({
+      source: 'kg',
+      sourceListId: 'kg_8888',
+      detail: { name: '酷狗热歌', cover_url: '', songs: [kgSong], total: 1 },
+    });
+    expect(imported.songs[0]?.stable_key).toMatch(/^query:/);
+
+    // 在线解析后的 stable_key 是 kg:*，与导入时的 query:* 不同，只比 stable_key 会重复入库。
+    const updated = await service.addSong('酷狗热歌', kgSong);
+
+    expect(updated.songs).toHaveLength(1);
+    expect(bridge.importSongs).not.toHaveBeenCalled();
+    await expect(service.list()).resolves.toHaveLength(1);
+  });
+
   it('still persists through fallback storage when native playlist writes fail', async () => {
     (songloft.playlists as unknown as Record<string, unknown>).create = vi.fn(async () => {
       throw new Error('native create failed');

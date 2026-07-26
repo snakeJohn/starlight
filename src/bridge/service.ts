@@ -118,13 +118,12 @@ export class BridgeService {
     const token = await songloft.plugin.getToken();
     const host = await requireHostBaseUrl();
     const imported = await postRemoteSongs(host, token, payloads);
-    let importedSongs = imported.ok ? await completeImportedSongs(host, token, payloads, imported.songs) : imported.songs;
+    const importedSongs: SongloftRemoteSong[] = [];
     if (!imported.ok) {
       if (!isDuplicateRemoteSongError(imported.body)) {
         throw remoteImportError(imported.status, imported.body);
       }
 
-      importedSongs = [];
       for (const [index, payload] of payloads.entries()) {
         const sourceSong = acceptedSongs[index];
         const single = await postRemoteSongs(host, token, [payload]);
@@ -132,7 +131,7 @@ export class BridgeService {
           throw remoteImportError(single.status, single.body);
         }
         const resolvedSongs = single.ok
-          ? await completeImportedSongs(host, token, [payload], single.songs)
+          ? compactRemoteSongs(await completeImportedSongs(host, token, [payload], single.songs))
           : await existingSongsForPayloads(host, token, [payload]);
         importedSongs.push(...resolvedSongs);
         if (sourceSong && resolvedSongs.length > 0) {
@@ -140,7 +139,10 @@ export class BridgeService {
         }
       }
     } else {
-      startImportedSongLyricSync(host, token, acceptedSongs, importedSongs);
+      // 歌词同步按下标配对，必须先用保持 payload 顺序（含空位）的结果同步，再压缩。
+      const completed = await completeImportedSongs(host, token, payloads, imported.songs);
+      startImportedSongLyricSync(host, token, acceptedSongs, completed);
+      importedSongs.push(...compactRemoteSongs(completed));
     }
 
     return { total: payloads.length, payloads, songs: importedSongs };
@@ -193,7 +195,7 @@ export class BridgeService {
         const sourceSong = acceptedSongs[index];
         const single = await postRemoteSongs(host, token, [payload]);
         if (single.ok) {
-          const resolvedSongs = await completeImportedSongs(host, token, [payload], single.songs);
+          const resolvedSongs = compactRemoteSongs(await completeImportedSongs(host, token, [payload], single.songs));
           acceptedPayloads.push(payload);
           importedSongs.push(...resolvedSongs);
           if (sourceSong && resolvedSongs.length > 0) {
@@ -223,14 +225,14 @@ export class BridgeService {
       };
     }
 
-    const importedSongs = await completeImportedSongs(host, token, payloads, imported.songs);
-    startImportedSongLyricSync(host, token, acceptedSongs, importedSongs);
+    const completed = await completeImportedSongs(host, token, payloads, imported.songs);
+    startImportedSongLyricSync(host, token, acceptedSongs, completed);
 
     return {
       total: payloads.length,
       skipped: songs.length - payloads.length,
       payloads,
-      songs: importedSongs,
+      songs: compactRemoteSongs(completed),
       errors,
     };
   }
@@ -358,8 +360,14 @@ export class BridgeService {
       matchScore: number;
     }> = [];
 
+    const bestPossibleScore = maxCandidateScore(artist);
     for await (const resolved of this.iterPlayableSearchCandidates(title, artist)) {
       candidates.push(resolved);
+      // 已拿到音质阶梯顶端 + 完全匹配的候选，后面的音源不可能更好，
+      // 提前结束可以省掉其余平台的搜索与逐档播放探测。
+      if (qualityRank(resolved.quality) >= TOP_QUALITY_RANK && resolved.matchScore >= bestPossibleScore) {
+        break;
+      }
     }
 
     if (!candidates.length) return null;
@@ -517,8 +525,15 @@ export class BridgeService {
   }
 }
 
+const TOP_QUALITY_RANK = QUALITY_RANK[PLAYBACK_QUALITY_LADDER[0]];
+
 function qualityRank(quality: string): number {
   return QUALITY_RANK[String(quality || '').toLowerCase()] || 0;
+}
+
+/** Highest score scoreResolvedCandidate can return for this query. */
+function maxCandidateScore(artist: string): number {
+  return artist.trim() ? 140 : 100;
 }
 
 /**
@@ -617,15 +632,23 @@ function hasUsableSongId(song: SongloftRemoteSong | undefined): song is Songloft
   return false;
 }
 
+/**
+ * Resolve one Songloft song per payload, keeping payload order: unresolved slots
+ * stay as null so callers can still pair imported songs back to their source song
+ * by index. Dropping the holes here would shift every later pair by one.
+ */
 async function completeImportedSongs(
   host: string,
   token: string,
   payloads: RemoteSongPayload[],
   importedSongs: SongloftRemoteSong[],
-): Promise<SongloftRemoteSong[]> {
-  const completed = [...importedSongs];
+): Promise<Array<SongloftRemoteSong | null>> {
+  const completed: Array<SongloftRemoteSong | null> = payloads.map((_, index) => {
+    const song = importedSongs[index];
+    return song && typeof song === 'object' ? song : null;
+  });
   for (const [index, payload] of payloads.entries()) {
-    if (hasUsableSongId(completed[index])) {
+    if (hasUsableSongId(completed[index] ?? undefined)) {
       continue;
     }
     const existing = await findExistingRemoteSong(host, token, payload);
@@ -633,7 +656,11 @@ async function completeImportedSongs(
       completed[index] = existing;
     }
   }
-  return completed.filter((song): song is SongloftRemoteSong => Boolean(song && typeof song === 'object'));
+  return completed;
+}
+
+function compactRemoteSongs(songs: Array<SongloftRemoteSong | null>): SongloftRemoteSong[] {
+  return songs.filter((song): song is SongloftRemoteSong => Boolean(song));
 }
 
 async function existingSongsForPayloads(host: string, token: string, payloads: RemoteSongPayload[]): Promise<SongloftRemoteSong[]> {
@@ -845,7 +872,12 @@ function remoteImportSongsFromBody(body: unknown): SongloftRemoteSong[] {
   return Array.isArray(songs) ? (songs as SongloftRemoteSong[]) : [];
 }
 
-function startImportedSongLyricSync(host: string, token: string, songs: SearchResultSong[], importedSongs: SongloftRemoteSong[]): void {
+function startImportedSongLyricSync(
+  host: string,
+  token: string,
+  songs: SearchResultSong[],
+  importedSongs: Array<SongloftRemoteSong | null>,
+): void {
   if (songs.length === 0 || importedSongs.length === 0) {
     return;
   }
@@ -880,7 +912,12 @@ export async function postRemoteSongs(host: string, token: string, payloads: Rem
   };
 }
 
-async function syncImportedSongLyrics(host: string, token: string, songs: SearchResultSong[], importedSongs: SongloftRemoteSong[]): Promise<void> {
+async function syncImportedSongLyrics(
+  host: string,
+  token: string,
+  songs: SearchResultSong[],
+  importedSongs: Array<SongloftRemoteSong | null>,
+): Promise<void> {
   const pairs = importedSongs
     .map((imported, index) => ({ song: songs[index], imported }))
     .filter((pair): pair is ImportedSongPair => Boolean(pair.song && pair.imported && pair.imported.id));

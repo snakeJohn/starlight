@@ -62,6 +62,33 @@ describe('registerConversationHandlers', () => {
     });
   });
 
+  it('falls back to the default limit instead of dumping the whole message cache', async () => {
+    const router = createRouter();
+    const monitor = {
+      getMessages: vi.fn(() => []),
+      getStatus: vi.fn(async () => ({ is_enabled: false, device_count: 0, devices: [], webhook_count: 0, message_count: 0 })),
+      clearMessages: vi.fn(() => 0),
+    } as unknown as ConversationMonitor;
+    const configManager = {
+      getWebhooks: vi.fn(async () => []),
+      addWebhook: vi.fn(async () => {}),
+      removeWebhook: vi.fn(async () => {}),
+    } as unknown as ConfigManager;
+    registerConversationHandlers(router, monitor, configManager);
+
+    await router.handle(request('GET', '/conversation/messages', 'limit=abc'));
+    expect(monitor.getMessages).toHaveBeenLastCalledWith(50, 0);
+
+    await router.handle(request('GET', '/conversation/messages', 'limit=-5'));
+    expect(monitor.getMessages).toHaveBeenLastCalledWith(50, 0);
+
+    await router.handle(request('GET', '/conversation/messages', 'limit=100000'));
+    expect(monitor.getMessages).toHaveBeenLastCalledWith(500, 0);
+
+    await router.handle(request('GET', '/conversation/messages', 'limit=20&since=1700000000000'));
+    expect(monitor.getMessages).toHaveBeenLastCalledWith(20, 1700000000000);
+  });
+
   it('rejects private and non-http webhook URLs', async () => {
     const router = createRouter();
     const monitor = {

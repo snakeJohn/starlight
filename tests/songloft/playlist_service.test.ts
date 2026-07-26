@@ -152,6 +152,32 @@ describe('SongloftPlaylistService', () => {
     expect(bridge.importSongsBestEffort).toHaveBeenCalledWith([song]);
   });
 
+  it('records a per-song error instead of aborting the import when resolve throws', async () => {
+    const fetchMock = vi.fn(async () => responseJson({ added: 1 }));
+    globalThis.fetch = fetchMock;
+    const bridge = createBridge();
+    (bridge.resolveSearchSong as ReturnType<typeof vi.fn>).mockImplementation(async (title: string) => {
+      if (title === 'Broken') throw new Error('source offline');
+      return song;
+    });
+    const service = new SongloftPlaylistService(bridge, createRegistry());
+
+    await expect(service.importSongsToPlaylist({
+      playlist_id: 12,
+      songs: [
+        { title: 'Broken', artist: 'Singer' } as any,
+        { title: 'Song', artist: 'Singer' } as any,
+      ],
+    })).resolves.toMatchObject({
+      imported: 1,
+      skipped: 1,
+      errors: [{ title: 'Broken', message: 'source offline' }],
+    });
+
+    // 其余歌曲仍需导入，不能被单曲解析异常整单中断。
+    expect(bridge.importSongsBestEffort).toHaveBeenCalledWith([song]);
+  });
+
   it('creates a target playlist by name before adding imported songs', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

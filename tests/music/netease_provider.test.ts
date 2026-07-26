@@ -151,4 +151,33 @@ describe('NeteaseProvider', () => {
     });
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/song/detail'))).toBe(true);
   });
+
+  it('falls back to playlist tracks when the song detail API returns no songs', async () => {
+    const trackIds = Array.from({ length: 75 }, (_, index) => ({ id: index + 1 }));
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/v6/playlist/detail')) {
+        return okJson({
+          playlist: {
+            name: 'Snake Yu',
+            coverImgUrl: 'https://img.test/wy-list.jpg',
+            trackCount: 75,
+            trackIds,
+            tracks: trackIds.slice(0, 10).map((item) => wySong(item.id)),
+          },
+        });
+      }
+      if (url.includes('/api/song/detail')) {
+        return okJson({ code: 400, msg: 'rate limited' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new NeteaseProvider().songListDetail('8282362946', 1, 50);
+
+    expect(result.total).toBe(75);
+    expect(result.songs).toHaveLength(10);
+    expect(result.songs[0]).toMatchObject({ title: 'Song 1', artist: 'Singer 1' });
+  });
 });

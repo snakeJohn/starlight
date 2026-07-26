@@ -41,6 +41,7 @@ class FakeSocket implements InboundWebSocket {
   closed: Array<{ code?: number; reason?: string }> = [];
   private messageHandlers: Array<(data: string | ArrayBuffer | Uint8Array) => void> = [];
   private closeHandlers: Array<() => void> = [];
+  private errorHandlers: Array<(err: unknown) => void> = [];
 
   send(data: string): void {
     this.sent.push(data);
@@ -60,8 +61,16 @@ class FakeSocket implements InboundWebSocket {
     this.closeHandlers.push(handler);
   }
 
+  onError(handler: (err: unknown) => void): void {
+    this.errorHandlers.push(handler);
+  }
+
   emitMessage(data: string | ArrayBuffer | Uint8Array): void {
     for (const h of this.messageHandlers) h(data);
+  }
+
+  emitError(err: unknown): void {
+    for (const h of this.errorHandlers) h(err);
   }
 }
 
@@ -531,6 +540,24 @@ describe('handleLxSyncWebSocket (non-blocking)', () => {
     await vi.waitFor(() => expect(marked).toBe(true));
   });
 
+  it('tears down the peer when the host only reports a socket error', async () => {
+    const socket = new FakeSocket();
+    const service = makeService(keyInfo);
+    const token = aesEncrypt(SYNC_CODE.msgConnect, keyInfo.key);
+    await handleLxSyncWebSocket(
+      {
+        path: '/socket',
+        query: `i=${encodeURIComponent(keyInfo.clientId)}&t=${encodeURIComponent(token)}`,
+      },
+      socket,
+      service as never,
+    );
+    expect(service._peers.has(keyInfo.clientId)).toBe(true);
+
+    socket.emitError(new Error('ECONNRESET'));
+    expect(service._peers.has(keyInfo.clientId)).toBe(false);
+  });
+
   it('rejects bad token without hanging', async () => {
     const socket = new FakeSocket();
     const service = makeService(keyInfo);
@@ -563,6 +590,64 @@ describe('decodeData limits', () => {
     const b64Len = Math.ceil((LX_WS_MAX_COMPRESSED_BYTES * 4) / 3) + 20;
     const huge = `cg_${'A'.repeat(b64Len)}`;
     await expect(decodeData(huge)).rejects.toThrow(/too large/);
+  });
+});
+
+describe('createMsg2call inbound frame safety', () => {
+  it('replies with an error when path is not an array instead of throwing', () => {
+    const sent: Array<{ name: string; error?: string | null }> = [];
+    const m2c = createMsg2call({
+      funcsObj: {},
+      timeout: 1000,
+      sendMessage(data) {
+        sent.push(data as { name: string; error?: string | null });
+      },
+    });
+
+    m2c.message({ name: 'evt-1', path: 'toString' as unknown as string[] });
+    expect(sent).toEqual([{ name: 'evt-1', error: 'invalid path' }]);
+    m2c.destroy();
+  });
+
+  it('never invokes prototype-chain members reached through the call path', async () => {
+    const sent: Array<{ name: string; error?: string | null; data?: unknown }> = [];
+    const m2c = createMsg2call({
+      funcsObj: { ping: () => 'pong' },
+      timeout: 1000,
+      sendMessage(data) {
+        sent.push(data as { name: string; error?: string | null; data?: unknown });
+      },
+    });
+
+    m2c.message({ name: 'evt-2', path: ['constructor', 'constructor'], data: ['return 1'] });
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].error).toMatch(/not defined/);
+
+    // Own properties of funcsObj still resolve normally.
+    m2c.message({ name: 'evt-3', path: ['ping'], data: [] });
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]).toMatchObject({ error: null, data: 'pong' });
+    m2c.destroy();
+  });
+
+  it('clears the pending timeout when sendMessage throws', async () => {
+    vi.useFakeTimers();
+    try {
+      const m2c = createMsg2call({
+        funcsObj: {},
+        timeout: 120_000,
+        sendMessage() {
+          throw new Error('disconnected');
+        },
+      });
+      const remote = m2c.remote as unknown as { a: () => Promise<unknown> };
+      await expect(remote.a()).rejects.toThrow(/disconnected/);
+      // A call that never went out must not leave its timeout armed.
+      expect(vi.getTimerCount()).toBe(0);
+      m2c.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

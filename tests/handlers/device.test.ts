@@ -5,6 +5,11 @@ import { registerDeviceHandlers } from '../../src/handlers/device';
 import type { AccountManager } from '../../src/account/manager';
 import type { ConversationMonitor } from '../../src/conversation/monitor';
 import type { MinaService } from '../../src/service/service';
+import {
+  DEVICE_STATUS_TTL,
+  getDeviceStatusCache,
+  updateDeviceStatusCache,
+} from '../../src/handlers/playlist';
 
 function request(method: string, path: string, body?: unknown): HTTPRequest {
   return {
@@ -83,6 +88,41 @@ describe('registerDeviceHandlers', () => {
     });
     expect(minaService.updateManagedStatus).toHaveBeenCalledWith('acc-1', 'dev-1', true);
     expect(monitor.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the shared device status cache when the speaker payload cannot be parsed', async () => {
+    vi.useFakeTimers();
+    try {
+      const router = createRouter();
+      const minaService = {
+        getPlayerStatus: vi.fn(async () => ({ data: { info: 'not-json' } })),
+      } as unknown as MinaService;
+
+      (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+        router,
+        minaService,
+        {} as AccountManager,
+      );
+
+      updateDeviceStatusCache('acc-cache', 'dev-cache', { state: 'playing', position: 42, volume: 30 });
+      vi.advanceTimersByTime(DEVICE_STATUS_TTL + 1000);
+
+      const response = await router.handle({
+        ...request('GET', '/mina/status'),
+        query: 'account_id=acc-cache&device_id=dev-cache',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(parseResponseBody(response).data.state).toBe('unknown');
+      // /player/status 读同一份缓存，unknown/0 一旦写入会把前端进度条清零
+      expect(getDeviceStatusCache('acc-cache', 'dev-cache')).toMatchObject({
+        state: 'playing',
+        position: 42,
+        volume: 30,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('includes the last selected device when listing devices for one account', async () => {

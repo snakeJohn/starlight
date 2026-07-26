@@ -188,10 +188,14 @@ function renderStatus() {
     `;
 }
 
+// 状态条只依赖这几个字段；播放进度每秒会多次 setState，无条件重建会毁掉整条状态栏 DOM。
+const statusStripKeys = ['accountId', 'deviceId', 'deviceName', 'sources', 'message', 'initStatus'];
+
 function bindStateRenderers() {
     window.addEventListener('starlight:state', event => {
-        if (event.detail?.activeTab) renderActiveTab(event.detail.activeTab);
-        renderStatus();
+        const patch = event.detail || {};
+        if (patch.activeTab) renderActiveTab(patch.activeTab);
+        if (statusStripKeys.some(key => key in patch)) renderStatus();
     });
 }
 

@@ -17,6 +17,54 @@ function isIpv4(host: string): boolean {
   });
 }
 
+/** Parse one inet_aton part: decimal, 0-prefixed octal, or 0x hex. */
+function parseIpv4Part(part: string): number | null {
+  if (!part) return null;
+  let value: number;
+  if (/^0[xX][0-9a-fA-F]+$/.test(part)) {
+    value = parseInt(part.slice(2), 16);
+  } else if (/^0[0-7]+$/.test(part)) {
+    value = parseInt(part.slice(1), 8);
+  } else if (/^\d+$/.test(part)) {
+    value = parseInt(part, 10);
+  } else {
+    return null;
+  }
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Normalize inet_aton-style IPv4 literals to dotted-quad.
+ * `http://2130706433`, `http://0x7f000001` and `http://127.1` all resolve to
+ * 127.0.0.1, so they must be normalized before the CIDR checks below.
+ */
+function normalizeIpv4Literal(host: string): string | null {
+  const parts = host.split('.');
+  if (parts.length < 1 || parts.length > 4) return null;
+
+  const values: number[] = [];
+  for (const part of parts) {
+    const value = parseIpv4Part(part);
+    if (value === null) return null;
+    values.push(value);
+  }
+
+  // Leading parts are single octets; the final part fills the remaining ones.
+  const leading = values.slice(0, -1);
+  const tail = values[values.length - 1];
+  if (leading.some((value) => value > 255)) return null;
+  const tailMax = Math.pow(256, 4 - leading.length);
+  if (tail >= tailMax) return null;
+
+  let ip = 0;
+  for (const value of leading) {
+    ip = ip * 256 + value;
+  }
+  ip = ip * tailMax + tail;
+
+  return [24, 16, 8, 0].map((shift) => Math.floor(ip / Math.pow(2, shift)) % 256).join('.');
+}
+
 function ipv4ToInt(host: string): number {
   const [a, b, c, d] = host.split('.').map(Number);
   return (((a << 24) >>> 0) + (b << 16) + (c << 8) + d) >>> 0;
@@ -126,12 +174,13 @@ export function isBlockedHostname(hostname: string): boolean {
     return isBlockedIpv6(host);
   }
 
-  if (!isIpv4(host)) {
+  const normalized = isIpv4(host) ? host : normalizeIpv4Literal(host);
+  if (!normalized) {
     // Hostnames are allowed at the string layer; DNS resolution must still verify public A/AAAA.
     return false;
   }
 
-  const ip = ipv4ToInt(host);
+  const ip = ipv4ToInt(normalized);
   if (inCidr(ip, '0.0.0.0', 8)) return true; // 0.0.0.0/8
   if (inCidr(ip, '10.0.0.0', 8)) return true;
   if (inCidr(ip, '127.0.0.0', 8)) return true;

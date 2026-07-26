@@ -118,6 +118,12 @@ export function registerSourceCrudRoutes(router: Router, options: SourceCrudOpti
       const body = parseJsonBody<SourceBatchToggleBody>(req);
       const ids = sourceIds(body.ids);
       const enabled = boolField(body.enabled);
+      // 先整体校验：否则中途遇到未知 id 会抛 500，且前面几个已经写入，留下部分生效的状态
+      const known = new Set(sources.listSources().map((source) => source.id));
+      const missing = ids.filter((id) => !known.has(id));
+      if (missing.length > 0) {
+        throw new StarlightError('BAD_REQUEST', `未知音源: ${missing.join(', ')}`);
+      }
       for (const id of ids) {
         await sources.setEnabled(id, enabled);
       }

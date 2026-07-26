@@ -558,6 +558,73 @@ describe('BridgeService', () => {
     );
   });
 
+  it('syncs lyrics to the song that was actually resolved when an earlier lookup finds nothing', async () => {
+    const lookupBase = 'http://127.0.0.1:18191/api/v1/songs?type=remote&keyword=';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/songs/remote')) {
+        // Host只回了写入条数，没有回 songs 数组，两首歌都要靠关键字回查。
+        return responseJson({ count: 2 }, 201);
+      }
+      if (url === `${lookupBase}Song&limit=20&offset=0`) {
+        return responseJson({ songs: [] });
+      }
+      if (url === `${lookupBase}Second%20Song&limit=20&offset=0`) {
+        return responseJson({
+          songs: [{
+            id: 102,
+            type: 'remote',
+            title: 'Second Song',
+            artist: 'Singer',
+            plugin_entry_path: 'starlight',
+            dedup_key: 'kw:456',
+          }],
+        });
+      }
+      const lyricMatch = url.match(/musicId=(\d+)/);
+      if (lyricMatch && (url.includes('openapi/v1/www/lyric/getlyric') || url.includes('newh5/singles/songinfoandlrc'))) {
+        return responseJson({
+          data: {
+            songinfo: { songName: 'Song', artist: 'Singer', album: 'Album' },
+            lrclist: [{ time: 0, lineLyric: `lyric-of-${lyricMatch[1]}` }],
+          },
+        });
+      }
+      if (url.includes('/api/v1/songs/102/lyrics')) {
+        return responseJson({ message: 'ok' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const { service } = createService();
+
+    await expect(service.importSongs([song, secondSong])).resolves.toMatchObject({
+      total: 2,
+      songs: [{ id: 102, title: 'Second Song' }],
+    });
+    await flushBackgroundSync();
+
+    const calls = fetchMock.mock.calls as unknown as Array<[string, { body?: string }]>;
+    const lyricCalls = calls.filter(([url]) => String(url).includes('/lyrics'));
+    expect(lyricCalls.map(([url]) => url)).toEqual(['http://127.0.0.1:18191/api/v1/songs/102/lyrics']);
+    expect(JSON.parse(lyricCalls[0][1]?.body || '{}')).toMatchObject({
+      lyric: expect.stringContaining('lyric-of-456'),
+    });
+  });
+
+  it('stops probing further platforms once a top-quality exact match is playable', async () => {
+    const firstProvider = createProvider('kw', [song]);
+    const secondProvider = createProvider('kg', [song]);
+    const { service } = createService({ providers: [firstProvider, secondProvider] });
+
+    await expect(service.resolveSearchSong('Song', 'Singer')).resolves.toMatchObject({
+      source_data: expect.objectContaining({ platform: 'kw', quality: 'flac24bit' }),
+    });
+
+    expect(firstProvider.search).toHaveBeenCalledWith('Song Singer', 1, 5);
+    expect(secondProvider.search).not.toHaveBeenCalled();
+  });
+
   it('returns an empty import result without fetching Songloft for an explicit empty song list', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
     globalThis.fetch = fetchMock;

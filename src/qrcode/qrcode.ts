@@ -59,6 +59,7 @@ export class QRCodeLogin {
   private state: QRCodeState = 'idle';
   private pollUrl: string = '';
   private pollTimer: any = null;
+  private polling: boolean = false;
   private sign: string = '';
   private qs: string = '';
   private callback: string = '';
@@ -305,11 +306,12 @@ export class QRCodeLogin {
 
   /**
    * 启动自动轮询
-   * 使用 setInterval 驱动轮询循环
-   * 每次 poll() 本身会阻塞到服务端超时（约 30s），所以间隔设短即可
+   * 每次 poll() 本身会阻塞到服务端长轮询超时（约 30s），远长于 POLL_INTERVAL_MS，
+   * 所以只能用「上一次完成后再排下一次」的 setTimeout 链：setInterval 不等待异步回调，
+   * 会并发发起多个 poll，迅速耗尽 MAX_POLL_COUNT 并误报二维码过期。
    */
   async startPolling(): Promise<void> {
-    if (this.pollTimer !== null) {
+    if (this.polling) {
       return; // 已在轮询中
     }
 
@@ -318,36 +320,35 @@ export class QRCodeLogin {
       return;
     }
 
-    // 立即执行一次轮询
-    const firstResult = await this.poll();
-    if (this.isTerminalState(firstResult.state)) {
-      if (this.onStateChange) {
-        this.onStateChange(firstResult.state, firstResult);
+    // 同步置位，避免 await 期间重入
+    this.polling = true;
+
+    try {
+      // 立即执行一次轮询
+      const firstResult = await this.poll();
+      if (this.isTerminalState(firstResult.state)) {
+        this.polling = false;
+        if (this.onStateChange) {
+          this.onStateChange(firstResult.state, firstResult);
+        }
+        return;
       }
+    } catch (e: any) {
+      this.polling = false;
+      console.log(`[qrcode] startPolling: error: ${e?.message || e}`);
       return;
     }
 
-    // 设置定时器继续轮询
-    this.pollTimer = setInterval(async () => {
-      const result = await this.poll();
-
-      if (this.onStateChange) {
-        this.onStateChange(result.state, result);
-      }
-
-      // 如果达到终态，停止轮询
-      if (this.isTerminalState(result.state)) {
-        this.stopPolling();
-      }
-    }, POLL_INTERVAL_MS);
+    this.scheduleNextPoll();
   }
 
   /**
    * 停止轮询
    */
   stopPolling(): void {
+    this.polling = false;
     if (this.pollTimer !== null) {
-      clearInterval(this.pollTimer);
+      clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
   }
@@ -388,6 +389,40 @@ export class QRCodeLogin {
   }
 
   // ===== 私有方法 =====
+
+  /**
+   * 排下一次轮询：上一次 poll() 完成后才计时，保证同时只有一个请求在飞
+   */
+  private scheduleNextPoll(): void {
+    if (!this.polling) {
+      return;
+    }
+
+    this.pollTimer = setTimeout(() => {
+      this.pollTimer = null;
+      if (!this.polling) {
+        return;
+      }
+
+      // setTimeout 回调里不能直接 async，否则异常变成 unhandled rejection
+      this.poll().then(result => {
+        if (!this.polling) {
+          return;
+        }
+        if (this.onStateChange) {
+          this.onStateChange(result.state, result);
+        }
+        if (this.isTerminalState(result.state)) {
+          this.stopPolling();
+          return;
+        }
+        this.scheduleNextPoll();
+      }).catch(e => {
+        console.log(`[qrcode] poll loop error: ${e?.message || e}`);
+        this.stopPolling();
+      });
+    }, POLL_INTERVAL_MS);
+  }
 
   /**
    * 使用 passToken 交换目标服务的 serviceToken

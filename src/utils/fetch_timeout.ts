@@ -49,11 +49,16 @@ export async function fetchWithTimeout(
     }
 
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Only our own timer means "timed out"; a caller-driven abort must surface as-is.
+    let timedOut = false;
     try {
-      timer = setTimeout(() => controller.abort(), ms);
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, ms);
       return await fetch(input, { ...init, signal: controller.signal });
     } catch (err) {
-      if (controller.signal.aborted) {
+      if (timedOut) {
         throw new FetchTimeoutError(`Request timed out after ${ms}ms`);
       }
       throw err;

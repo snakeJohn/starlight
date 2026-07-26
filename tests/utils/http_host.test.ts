@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getHostBaseUrl,
+  httpFetch,
   isUsableHostBaseUrl,
   normalizeHostBaseUrl,
   requireHostBaseUrl,
@@ -65,5 +66,38 @@ describe('host base URL resolution', () => {
     setHostBaseUrl('');
 
     await expect(requireHostBaseUrl('')).rejects.toThrow(/Songloft 访问地址不可用/);
+  });
+});
+
+describe('httpFetch response headers', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reads a spec-compliant Headers object (own keys are empty on Headers)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', {
+      status: 302,
+      headers: {
+        Location: 'https://account.example.com/next',
+        'Set-Cookie': 'sid=abc; Path=/',
+      },
+    })));
+
+    const response = await httpFetch('https://account.example.com/login');
+    expect(response.headers.get('location')).toBe('https://account.example.com/next');
+    expect(response.headers.getSetCookie()).toContain('sid=abc; Path=/');
+  });
+
+  it('still reads plain-object headers from the QuickJS fetch polyfill', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'Content-Type': 'application/json' },
+      text: async () => '{}',
+    })));
+
+    const response = await httpFetch('https://api.example.com/thing');
+    expect(response.headers.get('content-type')).toBe('application/json');
   });
 });

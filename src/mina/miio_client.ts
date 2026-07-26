@@ -45,6 +45,12 @@ export class MiIOClient {
     songloft.log.info(`[MiIOClient] TTS command start did=${did} siid=${siid} aiid=${aiid} text_length=${text.length}`);
 
     const result = await this.miotAction(did, siid, aiid, [safeText]);
+    // miotAction 失败（缺 token / HTTP 错误 / 解密失败 / 非零 code）统一返回 null，
+    // 必须判定为失败，否则会被当成播报成功、跳过 Mina UBus 回退，音箱最终没有任何声音。
+    if (result === null) {
+      songloft.log.warn(`[MiIOClient] TTS command failed did=${did} siid=${siid} aiid=${aiid}`);
+      return false;
+    }
     const innerCode = result && typeof result === 'object' && 'code' in result
       ? Number((result as Record<string, unknown>).code)
       : 0;

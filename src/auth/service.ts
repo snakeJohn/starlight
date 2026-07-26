@@ -15,7 +15,26 @@ import {
   LoginState,
 } from '../mina/constants';
 import type { LoginStateType } from '../mina/constants';
-import type { XiaomiTokenInfo, LoginResult } from '../types';
+import type { AccountConfig, XiaomiTokenInfo, LoginResult } from '../types';
+
+/** 账号认证状态（与 Go 后端 AuthStatusResponse 一致） */
+interface AuthStatusInfo {
+  id: string;
+  logged_in: boolean;
+  is_valid: boolean;
+  user_id: string;
+  login_method: string;
+  account_name: string;
+}
+
+/** 扫码轮询缓存只保留展示字段，剥离 tokenInfo / passToken 等凭证 */
+function toCacheableQRCodePollResult(result: PollResult): PollResult {
+  return {
+    state: result.state,
+    message: result.message,
+    ...(result.account_id ? { account_id: result.account_id } : {}),
+  };
+}
 
 /** 同一账号重登录最小间隔（毫秒） */
 const RELOGIN_MIN_INTERVAL_MS = 60 * 1000;
@@ -292,7 +311,8 @@ export class AuthService {
     }
 
     await this.finishQRCodePoll(accountId, result);
-    this.qrPollResults.set(accountId, result);
+    // 缓存结果会在后续每次轮询里被重复返回，不能长期持有 tokenInfo / passToken。
+    this.qrPollResults.set(accountId, toCacheableQRCodePollResult(result));
     return result;
   }
 
@@ -375,8 +395,21 @@ export class AuthService {
   /**
    * 获取账号认证状态（返回与 Go 后端 AuthStatusResponse 一致的格式）
    */
-  async getAuthStatus(accountId: string): Promise<{ id: string; logged_in: boolean; is_valid: boolean; user_id: string; login_method: string; account_name: string }> {
+  async getAuthStatus(accountId: string): Promise<AuthStatusInfo> {
     const account = await this.configManager.getAccount(accountId);
+    return this.buildAuthStatus(accountId, account);
+  }
+
+  /**
+   * 获取所有账号的认证状态
+   */
+  async getAllAuthStatus(): Promise<AuthStatusInfo[]> {
+    // 复用一次账号列表读取：逐个调用 getAuthStatus 会把整份账号存储重复读取+解析 N 次。
+    const accounts = await this.configManager.getAccounts();
+    return accounts.map(account => this.buildAuthStatus(account.id, account));
+  }
+
+  private buildAuthStatus(accountId: string, account: AccountConfig | null): AuthStatusInfo {
     if (!account) {
       return { id: accountId, logged_in: false, is_valid: false, user_id: '', login_method: '', account_name: '' };
     }
@@ -397,18 +430,6 @@ export class AuthService {
       login_method: account.login_method || '',
       account_name: account.account || account.user_id || '',
     };
-  }
-
-  /**
-   * 获取所有账号的认证状态
-   */
-  async getAllAuthStatus(): Promise<Array<{ id: string; logged_in: boolean; is_valid: boolean; user_id: string; login_method: string; account_name: string }>> {
-    const accounts = await this.configManager.getAccounts();
-    const results = [];
-    for (const acc of accounts) {
-      results.push(await this.getAuthStatus(acc.id));
-    }
-    return results;
   }
 
   // ===== 重新登录 =====
@@ -453,8 +474,8 @@ export class AuthService {
       console.log(`[auth] relogin with token failed, trying password, account=${accountId}`);
     }
 
-    // 尝试密码重新登录
-    if (accountConfig.password) {
+    // 尝试密码重新登录（缺少用户名时直接跳过，避免一次必然失败的登录请求）
+    if (accountConfig.password && accountConfig.account) {
       const loginResult = await this.autoLoginWithPassword(accountId, accountConfig.account, accountConfig.password);
       if (loginResult) {
         console.log(`[auth] relogin with password succeeded, account=${accountId}`);
@@ -539,7 +560,8 @@ export class AuthService {
     this.qrPollResults.clear();
     this.qrPollInFlight.clear();
 
-    // 清理会话
+    // 清理会话（登录中间态持有 MD5 密码与 MinaAuth CookieJar，卸载时必须释放）
+    this.sessionManager.clear();
     this.lastReloginTime.clear();
 
     console.log('[auth] cleanup: all timers and resources cleared');
@@ -556,6 +578,8 @@ export class AuthService {
     const accountConfig = await this.configManager.getAccount(accountId);
     if (!accountConfig) {
       console.log(`[auth] refreshToken: account config not found, account=${accountId}`);
+      // 账号已被删除：停掉定时器，否则它会一直空转到插件卸载。
+      this.stopTokenRefresh(accountId);
       return false;
     }
 

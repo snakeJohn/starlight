@@ -93,7 +93,8 @@ export function registerPlaylistHandlers(
   router.get('/playlists/:id/songs', async (_req: HTTPRequest, params: Record<string, string>) => {
     try {
       const playlistId = Number(params.id);
-      if (!playlistId || isNaN(playlistId)) {
+      // 宿主歌单 ID 必须是正整数：小数/负数/Infinity 传下去会变成宿主侧的内部错误
+      if (!Number.isInteger(playlistId) || playlistId <= 0) {
         return jsonResponse({ success: false, error: 'invalid playlist id' });
       }
       const songs = await songloft.playlists.getSongs(playlistId, { limit: 100000 });
@@ -118,8 +119,9 @@ export function registerPlaylistHandlers(
       if (!playlist_id) {
         return jsonResponse({ success: false, error: 'playlist_id is required' });
       }
+      // 负数是自定义歌单的合成 ID，允许；但必须是整数，小数会一路传到宿主歌单查询
       const playlistId = Number(playlist_id);
-      if (!Number.isFinite(playlistId) || playlistId === 0) {
+      if (!Number.isInteger(playlistId) || playlistId === 0) {
         return jsonResponse({ success: false, error: 'invalid playlist_id' });
       }
       const startIndex = start_index === undefined || start_index === null ? 0 : Number(start_index);

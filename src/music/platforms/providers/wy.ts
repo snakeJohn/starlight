@@ -113,9 +113,14 @@ export class NeteaseProvider implements MusicPlatformProvider {
       const offset = (page - 1) * pageSize;
       const pageTrackIds = trackIds.slice(offset, offset + pageSize);
       const tracksById = new Map(tracks.map((track: any) => [trackIdValue(track), track]));
-      const pageTracks = pageTrackIds.length
-        ? await loadWySongDetails(pageTrackIds).catch(() => pageTrackIds.map((trackId) => tracksById.get(trackId)).filter(Boolean))
-        : tracks.slice(offset, offset + pageSize);
+      const detailTracks = pageTrackIds.length ? await loadWySongDetails(pageTrackIds).catch(() => []) : [];
+      // 详情接口失败或返回空列表（如被限流返回非 songs 结构）时回落到歌单自带 tracks，
+      // 否则整页会变成空歌单。
+      const pageTracks = detailTracks.length
+        ? detailTracks
+        : (pageTrackIds.length
+          ? pageTrackIds.map((trackId) => tracksById.get(trackId)).filter(Boolean)
+          : tracks.slice(offset, offset + pageSize));
       return {
         songs: pageTracks.map(mapWySong),
         total: numberValue(body.playlist?.trackCount || trackIds.length || tracks.length),

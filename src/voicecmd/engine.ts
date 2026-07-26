@@ -210,20 +210,19 @@ function findBestPlaylistMatch(query: string, playlists: SongloftRecord[]): Matc
     .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  const best = scored[0];
-  if (!best) {
-    return null;
+  // 命中的歌单可能缺 id（脏数据），跳过它继续看下一个而不是整体判负
+  for (const item of scored) {
+    const id = readNumber(item.playlist.id);
+    if (id === null) {
+      continue;
+    }
+    return {
+      id,
+      name: getPlaylistName(item.playlist),
+    };
   }
 
-  const id = readNumber(best.playlist.id);
-  if (id === null) {
-    return null;
-  }
-
-  return {
-    id,
-    name: getPlaylistName(best.playlist),
-  };
+  return null;
 }
 
 function findBestSongloftSongMatch(query: string, songs: SongloftRecord[]): SongloftRecord | null {
@@ -419,8 +418,10 @@ export class VoiceEngine {
   private customPlaylistService?: VoiceCustomPlaylistService;
   private platforms?: PlatformRegistry;
   private enabled: boolean = false;
-  private resumeTimer: any = null;
-  private resumeCancelled: boolean = false;
+  // 智能恢复按 账号+设备 隔离：共用一个定时器会让多设备互相取消
+  private resumeTimers: Map<string, any> = new Map();
+  // 每次取消都递增代号，正在轮询的旧恢复任务据此自行退出（布尔标志会被随后的调度重置掉）
+  private resumeEpochs: Map<string, number> = new Map();
 
   constructor(
     configManager: ConfigManager,
@@ -452,6 +453,10 @@ export class VoiceEngine {
   /** 启用/禁用语音口令引擎 */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+    if (!enabled) {
+      // 停用（含插件卸载）时清掉待执行的恢复定时器，避免之后仍向音箱推送播放
+      this.cancelAllPendingResume();
+    }
     songloft.log.info(`[VoiceEngine] ${enabled ? 'Enabled' : 'Disabled'}`);
   }
 
@@ -604,27 +609,30 @@ export class VoiceEngine {
 
       for (const keyword of item.cmd.keywords) {
         const idx = query.indexOf(keyword);
-        if (idx >= 0) {
-          const kwLen = Array.from(keyword).length;
-          if (kwLen > bestKeywordLen) {
-            bestKeywordLen = kwLen;
-            let argument = query.slice(idx + keyword.length).trim();
-            if (item.cmd.type === 'play_song' && isGenericPlaySongKeyword(keyword)) {
-              if (idx !== 0) {
-                continue;
-              }
-              argument = trimVoiceArgument(argument.replace(/^歌曲\s*/, ''));
-              if (!argument || isPlaylistLikePlayArgument(argument)) {
-                continue;
-              }
-            }
-            bestMatch = {
-              command: item.cmd,
-              keyword,
-              argument,
-            };
+        if (idx < 0) {
+          continue;
+        }
+        const kwLen = Array.from(keyword).length;
+        if (kwLen <= bestKeywordLen) {
+          continue;
+        }
+        let argument = query.slice(idx + keyword.length).trim();
+        if (item.cmd.type === 'play_song' && isGenericPlaySongKeyword(keyword)) {
+          if (idx !== 0) {
+            continue;
+          }
+          argument = trimVoiceArgument(argument.replace(/^歌曲\s*/, ''));
+          if (!argument || isPlaylistLikePlayArgument(argument)) {
+            continue;
           }
         }
+        // 校验通过后才提升最长长度，否则被丢弃的泛用关键词会挡住后面更短的有效关键词
+        bestKeywordLen = kwLen;
+        bestMatch = {
+          command: item.cmd,
+          keyword,
+          argument,
+        };
       }
     }
 
@@ -715,7 +723,8 @@ export class VoiceEngine {
           songloft.log.warn('[VoiceEngine] [AI] play_song: no name or artist to play');
           return;
         }
-        await this.executePlaySong(searchTerm, accountId, deviceId);
+        // 只有歌手时 searchTerm 已经是歌手名，再传一次会让提示词重复
+        await this.executePlaySong(searchTerm, accountId, deviceId, name ? artist : '');
         break;
       }
       case 'play_playlist': {
@@ -837,9 +846,12 @@ export class VoiceEngine {
   }
 
   private parseAddSongArgument(argument: string): { name: string; artist?: string; source?: string; playlist?: string; error?: string } {
-    const match = argument.trim().match(/^(.*?)(?:加到|加入|添加到|放到|到)(?:歌单)?(.+)$/);
+    const trimmed = argument.trim();
+    // 先找明确的分隔词，光秃秃的"到"留作兜底，否则"回到过去"这类歌名会被从中间切开
+    const match = trimmed.match(/^(.*?)(?:添加到|加到|加入|放到)(?:歌单)?(.+)$/)
+      || trimmed.match(/^(.*?)到(?:歌单)?(.+)$/);
     if (!match) {
-      return { name: argument.trim() };
+      return { name: trimmed };
     }
 
     const before = match[1].replace(/^歌曲/, '').trim();
@@ -1114,7 +1126,7 @@ export class VoiceEngine {
    * 通过 IndexingManager 模糊匹配歌单名，然后调用 PlaylistManager 播放
    */
   private async executePlayPlaylist(playlistName: string, accountId: string, deviceId: string): Promise<void> {
-    this.cancelPendingResume();
+    this.cancelPendingResume(accountId, deviceId);
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
 
     // 空参数 + 有活跃队列：保持或恢复当前播放，不切歌、不搜索、不打断。
@@ -1230,8 +1242,8 @@ export class VoiceEngine {
    * 通过 IndexingManager 模糊匹配歌曲名，获取所在歌单及索引，然后调用 PlaylistManager 播放
    * 翻译自 Go 版本: voicecmd/engine.go executePlaySong
    */
-  private async executePlaySong(songName: string, accountId: string, deviceId: string): Promise<void> {
-    this.cancelPendingResume();
+  private async executePlaySong(songName: string, accountId: string, deviceId: string, artist = ''): Promise<void> {
+    this.cancelPendingResume(accountId, deviceId);
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
 
     // 空参数处理：保持或恢复当前队列，不能误触发下一首。
@@ -1253,7 +1265,7 @@ export class VoiceEngine {
     // 打断音箱当前播报
     await this.interruptBroadcast(accountId, deviceId);
 
-    const songloftSong = await this.findSongloftLibrarySong(songName);
+    const songloftSong = await this.findSongloftLibrarySong(songName, artist);
     if (songloftSong) {
       const ok = await pm.playStandalone([songloftSong], 0, 'single', {
         autoAdvance: false,
@@ -1294,9 +1306,9 @@ export class VoiceEngine {
     }
 
     if (!loc) {
-      const resolvedSong = await this.resolveVoiceSearchSong(songName, '', null);
+      const resolvedSong = await this.resolveVoiceSearchSong(songName, artist, null);
       if (resolvedSong) {
-        const downloadedSong = await this.downloadResolvedSongToLibrary(resolvedSong, songName, resolvedSong.artist);
+        const downloadedSong = await this.downloadResolvedSongToLibrary(resolvedSong, songName, artist || resolvedSong.artist);
         if (downloadedSong) {
           const ok = await pm.playStandalone([downloadedSong], 0, 'single', {
             autoAdvance: false,
@@ -1328,9 +1340,10 @@ export class VoiceEngine {
         await this.minaService.textToSpeech(accountId, deviceId, `未找到歌曲：${songName}`);
         return;
       }
-      const hint = songName.trim() ? { title: songName.trim() } : null;
+      const hint = songName.trim() ? { title: songName.trim(), artist: artist.trim() || undefined } : null;
       const played = await this.onlineSearcher.searchAndPlay(
-        songName, hint, accountId, deviceId, this.minaService,
+        [songName, artist].map(item => item.trim()).filter(Boolean).join(' '),
+        hint, accountId, deviceId, this.minaService,
       );
       if (!played) {
         songloft.log.warn(`[VoiceEngine] Online search failed for: ${songName}`);
@@ -1489,7 +1502,7 @@ export class VoiceEngine {
    * 执行下一首
    */
   private async executeNext(accountId: string, deviceId: string): Promise<void> {
-    this.cancelPendingResume();
+    this.cancelPendingResume(accountId, deviceId);
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
     const ok = await pm.next();
     if (ok) {
@@ -1503,7 +1516,7 @@ export class VoiceEngine {
    * 执行上一首
    */
   private async executePrevious(accountId: string, deviceId: string): Promise<void> {
-    this.cancelPendingResume();
+    this.cancelPendingResume(accountId, deviceId);
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
     const ok = await pm.previous();
     if (ok) {
@@ -1517,33 +1530,62 @@ export class VoiceEngine {
    * 执行停止播放
    */
   private async executeStop(accountId: string, deviceId: string): Promise<void> {
-    this.cancelPendingResume();
+    this.cancelPendingResume(accountId, deviceId);
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
     await pm.stop();
     songloft.log.info(`[VoiceEngine] Playback stopped`);
   }
 
+  private resumeKey(accountId: string, deviceId: string): string {
+    return accountId + ':' + deviceId;
+  }
+
+  /** 恢复任务是否已被更新的调度/取消作废 */
+  private isResumeStale(key: string, epoch: number): boolean {
+    return (this.resumeEpochs.get(key) ?? 0) !== epoch;
+  }
+
   /**
-   * 取消待执行的恢复操作
+   * 取消指定设备待执行的恢复操作
    */
-  private cancelPendingResume(): void {
-    if (this.resumeTimer !== null) {
-      clearTimeout(this.resumeTimer);
-      this.resumeTimer = null;
+  private cancelPendingResume(accountId: string, deviceId: string): void {
+    const key = this.resumeKey(accountId, deviceId);
+    const timer = this.resumeTimers.get(key);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.resumeTimers.delete(key);
     }
-    this.resumeCancelled = true;
+    this.resumeEpochs.set(key, (this.resumeEpochs.get(key) ?? 0) + 1);
+  }
+
+  /**
+   * 取消所有设备待执行的恢复操作
+   */
+  private cancelAllPendingResume(): void {
+    for (const timer of this.resumeTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.resumeTimers.clear();
+    for (const key of Array.from(this.resumeEpochs.keys())) {
+      this.resumeEpochs.set(key, (this.resumeEpochs.get(key) ?? 0) + 1);
+    }
   }
 
   /**
    * 调度智能恢复：先等 3 秒让小爱开始 TTS，再轮询设备状态等待 TTS 结束后重新推送歌曲
    */
   private scheduleSmartResume(pm: import('../player/manager').PlaylistManager, accountId: string, deviceId: string): void {
-    this.cancelPendingResume();
-    this.resumeCancelled = false;
-    this.resumeTimer = setTimeout(async () => {
-      this.resumeTimer = null;
-      await this.smartResume(pm, accountId, deviceId);
+    this.cancelPendingResume(accountId, deviceId);
+    const key = this.resumeKey(accountId, deviceId);
+    const epoch = this.resumeEpochs.get(key) ?? 0;
+    const timer = setTimeout(() => {
+      this.resumeTimers.delete(key);
+      // 定时器回调没有任何人 await，异常必须就地兜住，否则是未处理的 Promise 拒绝
+      this.smartResume(pm, accountId, deviceId, epoch).catch(e => {
+        songloft.log.warn('[VoiceEngine] Smart resume failed: ' + String(e));
+      });
     }, 3000);
+    this.resumeTimers.set(key, timer);
   }
 
   /**
@@ -1569,8 +1611,9 @@ export class VoiceEngine {
   /**
    * 等待小爱 TTS 播报结束后重新推送当前歌曲 URL
    */
-  private async smartResume(pm: import('../player/manager').PlaylistManager, accountId: string, deviceId: string): Promise<void> {
-    if (!pm.isPlaying() || this.resumeCancelled) return;
+  private async smartResume(pm: import('../player/manager').PlaylistManager, accountId: string, deviceId: string, epoch: number): Promise<void> {
+    const key = this.resumeKey(accountId, deviceId);
+    if (!pm.isPlaying() || this.isResumeStale(key, epoch)) return;
 
     const maxWaitMs = 30000;
     const pollInterval = 2000;
@@ -1579,9 +1622,15 @@ export class VoiceEngine {
     let lastDevicePosition = 0;
 
     while (Date.now() - startTime < maxWaitMs) {
-      if (!pm.isPlaying() || this.resumeCancelled) return;
+      if (!pm.isPlaying() || this.isResumeStale(key, epoch)) return;
 
-      const raw = await this.minaService.getPlayerStatus(accountId, deviceId);
+      let raw: unknown;
+      try {
+        raw = await this.minaService.getPlayerStatus(accountId, deviceId);
+      } catch (e) {
+        songloft.log.warn('[VoiceEngine] Smart resume status query failed: ' + String(e));
+        return;
+      }
       const deviceStatus = this.parseDeviceStatus(raw);
       if (deviceStatus.status !== 1) {
         deviceBecameIdle = true;
@@ -1592,7 +1641,7 @@ export class VoiceEngine {
       await new Promise(r => setTimeout(r, pollInterval));
     }
 
-    if (!pm.isPlaying() || this.resumeCancelled) return;
+    if (!pm.isPlaying() || this.isResumeStale(key, epoch)) return;
 
     if (!deviceBecameIdle) {
       // 超时退出：设备一直在播放，说明已自动恢复，仅重置切歌定时器
@@ -1665,10 +1714,8 @@ export class VoiceEngine {
   private extractNumber(s: string): number | null {
     if (!s) return null;
 
-    // 剥离"百分之"前缀，避免"百"被误解析为数字 100
-    const cleaned = s.replace(/百分之/g, '');
-
-    const target = cleaned || s;
+    // 剥离"百分之"前缀，避免"百"被误解析为数字 100（剥完为空说明本来就没有数字）
+    const target = s.replace(/百分之/g, '');
 
     // 优先尝试阿拉伯数字
     const numMatch = target.match(/\d+/);

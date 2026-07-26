@@ -72,7 +72,7 @@ function renderDevices(config) {
         <article class="data-row" data-role="lx-sync-device-item">
             <div class="row-main">
                 <strong>${escapeHtml(device.deviceName || '未知设备')}</strong>
-                <span>${device.isMobile ? '移动端' : '桌面端'} · 上次 ${formatTime(device.lastConnectDate || '')}</span>
+                <span>${device.isMobile ? '移动端' : '桌面端'} · 上次 ${escapeHtml(formatTime(device.lastConnectDate || ''))}</span>
             </div>
         </article>
     `).join('');

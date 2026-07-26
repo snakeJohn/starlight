@@ -3,7 +3,7 @@
 // 实现小米3步登录流程：serviceLogin → serviceLoginAuth2 → 重定向获取 serviceToken
 
 import { CookieJar } from '../utils/cookie';
-import { fetchWithRedirects, fetchSync } from '../utils/http';
+import { fetchWithRedirects } from '../utils/http';
 import { md5, generateDeviceId } from '../utils/crypto';
 import {
   ACCOUNT_BASE_URL,
@@ -132,21 +132,13 @@ export class MinaAuth {
       'User-Agent': this.userAgent,
     };
 
-    const cookieHeader = this.cookieJar.getCookieHeader(captchaUrl);
-    if (cookieHeader) {
-      headers['Cookie'] = cookieHeader;
-    }
-
-    const response = await fetchSync(captchaUrl, {
+    // 走 fetchWithRedirects 而不是裸 fetch：它统一带上 CookieJar 的 cookie，并按标准
+    // 拆分被合并成单个逗号分隔头的 Set-Cookie。直接 addFromHeaders(raw) 时，合并头里
+    // 排在后面的 ick 会被当成第一个 cookie 的属性吞掉，导致提交验证码时缺 ick 必然失败。
+    const { response } = await fetchWithRedirects(captchaUrl, {
       method: 'GET',
       headers,
-    });
-
-    // 收集 cookies
-    const setCookieHeaders = response.headers.getSetCookie();
-    if (setCookieHeaders.length > 0) {
-      this.cookieJar.addFromHeaders(setCookieHeaders, captchaUrl);
-    }
+    }, this.cookieJar, MAX_REDIRECTS);
 
     // 获取 ick cookie
     const ick = this.cookieJar.getValue('ick') || '';
@@ -601,9 +593,10 @@ function stripJsonPrefix(body: string): string {
  * 从原始 JSON 字符串中用正则提取大整数字段值（作为字符串）
  * 解决 JavaScript Number 精度限制（最大 2^53）导致 JSON.parse() 丢失大整数精度的问题
  * 例如 nonce: 1610098522385872896 会被 JSON.parse 四舍五入为 1610098522385873000
+ * nonce 是 int64 随机数，可能为负；漏掉负号会退回 JSON.parse 的结果而静默丢精度
  */
 function extractBigIntField(jsonStr: string, field: string): string {
-  const regex = new RegExp('"' + field + '"\\s*:\\s*(\\d+)');
+  const regex = new RegExp('"' + field + '"\\s*:\\s*(-?\\d+)');
   const match = jsonStr.match(regex);
   return match ? match[1] : '';
 }

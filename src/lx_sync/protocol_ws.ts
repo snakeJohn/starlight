@@ -15,7 +15,7 @@ import {
   overwriteListData,
   patchListData,
 } from './list_merge';
-import type { LxSyncService } from './service';
+import type { LxListSyncPeer, LxSyncService } from './service';
 import type { LxClientKeyInfo, LxListData, LxSyncMode } from './types';
 
 /** Local ambient types — host SDK may not export these on older versions. */
@@ -216,7 +216,7 @@ export async function handleLxSyncWebSocket(
   socketCtx.remote = remote;
   socketCtx.remoteQueueList = remoteQueueList;
 
-  service.registerListPeer({
+  const listPeer: LxListSyncPeer = {
     clientId,
     isListReady: () => socketCtx.moduleReadys.list && !disconnected,
     notifyListAction: async (action: unknown) => {
@@ -226,7 +226,8 @@ export async function handleLxSyncWebSocket(
     close: () => {
       void socket.close(SYNC_CLOSE_CODE.failed, 'revoked');
     },
-  });
+  };
+  service.registerListPeer(listPeer);
 
   /** Bound concurrent decode+dispatch work per socket (abuse / flood control). */
   let inFlightMessages = 0;
@@ -276,7 +277,9 @@ export async function handleLxSyncWebSocket(
   const onClose = () => {
     if (disconnected) return;
     disconnected = true;
-    service.unregisterListPeer(clientId);
+    // Pass the peer so a late close from a replaced socket cannot evict the
+    // reconnected session that already took over this clientId.
+    service.unregisterListPeer(clientId, listPeer);
     const err = new Error('closed');
     for (const h of closeHandlers) {
       try {
@@ -340,6 +343,13 @@ function attachSocket(
     socket.onClose(() => onClose());
   } else if (typeof socket.addEventListener === 'function') {
     socket.addEventListener('close', () => onClose());
+  }
+  // Some hosts only surface an error for an aborted socket; without this the peer
+  // registration and every pending RPC would linger until the 120s timeouts.
+  if (typeof socket.onError === 'function') {
+    socket.onError(() => onClose());
+  } else if (typeof socket.addEventListener === 'function') {
+    socket.addEventListener('error', () => onClose());
   }
 }
 

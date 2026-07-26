@@ -9,6 +9,18 @@ import { ConfigManager } from '../config/manager';
 import { isPlayMode } from '../player/modes';
 import type { ScheduledTask, TaskAction, TaskSchedule, TaskTarget, TaskParams } from '../types';
 
+/** 解析 limit 查询参数：非法/越界时回落到默认值，避免把 NaN 或负数传给下游 */
+function parseLimit(raw: string | undefined, fallback: number, max: number): number {
+  if (raw === undefined || raw === '') {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(parsed, max);
+}
+
 /** 验证调度配置 */
 function validateSchedule(schedule: TaskSchedule): string | null {
   if (!schedule || !schedule.type) {
@@ -88,7 +100,8 @@ function validateTaskTarget(target: TaskTarget): string | null {
   if (target.all_managed) {
     return null;
   }
-  if (!target.devices || target.devices.length === 0) {
+  // 必须先判数组：devices 传成对象/字符串时 for...of 会抛 TypeError，把参数错误变成 500
+  if (!Array.isArray(target.devices) || target.devices.length === 0) {
     return '请至少选择一个目标设备';
   }
   // 验证每个设备对象必须包含 device_id
@@ -291,7 +304,7 @@ export function registerScheduleHandlers(
   router.get('/schedules/logs', async (req: HTTPRequest) => {
     try {
       const query = parseQuery(req.query);
-      const limit = query.limit ? Number(query.limit) : 50;
+      const limit = parseLimit(query.limit, 50, 200);
       const logs = scheduler.getLogs(limit);
       return jsonResponse({ success: true, data: { logs, total: logs.length } });
     } catch (e: any) {

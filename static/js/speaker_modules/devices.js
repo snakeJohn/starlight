@@ -122,7 +122,7 @@ export function renderAccountRow(account) {
         <article class="account-row">
             <span class="row-main">
                 <strong>${escapeHtml(accountName(account))}</strong>
-                <span>${escapeHtml(id)} · ${account.auth_type || account.status || '已保存'}</span>
+                <span>${escapeHtml(id)} · ${escapeHtml(account.auth_type || account.status || '已保存')}</span>
             </span>
             <span class="row-actions">
                 <button

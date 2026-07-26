@@ -231,15 +231,22 @@ function fixNeteaseTimeLabel(value: string): string {
   return value.replace(/\[(\d{2}:\d{2}):(\d{2,3})]/g, (_match, mmss, sub) => `[${mmss}.${sub}]`);
 }
 
+/**
+ * LRC fractional seconds must stay 3 digits: `[00:00.5]` is unparseable by the
+ * `\d{2,3}` fraction used in players, and `[01:05.20]` reads as 200ms, not 20ms.
+ */
+function lrcMsLabel(timeMs: number): string {
+  const total = Math.max(0, Math.trunc(timeMs));
+  const ms = String(total % 1000).padStart(3, '0');
+  const totalSeconds = Math.trunc(total / 1000);
+  const minute = String(Math.trunc(totalSeconds / 60)).padStart(2, '0');
+  const second = String(totalSeconds % 60).padStart(2, '0');
+  return `${minute}:${second}.${ms}`;
+}
+
 function neteaseMsLabel(timeMs: number): string {
-  if (Number.isNaN(timeMs)) return '';
-  let current = timeMs;
-  const ms = current % 1000;
-  current /= 1000;
-  const minute = String(Math.trunc(current / 60)).padStart(2, '0');
-  current %= 60;
-  const second = String(Math.trunc(current)).padStart(2, '0');
-  return `[${minute}:${second}.${ms}]`;
+  if (!Number.isFinite(timeMs)) return '';
+  return `[${lrcMsLabel(timeMs)}]`;
 }
 
 function neteaseYrcHeaderLines(value: string): string[] | null {
@@ -300,13 +307,19 @@ function neteaseParseYrcLines(lines: string[]): { lyric: string; lxlyric: string
   };
 }
 
+/**
+ * `MM:SS.mmm` (or `SS.mmm`) → milliseconds.
+ * A minute is 60_000ms, not 3_600_000: the inflated factor made
+ * fixNeteaseExtendedTimeTags miss translated lines that sit within its 100ms
+ * tolerance but on the other side of a minute boundary.
+ */
 function neteaseIntervalMs(interval: string): number {
   if (!interval) return 0;
   const normalized = interval.includes('.') ? interval : `${interval}.0`;
   const parts = normalized.split(/:|\./);
   while (parts.length < 3) parts.unshift('0');
   const [minute, second, ms] = parts;
-  return Number(minute) * 3600000 + Number(second) * 1000 + Number(ms);
+  return Number(minute) * 60000 + Number(second) * 1000 + Number(ms);
 }
 
 function fixNeteaseExtendedTimeTags(source: string, target: string): string {
@@ -734,13 +747,7 @@ async function decodeKugouKrc(content: string): Promise<MusicLyricResult> {
 }
 
 function kugouMsLabel(timeMs: number): string {
-  let current = timeMs;
-  const ms = current % 1000;
-  current /= 1000;
-  const minute = String(Math.trunc(current / 60)).padStart(2, '0');
-  current %= 60;
-  const second = String(Math.trunc(current)).padStart(2, '0');
-  return `${minute}:${second}.${ms}`;
+  return lrcMsLabel(timeMs);
 }
 
 function kugouLanguageLine(value: unknown): string {
@@ -824,14 +831,18 @@ function miguHeaders(): HeadersInit {
   };
 }
 
-function miguLongToBytes(value: bigint): Buffer {
-  const result = Buffer.alloc(8);
-  let current = value;
-  for (let index = 0; index < 8; index += 1) {
-    result[index] = Number(current & 0xFFn);
-    current >>= 8n;
+/**
+ * Little-endian 8 bytes → 4 UTF-16LE code units.
+ * Pure JS on purpose: `Buffer` does not exist in the Songloft QuickJS runtime.
+ */
+function miguLongToUtf16le(value: bigint): string {
+  let current = value & 0xFFFFFFFFFFFFFFFFn;
+  let out = '';
+  for (let index = 0; index < 4; index += 1) {
+    out += String.fromCharCode(Number(current & 0xFFFFn));
+    current >>= 16n;
   }
-  return result;
+  return out;
 }
 
 const MRC_DELTA = 2654435769n;
@@ -898,7 +909,7 @@ function miguTeaDecrypt(data: bigint[], key: bigint[]): bigint[] {
 function decryptMiguMrc(data: string): string {
   if (!data || data.length < 32) return data;
   return miguTeaDecrypt(miguBigintArray(data), MRC_KEY)
-    .map((item) => miguLongToBytes(item).toString('utf16le'))
+    .map((item) => miguLongToUtf16le(item))
     .join('');
 }
 
@@ -910,10 +921,7 @@ function parseMiguMrc(value: string): MusicLyricResult {
     const match = /^\s*\[(\d+),\d+\](.*)$/.exec(line);
     if (!match) continue;
     const startTime = Number(match[1]);
-    const minute = String(Math.floor(startTime / 1000 / 60)).padStart(2, '0');
-    const second = String(Math.floor((startTime / 1000) % 60)).padStart(2, '0');
-    const millisecond = String(startTime % 1000);
-    const timeLabel = `[${minute}:${second}.${millisecond}]`;
+    const timeLabel = `[${lrcMsLabel(startTime)}]`;
     const words = match[2];
     lyricLines.push(`${timeLabel}${words.replace(/(\(\d+,\d+\))/g, '')}`);
 

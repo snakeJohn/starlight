@@ -174,10 +174,12 @@ export class MiguProvider implements MusicPlatformProvider {
       if (!listId) {
         throw new Error('migu playlist id resolve failed');
       }
-      const songsBody = await fetchJson<any>(`https://app.c.nf.migu.cn/MIGUM3.0/resource/playlist/song/v2.0?pageNo=${page}&pageSize=${pageSize}&playlistId=${encodeURIComponent(listId)}`, {
+      // 歌曲分页与歌单信息互不依赖，并发请求避免每页多一次串行往返。
+      const songsRequest = fetchJson<any>(`https://app.c.nf.migu.cn/MIGUM3.0/resource/playlist/song/v2.0?pageNo=${page}&pageSize=${pageSize}&playlistId=${encodeURIComponent(listId)}`, {
         headers: playlistHeaders(),
       });
-      const info = await loadMiguPlaylistInfo(listId);
+      const infoRequest = loadMiguPlaylistInfo(listId);
+      const [songsBody, info] = await Promise.all([songsRequest, infoRequest]);
       return {
         songs: Array.isArray(songsBody.data?.songList) ? songsBody.data.songList.map(mapMgSong) : [],
         total: numberValue(songsBody.data?.totalCount),

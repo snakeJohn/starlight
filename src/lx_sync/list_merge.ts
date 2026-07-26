@@ -44,12 +44,14 @@ function handleMergeMusic(
   const combined =
     addMusicLocationType === 'top' ? [...targetList, ...sourceList] : [...sourceList, ...targetList];
   if (addMusicLocationType === 'top') {
+    // Walk backwards then reverse once — unshift per item is O(n²) on big lists.
     for (let i = combined.length - 1; i > -1; i--) {
       const item = combined[i];
       if (map.has(item.id)) continue;
-      ids.unshift(item.id);
+      ids.push(item.id);
       map.set(item.id, item);
     }
+    ids.reverse();
   } else {
     for (const item of combined) {
       if (map.has(item.id)) continue;
@@ -99,7 +101,8 @@ export function mergeListData(
       // Always merge songs onto the returned copy; early return only skips reorder.
       sourceList.list = handleMergeMusic(sourceList.list, list.list, addMusicLocationType);
       const sourceUpdateTime = sourceList.locationUpdateTime ?? 0;
-      if (targetUpdateTime >= sourceUpdateTime) return;
+      // Only the side whose position was reordered more recently wins the slot.
+      if (targetUpdateTime <= sourceUpdateTime) return;
       const idx = newListData.userList.findIndex((l) => l.id == list.id);
       if (idx >= 0) {
         const [moved] = newListData.userList.splice(idx, 1);
@@ -190,11 +193,14 @@ export function applyListActionToData(listData: LxListData, action: unknown): Lx
       const data = payload as { position?: number; listInfos?: LxUserListInfo[] } | undefined;
       const infos = Array.isArray(data?.listInfos) ? data!.listInfos! : [];
       const position = typeof data?.position === 'number' ? data.position : next.userList.length;
+      // Insert as one block: splicing each info at `position` would reverse them.
+      const created: LxUserListInfo[] = [];
       for (const info of infos) {
         if (!info || typeof info !== 'object') continue;
         const id = String(info.id || '');
-        if (!id || next.userList.some((l) => l.id === id)) continue;
-        next.userList.splice(Math.max(0, Math.min(position, next.userList.length)), 0, {
+        if (!id) continue;
+        if (next.userList.some((l) => l.id === id) || created.some((l) => l.id === id)) continue;
+        created.push({
           id,
           name: String(info.name || id),
           source: info.source,
@@ -202,6 +208,9 @@ export function applyListActionToData(listData: LxListData, action: unknown): Lx
           locationUpdateTime: info.locationUpdateTime ?? null,
           list: asMusicInfos(info.list),
         });
+      }
+      if (created.length) {
+        next.userList.splice(Math.max(0, Math.min(position, next.userList.length)), 0, ...created);
       }
       return next;
     }
@@ -251,7 +260,9 @@ export function applyListActionToData(listData: LxListData, action: unknown): Lx
       const existing = getListMusics(next, listId);
       if (!existing) return next;
       const addType = data?.addMusicLocationType === 'top' ? 'top' : 'bottom';
-      setListMusics(next, listId, handleMergeMusic(asMusicInfos(data?.musicInfos), existing, addType));
+      // The incoming songs are the added side: `bottom` appends them, `top` prepends;
+      // already-present ids keep their existing object and position.
+      setListMusics(next, listId, handleMergeMusic(existing, asMusicInfos(data?.musicInfos), addType));
       return next;
     }
     case 'list_music_remove': {
@@ -333,7 +344,10 @@ export function applyListActionToData(listData: LxListData, action: unknown): Lx
         fromList.filter((m) => !ids.has(String(m.id))),
       );
       const addType = data?.addMusicLocationType === 'top' ? 'top' : 'bottom';
-      setListMusics(next, toId, handleMergeMusic(moving, toList, addType));
+      // Re-read the destination: for a move inside one list it must be the
+      // post-removal array, otherwise the removal is undone by the merge.
+      const destList = getListMusics(next, toId) ?? toList;
+      setListMusics(next, toId, handleMergeMusic(destList, moving, addType));
       return next;
     }
     default:

@@ -5,6 +5,13 @@ import {
   peerKeyFromRequest,
   resetAuthRateLimitForTests,
 } from '../../src/lx_sync/protocol_http';
+import {
+  AUTH_BLOCK_MS,
+  AUTH_MAX_FAILURES,
+  getAuthPeerCount,
+  isPeerBlocked,
+  recordAuthFailure,
+} from '../../src/lx_sync/auth_rate_limit';
 import { generatePassword } from '../../src/lx_sync/crypto_lx';
 import type { LxSyncService } from '../../src/lx_sync/service';
 
@@ -143,6 +150,27 @@ describe('LX /ah rate limit bypass protection', () => {
       service,
     );
     expect(blocked!.statusCode).toBe(403);
+  });
+});
+
+describe('auth rate-limit bookkeeping', () => {
+  beforeEach(() => {
+    resetAuthRateLimitForTests();
+  });
+
+  it('keeps no state for peers that never failed', () => {
+    expect(isPeerBlocked('203.0.113.77')).toBe(false);
+    expect(getAuthPeerCount()).toBe(0);
+  });
+
+  it('drops peer state once the block has expired', () => {
+    const now = 1_700_000_000_000;
+    for (let i = 0; i < AUTH_MAX_FAILURES; i++) recordAuthFailure('203.0.113.78', now);
+    expect(isPeerBlocked('203.0.113.78', now)).toBe(true);
+    expect(getAuthPeerCount()).toBe(1);
+
+    expect(isPeerBlocked('203.0.113.78', now + AUTH_BLOCK_MS + 1)).toBe(false);
+    expect(getAuthPeerCount()).toBe(0);
   });
 });
 

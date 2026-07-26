@@ -395,4 +395,53 @@ describe('MiguProvider', () => {
       }],
     });
   });
+
+  test('requests playlist songs and playlist info concurrently', async () => {
+    const cryptoMd5 = vi.fn(() => 'migu-sign');
+    let releaseSongs: () => void = () => {};
+    let infoRequested = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('playlist/song/v2.0')) {
+        await new Promise<void>((resolve) => {
+          releaseSongs = resolve;
+        });
+        return new Response(JSON.stringify({
+          code: '000000',
+          data: {
+            totalCount: 1,
+            songList: [{ name: '稻花香', singerList: [{ name: '周杰伦' }], duration: 180, songId: 'mg-song-1' }],
+          },
+        }));
+      }
+      if (url.includes('resource/playlist/v2.0')) {
+        infoRequested = true;
+        return new Response(JSON.stringify({
+          code: '000000',
+          data: { title: '测试歌单', imgItem: { img: 'https://img.test/mg-list.jpg' } },
+        }));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: { md5: cryptoMd5 },
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const pending = new MiguProvider().songListDetail('234913063', 1, 30);
+    for (let turn = 0; turn < 10; turn += 1) {
+      await Promise.resolve();
+    }
+
+    expect(infoRequested).toBe(true);
+
+    releaseSongs();
+    await expect(pending).resolves.toMatchObject({
+      name: '测试歌单',
+      total: 1,
+      songs: [{ title: '稻花香' }],
+    });
+  });
 });

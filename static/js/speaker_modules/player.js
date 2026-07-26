@@ -28,6 +28,9 @@ let currentLyricText = '';
 let currentLyricIndex = null;
 let currentCoverUrl = '';
 let currentCoverObjectUrl = '';
+/** Monotonic tokens so late cover/lyric fetches for a previous track are ignored. */
+let coverRequestId = 0;
+let lyricRequestId = 0;
 let lastUpdateTime = 0;
 let progressAnimationFrame = null;
 let playerPollTimer = null;
@@ -268,6 +271,8 @@ function isSameOriginUrl(url) {
 function loadCover(coverUrl) {
     if (coverUrl === currentCoverUrl) return;
     currentCoverUrl = coverUrl || '';
+    // Invalidate any in-flight fetch for the previous cover.
+    coverRequestId += 1;
 
     if (currentCoverObjectUrl && URL.revokeObjectURL) {
         URL.revokeObjectURL(currentCoverObjectUrl);
@@ -284,15 +289,21 @@ function loadCover(coverUrl) {
         return;
     }
 
-    fetchWithAuth(currentCoverUrl)
+    // Track changes can outrun in-flight fetches; drop responses for a stale cover.
+    const requestedUrl = currentCoverUrl;
+    const requestId = coverRequestId;
+
+    fetchWithAuth(requestedUrl)
         .then(blob => {
+            if (requestId !== coverRequestId) return;
             currentCoverObjectUrl = URL.createObjectURL(blob);
             setCoverImage(currentCoverObjectUrl);
         })
         .catch(() => {
+            if (requestId !== coverRequestId) return;
             // Fall back to direct URL if authenticated fetch fails.
             currentCoverObjectUrl = '';
-            setCoverImage(currentCoverUrl);
+            setCoverImage(requestedUrl);
         });
 }
 
@@ -317,6 +328,8 @@ function loadLyrics(lyricUrl, lyricText = '') {
 
     currentLyricUrl = lyricUrl || '';
     currentLyricText = inlineText;
+    // Invalidate any in-flight fetch for the previous track's lyrics.
+    lyricRequestId += 1;
     currentLyrics = [];
     renderFullscreenLyrics([]);
     renderActiveLyric();
@@ -329,14 +342,20 @@ function loadLyrics(lyricUrl, lyricText = '') {
     }
     if (!currentLyricUrl) return;
 
-    fetchWithAuth(currentLyricUrl)
+    // Same race as the cover: a slow lyric fetch must not overwrite a newer track.
+    const requestedUrl = currentLyricUrl;
+    const requestId = lyricRequestId;
+
+    fetchWithAuth(requestedUrl)
         .then(blob => blob.text())
         .then(rawText => {
+            if (requestId !== lyricRequestId) return;
             currentLyrics = parseLrc(lyricTextFrom(rawText));
             renderFullscreenLyrics(currentLyrics);
             renderActiveLyric();
         })
         .catch(() => {
+            if (requestId !== lyricRequestId) return;
             currentLyrics = [];
             renderFullscreenLyrics([]);
             renderActiveLyric();

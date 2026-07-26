@@ -79,6 +79,7 @@ interface RemoteSongsResponse {
  */
 export class OnlineSearcher {
   private readonly searchTimeoutMs = 6000;
+  private readonly importTimeoutMs = 10000;
   private configManager: ConfigManager;
 
   constructor(configManager: ConfigManager, private readonly bridgeService?: BridgeService) {
@@ -270,23 +271,25 @@ export class OnlineSearcher {
     try {
       const pluginToken = await songloft.plugin.getToken();
       const serverHost = await resolveHostBaseUrl();
-      const fetchResp = await fetch(serverHost + '/api/v1/songs/remote', {
+      // 走 fetchWithTimeout：裸 fetch 没有超时，后端卡住会让整条语音播放链路一直挂着
+      const fetchResp = await fetchWithTimeout(serverHost + '/api/v1/songs/remote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pluginToken}` },
         body: JSON.stringify([remoteItem]),
+        timeoutMs: this.importTimeoutMs,
       });
       const text = await fetchResp.text();
       let result: RemoteSongsResponse;
       try {
         result = JSON.parse(text) as RemoteSongsResponse;
       } catch {
-        songloft.log.warn('[OnlineSearcher] Failed to parse remote songs response: ' + text);
+        songloft.log.warn('[OnlineSearcher] Failed to parse remote songs response: ' + redactForLog(text));
         // 导入失败（可能是 UNIQUE 约束冲突），尝试查找已存在的歌曲
         return await this.findExistingSong(song.title, song.artist);
       }
 
       if (!result.songs || result.songs.length === 0) {
-        songloft.log.warn('[OnlineSearcher] Remote import returned no songs: ' + text);
+        songloft.log.warn('[OnlineSearcher] Remote import returned no songs: ' + redactForLog(text));
         // 导入失败，尝试查找已存在的歌曲
         return await this.findExistingSong(song.title, song.artist);
       }

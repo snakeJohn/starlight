@@ -22,8 +22,10 @@ export interface FetchOptions {
 /** 响应头包装器（支持 case-insensitive get + getSetCookie） */
 class ResponseHeaders {
   private _raw: Record<string, string>;
-  constructor(raw: Record<string, string>) {
+  private _setCookies: string[];
+  constructor(raw: Record<string, string>, setCookies: string[] = []) {
     this._raw = raw || {};
+    this._setCookies = setCookies;
   }
   get(name: string): string | null {
     if (this._raw[name] !== undefined) return this._raw[name];
@@ -34,9 +36,51 @@ class ResponseHeaders {
     return null;
   }
   getSetCookie(): string[] {
+    if (this._setCookies.length > 0) return this._setCookies.slice();
     const raw = this.get('set-cookie');
     return raw ? [raw] : [];
   }
+}
+
+/** Web `Headers` 的最小结构（宿主可能给普通对象，也可能给标准 Headers）。 */
+type HeadersLike = {
+  forEach?: (callback: (value: string, key: string) => void) => void;
+  getSetCookie?: () => string[];
+};
+
+/**
+ * 把响应头拆成普通对象。
+ * QuickJS polyfill 返回普通对象；标准 fetch 返回 `Headers`，
+ * 其自有属性为空，必须用 forEach 才能读到，否则会静默丢掉全部响应头
+ * （包括登录流程依赖的 Location / Set-Cookie）。
+ */
+function readResponseHeaders(raw: unknown): { headerObj: Record<string, string>; setCookies: string[] } {
+  const headerObj: Record<string, string> = {};
+  const setCookies: string[] = [];
+  if (!raw || typeof raw !== 'object') {
+    return { headerObj, setCookies };
+  }
+
+  const headers = raw as HeadersLike;
+  if (typeof headers.getSetCookie === 'function') {
+    try {
+      setCookies.push(...headers.getSetCookie());
+    } catch {
+      // Older runtimes may expose the method without implementing it.
+    }
+  }
+
+  if (typeof headers.forEach === 'function') {
+    headers.forEach((value, key) => {
+      headerObj[key] = value;
+    });
+    return { headerObj, setCookies };
+  }
+
+  for (const key of Object.keys(raw as Record<string, string>)) {
+    headerObj[key] = (raw as Record<string, string>)[key];
+  }
+  return { headerObj, setCookies };
 }
 
 /** HTTP 响应对象（与 Web Response 兼容的子集，xiaomi 内部使用） */
@@ -69,21 +113,14 @@ export async function httpFetch(
   const body = options.body;
 
   const resp = await fetch(url, { method, headers, body });
-  // 把 Response.headers 拆成普通对象，方便 ResponseHeaders 包装。
-  const headerObj: Record<string, string> = {};
-  if (resp.headers && typeof (resp.headers as unknown as Record<string, unknown>) === 'object') {
-    // QuickJS polyfill 的 fetch.headers 是一个普通对象。
-    for (const k of Object.keys(resp.headers as unknown as Record<string, string>)) {
-      headerObj[k] = (resp.headers as unknown as Record<string, string>)[k];
-    }
-  }
+  const { headerObj, setCookies } = readResponseHeaders(resp.headers);
   const text = await resp.text();
 
   return {
     ok: resp.ok,
     status: resp.status,
     statusText: resp.statusText || '',
-    headers: new ResponseHeaders(headerObj),
+    headers: new ResponseHeaders(headerObj, setCookies),
     text() { return text; },
     json() { return JSON.parse(text); },
   };
@@ -148,11 +185,15 @@ export async function fetchWithRedirects(
 function collectCookies(response: HttpResponse, url: string, cookieJar: CookieJar): void {
   const setCookieHeaders: string[] = [];
 
-  if (typeof response.headers.getSetCookie === 'function') {
-    const cookies = response.headers.getSetCookie();
+  const cookies = typeof response.headers.getSetCookie === 'function'
+    ? response.headers.getSetCookie()
+    : [];
+  if (cookies.length > 1) {
+    // Already split by the runtime — one entry per Set-Cookie header.
     setCookieHeaders.push(...cookies);
   } else {
-    const raw = response.headers.get('set-cookie');
+    // A single entry may still be several cookies folded into one comma-joined header.
+    const raw = cookies[0] ?? response.headers.get('set-cookie');
     if (raw) {
       setCookieHeaders.push(...splitSetCookieHeader(raw));
     }

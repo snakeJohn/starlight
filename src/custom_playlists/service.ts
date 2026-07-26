@@ -70,6 +70,23 @@ function toPlaylistSong(song: SearchResultSong): CustomPlaylistSong {
   };
 }
 
+/** 松散匹配键（大小写/空白归一），用于在线解析结果回填本地曲目。 */
+function looseSongKey(song: Pick<CustomPlaylistSong, 'title' | 'artist'>): string {
+  return `${normalizeKey(song.title || '')}\u0000${normalizeKey(song.artist || '')}`;
+}
+
+/**
+ * 歌曲去重：stable_key 在不同来源下格式不同（在线解析 `platform:id`、
+ * 网络歌单导入 `query:标题:歌手`、Songloft 快照 `songloft:id`），
+ * 只比对 stable_key 会漏判，因此再用标题+歌手文本键兜底。
+ */
+function containsSong(songs: CustomPlaylistSong[], candidate: CustomPlaylistSong): boolean {
+  const textKey = stableSongTextKey(candidate);
+  return songs.some(
+    (item) => item.stable_key === candidate.stable_key || stableSongTextKey(item) === textKey,
+  );
+}
+
 function toPortablePlaylistSong(song: SearchResultSong): CustomPlaylistSong {
   return {
     title: song.title,
@@ -207,20 +224,34 @@ export class CustomPlaylistService {
   async addSong(playlistName: string, song: SearchResultSong | CustomPlaylistSong): Promise<CustomPlaylist> {
     const playlist = await this.create(playlistName);
     const resolved = await this.resolveSongForOwnPlaylist(song);
-    if (playlist.songs.some((item) => item.stable_key === stableSongId(resolved))) {
+    const entry = toPlaylistSong(resolved);
+    if (containsSong(playlist.songs, entry)) {
       return playlist;
     }
 
     const imported = await this.bridge.importSongs([resolved]);
-    const updated: CustomPlaylist = {
-      ...playlist,
-      cover_url: playlist.cover_url || resolved.cover_url,
-      updated_at: nowIso(),
-      songs: [...playlist.songs, toPlaylistSong(resolved)],
-    };
     // Songloft playlists accept library song ids, not remote import payloads.
-    await this.tryNativeAddSongIds(updated.native_playlist_id, remoteSongIds(imported.songs ?? []));
-    await this.replace(updated);
+    await this.tryNativeAddSongIds(playlist.native_playlist_id, remoteSongIds(imported.songs ?? []));
+
+    // 追加必须在 store 锁内基于最新快照做，否则并发 addSong / LX 写入会互相覆盖
+    // （`playlist` 是 create() 之后、多次 await 之前的旧快照）。
+    let updated: CustomPlaylist = playlist;
+    await this.store.mutate((playlists) =>
+      playlists.map((item) => {
+        if (item.id !== playlist.id) return item;
+        if (containsSong(item.songs, entry)) {
+          updated = item;
+          return item;
+        }
+        updated = {
+          ...item,
+          cover_url: item.cover_url || entry.cover_url,
+          updated_at: nowIso(),
+          songs: [...item.songs, entry],
+        };
+        return updated;
+      }),
+    );
     return updated;
   }
 
@@ -539,12 +570,6 @@ export class CustomPlaylistService {
     };
   }
 
-  private async replace(updated: CustomPlaylist): Promise<void> {
-    await this.store.mutate((playlists) =>
-      playlists.map((playlist) => (playlist.id === updated.id ? updated : playlist)),
-    );
-  }
-
   /**
    * Merge only Songloft link fields onto the current store row.
    * Avoids clobbering songs/name updated by concurrent LX setLocalListData.
@@ -574,8 +599,15 @@ export class CustomPlaylistService {
   ): Promise<CustomPlaylist | undefined> {
     let result: CustomPlaylist | undefined;
     const resolvedByKey = new Map<string, SearchResultSong>();
+    // 松散键预先建表：原实现在每首歌里重建候选数组做线性回退，
+    // 大歌单同步时是 O(n×m) + 每首歌一次数组拷贝。
+    const resolvedByLooseKey = new Map<string, SearchResultSong>();
     for (const song of link.resolvedSongs || []) {
       resolvedByKey.set(stableSongTextKey(song), song);
+      const loose = looseSongKey(song);
+      if (!resolvedByLooseKey.has(loose)) {
+        resolvedByLooseKey.set(loose, song);
+      }
     }
 
     await this.store.mutate((playlists) =>
@@ -588,11 +620,7 @@ export class CustomPlaylistService {
             : playlist.songs.map((existing) => {
                 const hit =
                   resolvedByKey.get(stableSongTextKey(existing))
-                  || [...resolvedByKey.values()].find(
-                    (r) =>
-                      normalizeKey(r.title) === normalizeKey(existing.title)
-                      && normalizeKey(r.artist) === normalizeKey(existing.artist),
-                  );
+                  || resolvedByLooseKey.get(looseSongKey(existing));
                 if (!hit) return existing;
                 const mapped = toPlaylistSong(hit);
                 return {

@@ -1,6 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MinaHTTPClient } from '../../src/mina/client';
-import { needUsePlayMusicAPI } from '../../src/mina/constants';
+import { MINA_SID, needUsePlayMusicAPI } from '../../src/mina/constants';
+
+function createClient(): MinaHTTPClient {
+  return new MinaHTTPClient({
+    user_id: 'user-1',
+    device_id: 'client-device-1',
+    services: {
+      [MINA_SID]: {
+        service_token: 'service-token',
+        ssecurity: '',
+        expires_at: Date.now() + 3600_000,
+      },
+    },
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 3600_000).toISOString(),
+  });
+}
 
 describe('MIoT playback API model detection', () => {
   afterEach(() => {
@@ -147,5 +163,54 @@ describe('MIoT playback API model detection', () => {
       { method: 'player_play_operation', path: 'mediaplayer', action: 'pause' },
       { method: 'player_play_operation', path: 'mediaplayer', action: 'stop' },
     ]);
+  });
+
+  it('sends a millisecond timestamp to the Xiaomi music search API', async () => {
+    const bodies: string[] = [];
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(String(init?.body ?? ''));
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        // 手写 JSON：audioID 是 int64，经 JSON.stringify(number) 会先丢精度
+        text: async () => '{"code":0,"data":{"songList":[{"audioID":1732418460076477549,"name":"歌名","artist":{"name":"歌手"}}]}}',
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const before = Date.now();
+    await expect(createClient().searchAudioId('歌名-歌手', 'fallback-id')).resolves.toBe('1732418460076477549');
+
+    const timestamp = Number(new URLSearchParams(bodies[0]).get('timestamp'));
+    expect(timestamp).toBeGreaterThanOrEqual(before);
+    expect(timestamp).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
+  it('falls back to the default audio id when songList is not an array', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      text: async () => JSON.stringify({ code: 0, data: { songList: { unexpected: true } } }),
+    } as Response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createClient().searchAudioId('歌名-歌手', 'fallback-id')).resolves.toBe('fallback-id');
+  });
+
+  it('returns an empty device list when the API sends a non-array data field', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      text: async () => JSON.stringify({ code: 0, message: 'ok', data: { total: 0 } }),
+    } as Response));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createClient().getDeviceList()).resolves.toEqual([]);
   });
 });

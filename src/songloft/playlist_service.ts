@@ -144,7 +144,14 @@ export class SongloftPlaylistService {
         errors.push({ title: '未知歌曲', message: 'song.title is required' });
         continue;
       }
-      const resolved = await this.bridge.resolveSearchSong(title, artist);
+      // 单曲解析异常（网络/音源故障）只记账，不能中断整份歌单导入。
+      let resolved: SearchResultSong | null = null;
+      try {
+        resolved = await this.bridge.resolveSearchSong(title, artist);
+      } catch (error) {
+        errors.push({ title, message: errorMessage(error) });
+        continue;
+      }
       if (resolved) {
         resolvedSongs.push(resolved);
       } else {

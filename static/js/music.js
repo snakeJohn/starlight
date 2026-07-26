@@ -283,17 +283,22 @@ setCustomPlaylistDependencies({
     setControlDisabled,
 });
 
+let musicBindingsBound = false;
+
 export async function initMusicUI() {
     installArtworkFallback();
-    bindSearch();
-    bindSources();
-    bindDownloads();
-    bindSongloftLibrary();
-    bindSongloftPlaylistTarget();
-    bindSongLists();
-    bindRankings();
-    bindCustomPlaylists();
-    bindLxSync();
+    if (!musicBindingsBound) {
+        bindSearch();
+        bindSources();
+        bindDownloads();
+        bindSongloftLibrary();
+        bindSongloftPlaylistTarget();
+        bindSongLists();
+        bindRankings();
+        bindCustomPlaylists();
+        bindLxSync();
+        musicBindingsBound = true;
+    }
     await loadPlatforms().catch(error => toast(error.message, 'error'));
     await loadSources().catch(error => toast(error.message, 'error'));
     await loadDownloadSettings().catch(error => toast(error.message, 'error'));

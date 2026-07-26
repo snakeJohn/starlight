@@ -78,18 +78,23 @@ async function clearSourceLogs() {
     toast('日志已清空');
 }
 
+let diagnosticsBindingsBound = false;
+
 export function initDiagnosticsUI() {
-    $('[data-action="refresh-source-logs"]')?.addEventListener('click', () => {
-        loadSourceLogs().catch(error => toast(error.message || '日志刷新失败', 'error'));
-    });
-    $('[data-action="clear-source-logs"]')?.addEventListener('click', () => {
-        clearSourceLogs().catch(error => toast(error.message || '日志清空失败', 'error'));
-    });
-    $('[data-role="diagnostics-operation-filter"]')?.addEventListener('change', () => {
-        loadSourceLogs().catch(error => toast(error.message || '日志刷新失败', 'error'));
-    });
-    $('[data-role="diagnostics-status-filter"]')?.addEventListener('change', () => {
-        loadSourceLogs().catch(error => toast(error.message || '日志刷新失败', 'error'));
-    });
+    if (!diagnosticsBindingsBound) {
+        $('[data-action="refresh-source-logs"]')?.addEventListener('click', () => {
+            loadSourceLogs().catch(error => toast(error.message || '日志刷新失败', 'error'));
+        });
+        $('[data-action="clear-source-logs"]')?.addEventListener('click', () => {
+            clearSourceLogs().catch(error => toast(error.message || '日志清空失败', 'error'));
+        });
+        $('[data-role="diagnostics-operation-filter"]')?.addEventListener('change', () => {
+            loadSourceLogs().catch(error => toast(error.message || '日志刷新失败', 'error'));
+        });
+        $('[data-role="diagnostics-status-filter"]')?.addEventListener('change', () => {
+            loadSourceLogs().catch(error => toast(error.message || '日志刷新失败', 'error'));
+        });
+        diagnosticsBindingsBound = true;
+    }
     renderSourceLogs();
 }

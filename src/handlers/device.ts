@@ -285,7 +285,11 @@ export function registerDeviceHandlers(
         }
       }
 
-      updateDeviceStatusCache(account_id, device_id, { state, position, volume: volume ?? undefined });
+      // 解析失败时 state 仍是 unknown，此时不能回写共享缓存：
+      // /player/status 会读到 unknown + position 0，把前端进度条清零。
+      if (state !== 'unknown') {
+        updateDeviceStatusCache(account_id, device_id, { state, position, volume: volume ?? undefined });
+      }
 
       return jsonResponse({
         success: true,

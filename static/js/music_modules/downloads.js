@@ -52,7 +52,8 @@ export async function loadDownloadProgress() {
     renderDownloadProgress(progress);
     if (progress?.active && !progress.done) {
         startDownloadProgressPolling();
-    } else if (progress?.done) {
+    } else {
+        // 任务不再运行就必须停表：只在 done 时停会让 {active:false} 的响应无限轮询下去。
         stopDownloadProgressPolling();
     }
     return progress;

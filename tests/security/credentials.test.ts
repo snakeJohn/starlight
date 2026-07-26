@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  migrateAccountSecrets,
   resolveSecretUpdate,
   toPublicAccount,
   toPublicAIConfig,
@@ -59,6 +60,28 @@ describe('credential DTOs', () => {
       timeout: 6,
     });
     expect(JSON.stringify(pub)).not.toContain('sk-live-secret');
+  });
+});
+
+describe('migrateAccountSecrets', () => {
+  it('normalizes legacy records without devices so device paths cannot throw', () => {
+    const legacy = {
+      id: 'u1',
+      account: 'user@example.com',
+      auth_type: 'password',
+      login_method: 'password',
+      user_id: '123',
+      created_at: 'a',
+      updated_at: 'b',
+    } as unknown as AccountConfig;
+
+    const migrated = migrateAccountSecrets(legacy);
+
+    expect(migrated.devices).toEqual([]);
+    expect(migrated.services).toEqual({});
+    expect(migrated.password).toBe('');
+    expect(migrated.pass_token).toBe('');
+    expect(() => migrated.devices.map(device => device.device_id)).not.toThrow();
   });
 });
 

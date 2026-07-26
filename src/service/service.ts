@@ -83,12 +83,10 @@ export class MinaService {
       return this.buildDeviceInfoFromLocal(accountId);
     }
 
-    // 更新设备型号 / MIoT DID 缓存
+    // 更新设备型号 / MIoT DID 缓存（无 DID 的设备也要写入空串占位，见 getDeviceIdentity）
     for (const dev of apiDevices) {
-      this.deviceModelCache.set(dev.deviceID, dev.hardware);
-      if (dev.miotDID) {
-        this.deviceMiotDIDCache.set(dev.deviceID, dev.miotDID);
-      }
+      this.deviceModelCache.set(dev.deviceID, dev.hardware || '');
+      this.deviceMiotDIDCache.set(dev.deviceID, dev.miotDID || '');
     }
 
     // 合并到本地配置
@@ -373,20 +371,23 @@ export class MinaService {
   private async getDeviceIdentity(client: MinaHTTPClient, deviceId: string): Promise<{ hardware: string; miotDID: string }> {
     const cachedHardware = this.deviceModelCache.get(deviceId) || '';
     const cachedMiotDID = this.deviceMiotDIDCache.get(deviceId) || '';
-    if (cachedHardware && cachedMiotDID) {
+    // 用 has() 而不是值真假判断：部分设备本身就没有 miotDID（或 hardware 为空），
+    // 按真假判断会让每次播放/TTS 都重新拉一遍 device_list。
+    if (this.deviceModelCache.has(deviceId) && this.deviceMiotDIDCache.has(deviceId)) {
       return { hardware: cachedHardware, miotDID: cachedMiotDID };
     }
 
     try {
       const devices = await client.getDeviceList();
       for (const dev of devices) {
-        this.deviceModelCache.set(dev.deviceID, dev.hardware);
-        if (dev.miotDID) {
-          this.deviceMiotDIDCache.set(dev.deviceID, dev.miotDID);
-        }
-        if (dev.deviceID === deviceId) {
-          return { hardware: dev.hardware || '', miotDID: dev.miotDID || '' };
-        }
+        this.deviceModelCache.set(dev.deviceID, dev.hardware || '');
+        this.deviceMiotDIDCache.set(dev.deviceID, dev.miotDID || '');
+      }
+      if (this.deviceModelCache.has(deviceId)) {
+        return {
+          hardware: this.deviceModelCache.get(deviceId) || '',
+          miotDID: this.deviceMiotDIDCache.get(deviceId) || '',
+        };
       }
     } catch (e) {
       songloft.log.warn('[MinaService] Failed to refresh device list for identity lookup: ' + String(e));

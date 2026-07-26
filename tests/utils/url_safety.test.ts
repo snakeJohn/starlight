@@ -27,6 +27,21 @@ describe('isBlockedHostname', () => {
     expect(isBlockedHostname('255.255.255.255')).toBe(true);
   });
 
+  it('blocks non-dotted-quad IPv4 literals that still resolve to loopback/private', () => {
+    expect(isBlockedHostname('2130706433')).toBe(true);      // decimal 127.0.0.1
+    expect(isBlockedHostname('0x7f000001')).toBe(true);      // hex 127.0.0.1
+    expect(isBlockedHostname('017700000001')).toBe(true);    // octal 127.0.0.1
+    expect(isBlockedHostname('127.1')).toBe(true);           // short form 127.0.0.1
+    expect(isBlockedHostname('192.168.257')).toBe(true);     // short form 192.168.1.1
+    expect(isBlockedHostname('0')).toBe(true);               // 0.0.0.0
+  });
+
+  it('keeps allowing public hosts that merely look numeric', () => {
+    expect(isBlockedHostname('134744072')).toBe(false);       // decimal 8.8.8.8
+    expect(isBlockedHostname('example123.com')).toBe(false);
+    expect(isBlockedHostname('1e10.example.com')).toBe(false);
+  });
+
   it('blocks IPv6 loopback, ULA, link-local, multicast, docs, and mapped private', () => {
     expect(isBlockedHostname('::1')).toBe(true);
     expect(isBlockedHostname('::')).toBe(true);
@@ -52,5 +67,7 @@ describe('validateOutboundWebhookUrl', () => {
     expect(validateOutboundWebhookUrl('http://127.0.0.1/hook').ok).toBe(false);
     expect(validateOutboundWebhookUrl('http://192.168.0.10/x').ok).toBe(false);
     expect(validateOutboundWebhookUrl('https://user:pass@example.com/x').ok).toBe(false);
+    expect(validateOutboundWebhookUrl('http://2130706433/hook').ok).toBe(false);
+    expect(validateOutboundWebhookUrl('http://0x7f000001/hook').ok).toBe(false);
   });
 });

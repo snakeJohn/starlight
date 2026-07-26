@@ -580,6 +580,65 @@ describe('LxSyncService (protocol server)', () => {
     expect(String(ok?.body).length).toBeGreaterThan(20);
   });
 
+  it('a late close from a replaced socket does not evict the reconnected peer', () => {
+    const service = new LxSyncService();
+    const makePeer = () => ({
+      clientId: 'dev-1',
+      isListReady: () => true,
+      notifyListAction: async () => {},
+      close: () => {},
+    });
+    const oldPeer = makePeer();
+    const newPeer = makePeer();
+    service.registerListPeer(oldPeer);
+    service.registerListPeer(newPeer);
+
+    // Old socket's close event lands after the reconnect already took over.
+    service.unregisterListPeer('dev-1', oldPeer);
+    expect(service.getConnectedCount()).toBe(1);
+
+    service.unregisterListPeer('dev-1', newPeer);
+    expect(service.getConnectedCount()).toBe(0);
+  });
+
+  it('concurrent first-run config reads agree with the persisted config', async () => {
+    const service = new LxSyncService();
+    const [a, b] = await Promise.all([service.getConfig(), service.getConfig()]);
+    expect(a.password).toBe(b.password);
+    expect(a.serverId).toBe(b.serverId);
+
+    const raw = JSON.parse(String(await songloft.storage.get(LX_SYNC_CONFIG_KEY)));
+    expect(raw.password).toBe(a.password);
+    expect(raw.serverId).toBe(a.serverId);
+  });
+
+  it('a concurrent lastSyncAt stamp cannot revert a password rotation', async () => {
+    const service = new LxSyncService();
+    const before = await service.getConfig();
+
+    const storage = songloft.storage;
+    const realSet = storage.set.bind(storage);
+    let delayNextConfigWrite = true;
+    const spy = vi.spyOn(storage, 'set').mockImplementation(async (key: string, value: unknown) => {
+      if (key === LX_SYNC_CONFIG_KEY && delayNextConfigWrite) {
+        delayNextConfigWrite = false;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return realSet(key, value);
+    });
+
+    try {
+      await Promise.all([service.markSynced(), service.updateConfig({ regeneratePassword: true })]);
+    } finally {
+      spy.mockRestore();
+    }
+
+    const raw = JSON.parse(String(await songloft.storage.get(LX_SYNC_CONFIG_KEY)));
+    expect(raw.password).not.toBe(before.password);
+    expect(raw.serverId).not.toBe(before.serverId);
+    expect(raw.password).toBe((await service.getConfig()).password);
+  });
+
   it('broadcastListAction fans out only to other ready peers', async () => {
     const service = new LxSyncService();
     const received: Array<{ id: string; action: unknown }> = [];

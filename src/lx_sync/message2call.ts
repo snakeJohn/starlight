@@ -32,6 +32,10 @@ const nextTick = (fn: () => void): void => {
   else setTimeout(fn, 0);
 };
 
+/** Remote paths are attacker-controlled: never walk the prototype chain. */
+const hasOwnKey = (obj: unknown, key: string): boolean =>
+  obj != null && Object.prototype.hasOwnProperty.call(obj, key);
+
 export function createMsg2call(options: CreateMsg2CallOptions) {
   const events = new Map<string, EventHandler>();
   const queueGroups = new Map<string, QueueGroup>();
@@ -50,13 +54,17 @@ export function createMsg2call(options: CreateMsg2CallOptions) {
       return;
     }
     for (const part of names) {
-      obj = (obj as Record<string, unknown>)?.[part];
-      if (obj === undefined) {
+      if (!hasOwnKey(obj, part)) {
         sendMessage({ name: eventName, error: `${name} is not defined` });
         return;
       }
+      obj = (obj as Record<string, unknown>)[part];
     }
-    const target = (obj as Record<string, unknown>)?.[name];
+    if (!hasOwnKey(obj, name)) {
+      sendMessage({ name: eventName, error: `${name} is not defined` });
+      return;
+    }
+    const target = (obj as Record<string, unknown>)[name];
     if (typeof target === 'function') {
       let callArgs = Array.isArray(args) ? args : [];
       try {
@@ -128,11 +136,17 @@ export function createMsg2call(options: CreateMsg2CallOptions) {
         handler.timeout = null;
         handler('timeout', undefined);
       }, timeoutMs);
-      sendMessage({
-        name: eventName,
-        path: pathname,
-        data,
-      });
+      try {
+        sendMessage({
+          name: eventName,
+          path: pathname,
+          data,
+        });
+      } catch (err) {
+        // Send failed (socket already gone): settle now, otherwise the handler and
+        // its timeout stay registered for the full timeout window on every attempt.
+        handler(err instanceof Error ? err.message : String(err), undefined);
+      }
     });
 
     if (groupName != null) {
@@ -165,13 +179,21 @@ export function createMsg2call(options: CreateMsg2CallOptions) {
   }
 
   function onMessage(msg: Msg2CallMessage) {
-    if (!msg?.name) return;
-    if (msg.path?.length) {
-      void handleResponseData(msg.name, msg.path.slice(), (msg.data as unknown[]) || []);
-    } else {
-      const handler = events.get(msg.name);
-      if (handler) handler(msg.error ?? null, msg.data);
+    if (!msg || typeof msg.name !== 'string' || !msg.name) return;
+    // A non-array `path` (attacker frame) must not blow up inside the async handler.
+    if (Array.isArray(msg.path) && msg.path.length) {
+      const pathname = msg.path.map((part) => String(part));
+      void handleResponseData(msg.name, pathname, (msg.data as unknown[]) || []).catch((err) => {
+        onError(err instanceof Error ? err : new Error(String(err)), pathname, null);
+      });
+      return;
     }
+    if (msg.path != null && !Array.isArray(msg.path)) {
+      sendMessage({ name: msg.name, error: 'invalid path' });
+      return;
+    }
+    const handler = events.get(msg.name);
+    if (handler) handler(msg.error ?? null, msg.data);
   }
 
   function destroy() {

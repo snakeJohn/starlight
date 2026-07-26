@@ -31,4 +31,24 @@ describe('MinaService', () => {
     expect(client.setVolume).not.toHaveBeenCalled();
     expect(accountManager.updateDeviceConfig).not.toHaveBeenCalled();
   });
+
+  it('caches device identity for speakers that have no MIoT DID', async () => {
+    // 没有 miotDID 的设备如果不进缓存，每次 TTS/播放都会重新拉一遍 device_list
+    const client = {
+      getDeviceList: vi.fn(async () => [
+        { deviceID: 'dev-1', name: '音箱', miotDID: '', model: 'model-1', hardware: 'ZZZ', alias: '', presence: 'online' },
+      ]),
+      textToSpeech: vi.fn(async () => true),
+    };
+    const accountManager = {
+      getMinaClient: vi.fn(() => client),
+    } as unknown as AccountManager;
+    const service = new MinaService(accountManager, {} as ConfigManager);
+
+    await expect(service.textToSpeech('acc-1', 'dev-1', '你好')).resolves.toBe(true);
+    await expect(service.textToSpeech('acc-1', 'dev-1', '再见')).resolves.toBe(true);
+
+    expect(client.getDeviceList).toHaveBeenCalledTimes(1);
+    expect(client.textToSpeech).toHaveBeenCalledTimes(2);
+  });
 });

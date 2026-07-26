@@ -128,6 +128,20 @@ describe('registerDownloadHandlers', () => {
     expect(sources.deleteSource).toHaveBeenCalledWith('download-source');
   });
 
+  it('rejects a batch toggle containing unknown ids before applying any of them', async () => {
+    const { router, sources, runtimes } = createHarness();
+
+    const response = await router.handle(request('POST', '/api/download/sources/batch-toggle', {
+      ids: ['download-source', 'missing-source'],
+      enabled: true,
+    }));
+
+    expect(response.statusCode).toBe(400);
+    expect(parseResponseBody(response).error).toMatchObject({ code: 'BAD_REQUEST' });
+    expect(sources.setEnabled).not.toHaveBeenCalled();
+    expect(runtimes.loadEnabledSources).not.toHaveBeenCalled();
+  });
+
   it('exposes download settings and starts single-song downloads in the background', async () => {
     const { router, downloads } = createHarness();
     const song = {

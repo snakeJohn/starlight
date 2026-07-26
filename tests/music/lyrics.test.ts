@@ -108,7 +108,37 @@ describe('resolveMusicLyric', () => {
     });
 
     expect(result.lyric).toContain('Fallback');
-    expect(result.lxlyric).toContain('[00:00.0]<0,500>Fall<500,500>back');
+    expect(result.lxlyric).toContain('[00:00.000]<0,500>Fall<500,500>back');
+  });
+
+  it('aligns Netease translated lines that straddle a minute boundary', async () => {
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        md5: vi.fn(() => 'digest'),
+        aesEncrypt: vi.fn(() => ({ toString: () => 'ENCODED' })),
+      },
+    });
+    const fetchMock = vi.fn(async () => jsonResponse({
+      code: 200,
+      lrc: { lyric: '[00:59.95]Fallback' },
+      yrc: { lyric: '[59950,1000](59950,500,0)Fall(60450,500,0)back' },
+      // Translation sits 50ms past the minute mark — inside the 100ms tolerance.
+      ytlrc: { lyric: '[01:00.000]译文' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await resolveMusicLyric('wy', {
+      source: 'wy',
+      name: 'Fallback',
+      singer: 'Artist',
+      album: 'Album',
+      duration: 200,
+      songmid: '1003',
+    });
+
+    expect(result.lyric).toContain('[00:59.950]Fallback');
+    expect(result.tlyric).toContain('[00:59.950]译文');
   });
 
   it('converts Kuwo lrclist responses into lrc text', async () => {
@@ -450,8 +480,8 @@ describe('resolveMusicLyric', () => {
       hash: 'kg-hash-1',
     });
 
-    expect(result.lyric).toContain('[00:00.0]Fallback');
-    expect(result.lxlyric).toContain('[00:00.0]<0,500>Fall<500,500>back');
+    expect(result.lyric).toContain('[00:00.000]Fallback');
+    expect(result.lxlyric).toContain('[00:00.000]<0,500>Fall<500,500>back');
   });
 
   it('decodes Kuwo newlyric responses when the plugin runtime lacks typed-array slice', async () => {

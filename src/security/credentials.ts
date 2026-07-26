@@ -143,6 +143,8 @@ export function migrateAccountSecrets(account: AccountConfig): AccountConfig {
     password: typeof account.password === 'string' ? account.password : '',
     pass_token: typeof account.pass_token === 'string' ? account.pass_token : '',
     services: account.services || {},
+    // 旧存档可能没有 devices 字段，而设备读写路径直接遍历它（会抛 TypeError）。
+    devices: Array.isArray(account.devices) ? account.devices : [],
   };
 }
 

@@ -27,14 +27,17 @@ function getSongloftLibraryDependencies() {
 const songloftLibraryPanelMap = {
     songs: {
         panelRole: 'songloft-songs-panel',
+        listRole: 'songloft-songs',
         action: 'load-songloft-songs',
     },
     local: {
         panelRole: 'songloft-local-songs-panel',
+        listRole: 'songloft-local-songs',
         action: 'load-songloft-local-songs',
     },
     playlists: {
         panelRole: 'songloft-playlists-panel',
+        listRole: 'songloft-playlists',
         action: 'load-songloft-playlists',
     },
 };
@@ -64,7 +67,15 @@ function isSongloftLibraryPanelExpanded(kind) {
 async function toggleSongloftLibraryPanel(kind, load) {
     const nextExpanded = !isSongloftLibraryPanelExpanded(kind);
     if (!setSongloftLibraryPanelExpanded(kind, nextExpanded)) return;
-    if (nextExpanded) await load();
+    if (!nextExpanded) return;
+    try {
+        await load();
+    } catch (error) {
+        // 失败时必须替换掉“正在加载”占位，否则面板会一直停在加载态。
+        const node = $(`[data-role="${songloftLibraryPanelMap[kind].listRole}"]`);
+        if (node) node.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(error?.message || error)}</div>`;
+        throw error;
+    }
 }
 
 function renderSongloftSongList(role, songs, emptyText) {

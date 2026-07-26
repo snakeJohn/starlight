@@ -234,6 +234,13 @@ describe('registerMusicHandlers', () => {
   test('batch toggles music sources and reloads runtimes once', async () => {
     const { router, sources, runtimes } = createHarness();
 
+    // batch-toggle 会先整体校验 id 是否存在，所以 'imported' 必须真的导入过。
+    // （import 本身不触发 loadEnabledSources，下面的调用次数断言仍然成立。）
+    await router.handle(request('POST', '/api/music/sources/import', {
+      filename: 'new.js',
+      content: 'lx.send("inited")',
+    }));
+
     const response = await router.handle(request('POST', '/api/music/sources/batch-toggle', {
       ids: ['star', 'imported'],
       enabled: true,
@@ -244,6 +251,20 @@ describe('registerMusicHandlers', () => {
     expect(sources.setEnabled).toHaveBeenCalledWith('imported', true);
     expect(runtimes.loadEnabledSources).toHaveBeenCalledTimes(1);
     expect(parseResponseBody(response).data).toMatchObject({ ids: ['star', 'imported'], enabled: true });
+  });
+
+  test('batch toggle rejects unknown ids without writing any of them', async () => {
+    const { router, sources, runtimes } = createHarness();
+
+    const response = await router.handle(request('POST', '/api/music/sources/batch-toggle', {
+      ids: ['star', 'ghost'],
+      enabled: true,
+    }));
+
+    // 旧行为：'star' 先写入，随后 'ghost' 抛错 → 500 + 半生效状态且不重载运行时。
+    expect(response.statusCode).toBe(400);
+    expect(sources.setEnabled).not.toHaveBeenCalled();
+    expect(runtimes.loadEnabledSources).not.toHaveBeenCalled();
   });
 
   test('toggle source does not wait for slow runtime reloads', async () => {

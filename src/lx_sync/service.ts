@@ -102,6 +102,8 @@ export class LxSyncService {
   private hostBaseUrl = '';
   /** Serialize concurrent list sync / action writes. */
   private syncChain: Promise<void> = Promise.resolve();
+  /** Serialize config read-modify-write (lastSyncAt stamps vs password rotation). */
+  private configChain: Promise<void> = Promise.resolve();
   /**
    * Serialize auto Songloft import after LX list writes.
    * Kept separate from syncChain so WS list RPCs are not blocked by host import I/O.
@@ -142,6 +144,24 @@ export class LxSyncService {
     }
   }
 
+  /**
+   * Run exclusive config work. Without this a lastSyncAt stamp taken mid-sync can
+   * write back a stale snapshot and silently revert a just-rotated password/serverId.
+   */
+  private async withConfigLock<T>(fn: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const prev = this.configChain;
+    this.configChain = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
   getConnectedCount(): number {
     return this.connectedClientIds.size;
   }
@@ -160,7 +180,14 @@ export class LxSyncService {
     this.connectedClientIds.add(peer.clientId);
   }
 
-  unregisterListPeer(clientId: string): void {
+  /**
+   * Drop a peer registration. When `peer` is given it is only dropped if it is still
+   * the registered one — a late close from a replaced socket must not evict the
+   * reconnected session that reused the same clientId.
+   */
+  unregisterListPeer(clientId: string, peer?: LxListSyncPeer): void {
+    const current = this.listPeers.get(clientId);
+    if (peer && current && current !== peer) return;
     this.listPeers.delete(clientId);
     this.connectedClientIds.delete(clientId);
   }
@@ -209,47 +236,50 @@ export class LxSyncService {
   }
 
   async updateConfig(patch: LxSyncConfigPatch): Promise<LxSyncConfigPublic> {
-    const current = await this.ensureConfig();
-    let password = current.password;
-    if (patch.regeneratePassword) {
-      password = generatePassword();
-    } else if (typeof patch.password === 'string' && patch.password.trim()) {
-      password = patch.password.trim();
-    }
-    const passwordChanged = password !== current.password;
-    // Keep service enabled when only rotating the key unless the user explicitly disables it.
-    const enabled =
-      patch.enabled !== undefined
-        ? Boolean(patch.enabled)
-        : current.enabled !== false;
-    const next: LxSyncConfig = {
-      ...current,
-      password,
-      enabled,
-      // Rotate serverId on password change so LX clients drop cached client keys and
-      // re-run password (code) auth — otherwise they keep keyAuth with a revoked clientId.
-      ...(passwordChanged ? { serverId: createServerId() } : {}),
-      ...(patch.serverName !== undefined
-        ? { serverName: String(patch.serverName || '').trim() || DEFAULT_SERVER_NAME }
-        : {}),
-    };
-    await this.saveConfig(next);
-    if (passwordChanged) {
-      // Password regen/change must revoke long-lived device session keys and kick sockets.
-      await this.devices.clearAll();
-      this.dropAllConnections();
-      // Failed reconnect attempts with the old key must not leave the LAN peer blocked.
-      clearAuthRateLimits();
-      songloft.log.info(
-        `[LxSync] password changed: new serverId issued, revoked devices, cleared auth rate limits`,
-      );
-    }
-    // Disabling the service must also tear down live peers (new connections are already blocked).
-    if (current.enabled && next.enabled === false) {
-      this.dropAllConnections();
-      songloft.log.info('[LxSync] service disabled: dropped all live connections');
-    }
-    songloft.log.info(`[LxSync] config updated enabled=${next.enabled}`);
+    const next = await this.withConfigLock(async () => {
+      const current = await this.loadConfigLocked();
+      let password = current.password;
+      if (patch.regeneratePassword) {
+        password = generatePassword();
+      } else if (typeof patch.password === 'string' && patch.password.trim()) {
+        password = patch.password.trim();
+      }
+      const passwordChanged = password !== current.password;
+      // Keep service enabled when only rotating the key unless the user explicitly disables it.
+      const enabled =
+        patch.enabled !== undefined
+          ? Boolean(patch.enabled)
+          : current.enabled !== false;
+      const updated: LxSyncConfig = {
+        ...current,
+        password,
+        enabled,
+        // Rotate serverId on password change so LX clients drop cached client keys and
+        // re-run password (code) auth — otherwise they keep keyAuth with a revoked clientId.
+        ...(passwordChanged ? { serverId: createServerId() } : {}),
+        ...(patch.serverName !== undefined
+          ? { serverName: String(patch.serverName || '').trim() || DEFAULT_SERVER_NAME }
+          : {}),
+      };
+      await this.saveConfig(updated);
+      if (passwordChanged) {
+        // Password regen/change must revoke long-lived device session keys and kick sockets.
+        await this.devices.clearAll();
+        this.dropAllConnections();
+        // Failed reconnect attempts with the old key must not leave the LAN peer blocked.
+        clearAuthRateLimits();
+        songloft.log.info(
+          `[LxSync] password changed: new serverId issued, revoked devices, cleared auth rate limits`,
+        );
+      }
+      // Disabling the service must also tear down live peers (new connections are already blocked).
+      if (current.enabled && updated.enabled === false) {
+        this.dropAllConnections();
+        songloft.log.info('[LxSync] service disabled: dropped all live connections');
+      }
+      songloft.log.info(`[LxSync] config updated enabled=${updated.enabled}`);
+      return updated;
+    });
     return this.toPublic(next);
   }
 
@@ -315,8 +345,7 @@ export class LxSyncService {
   async setLocalListData(listData: LxListData): Promise<void> {
     const mapped = mapListDataToPlaylists(listData, { includeEmpty: true });
     await this.replaceLxManagedSnapshot(mapped);
-    const config = await this.ensureConfig();
-    await this.saveConfig({ ...config, lastSyncAt: nowIso() });
+    await this.stampLastSyncAt();
     this.scheduleAutoImportToSongloft();
   }
 
@@ -340,8 +369,15 @@ export class LxSyncService {
   }
 
   async markSynced(): Promise<void> {
-    const config = await this.ensureConfig();
-    await this.saveConfig({ ...config, lastSyncAt: nowIso() });
+    await this.stampLastSyncAt();
+  }
+
+  /** Stamp lastSyncAt under the config lock so it cannot revert a concurrent config write. */
+  private async stampLastSyncAt(): Promise<void> {
+    await this.withConfigLock(async () => {
+      const config = await this.loadConfigLocked();
+      await this.saveConfig({ ...config, lastSyncAt: nowIso() });
+    });
   }
 
   /** Device list snapshot key from last successful full list sync (if any). */
@@ -570,6 +606,15 @@ export class LxSyncService {
   }
 
   private async ensureConfig(): Promise<LxSyncConfig> {
+    return this.withConfigLock(() => this.loadConfigLocked());
+  }
+
+  /**
+   * Caller must hold the config lock. Concurrent first-run callers would otherwise each
+   * generate (and persist) a different password/serverId, so the value returned to the UI
+   * would not be the one stored.
+   */
+  private async loadConfigLocked(): Promise<LxSyncConfig> {
     const raw = await songloft.storage.get(LX_SYNC_CONFIG_KEY);
     const { config, needsPersist } = asConfig(safeParse(raw));
     // Persist on first create and when migrating legacy / incomplete config blobs.

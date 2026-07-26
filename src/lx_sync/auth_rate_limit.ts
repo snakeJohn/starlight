@@ -11,7 +11,23 @@ type AuthPeerState = {
   blockedUntil: number;
 };
 
+/** Hard cap on tracked peers; stale entries are pruned before it is reached. */
+const AUTH_MAX_PEERS = 1024;
+
 const authPeers = new Map<string, AuthPeerState>();
+
+/** Entry is no longer meaningful: not blocked and its failure window has elapsed. */
+function isStale(state: AuthPeerState, now: number): boolean {
+  if (state.blockedUntil > now) return false;
+  if (state.blockedUntil) return true;
+  return !state.firstFailureAt || now - state.firstFailureAt > AUTH_WINDOW_MS;
+}
+
+function pruneAuthPeers(now: number): void {
+  for (const [peer, state] of authPeers) {
+    if (isStale(state, now)) authPeers.delete(peer);
+  }
+}
 
 export function getPeerState(peer: string): AuthPeerState {
   let state = authPeers.get(peer);
@@ -23,17 +39,16 @@ export function getPeerState(peer: string): AuthPeerState {
 }
 
 export function isPeerBlocked(peer: string, now = Date.now()): boolean {
-  const state = getPeerState(peer);
+  // Read-only lookup: every /ah hit calls this, so it must not create a permanent entry.
+  const state = authPeers.get(peer);
+  if (!state) return false;
   if (state.blockedUntil > now) return true;
-  if (state.blockedUntil && state.blockedUntil <= now) {
-    state.failures = 0;
-    state.firstFailureAt = 0;
-    state.blockedUntil = 0;
-  }
+  if (isStale(state, now)) authPeers.delete(peer);
   return false;
 }
 
 export function recordAuthFailure(peer: string, now = Date.now()): void {
+  if (!authPeers.has(peer) && authPeers.size >= AUTH_MAX_PEERS) pruneAuthPeers(now);
   const state = getPeerState(peer);
   if (state.blockedUntil > now) return;
   if (!state.firstFailureAt || now - state.firstFailureAt > AUTH_WINDOW_MS) {
@@ -49,6 +64,11 @@ export function recordAuthFailure(peer: string, now = Date.now()): void {
 
 export function recordAuthSuccess(peer: string): void {
   authPeers.delete(peer);
+}
+
+/** Tracked peer count (diagnostics / tests). */
+export function getAuthPeerCount(): number {
+  return authPeers.size;
 }
 
 /** Clear /ah rate-limit state (password rotate, tests). */

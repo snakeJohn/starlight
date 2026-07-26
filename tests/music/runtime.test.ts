@@ -520,6 +520,17 @@ describe('LX_SHIM', () => {
     }
   });
 
+  test('bufToString decodes typed array buffers instead of joining raw byte values', () => {
+    const { shimGlobal, restore } = installShim();
+
+    try {
+      expect(shimGlobal.lx?.utils.buffer.bufToString(new TextEncoder().encode('body text'), 'utf-8')).toBe('body text');
+      expect(shimGlobal.lx?.utils.buffer.bufToString(new Uint8Array([0x61, 0x62]), 'hex')).toBe('6162');
+    } finally {
+      restore();
+    }
+  });
+
   test('lx.send uses the Songloft jsenv __go_send bridge when present', () => {
     const { shimGlobal, restore } = installShim();
     const emittedEvents: Array<{ name: string; data: string }> = [];

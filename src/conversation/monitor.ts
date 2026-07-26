@@ -8,6 +8,7 @@ import { AccountManager } from '../account/manager';
 import { ConfigManager } from '../config/manager';
 import type { ConversationMessage, AskMessage, WebhookConfig } from '../types';
 import { MinaHTTPClient } from '../mina/client';
+import { validateOutboundWebhookUrl } from '../utils/url_safety';
 
 // ===== 类型定义 =====
 
@@ -462,21 +463,29 @@ export class ConversationMonitor {
    * 向单个 Webhook URL 发送 POST 请求（带超时）
    */
   private async sendWebhook(wh: WebhookConfig, payload: string): Promise<void> {
+    // Re-validate at delivery: entries stored before the URL rules tightened
+    // must not become a standing SSRF path into the host network.
+    const validated = validateOutboundWebhookUrl(wh.url);
+    if (!validated.ok) {
+      throw new Error(`webhook url rejected: ${validated.error}`);
+    }
+
     const timeoutMs = ConversationMonitor.WEBHOOK_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
+      let response: Response;
       if (typeof AbortController !== 'undefined') {
         const controller = new AbortController();
         timer = setTimeout(() => controller.abort(), timeoutMs);
-        await fetch(wh.url, {
+        response = await fetch(validated.url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: payload,
           signal: controller.signal,
         });
       } else {
-        await Promise.race([
-          fetch(wh.url, {
+        response = await Promise.race([
+          fetch(validated.url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: payload,
@@ -485,6 +494,9 @@ export class ConversationMonitor {
             timer = setTimeout(() => reject(new Error('webhook timeout')), timeoutMs);
           }),
         ]);
+      }
+      if (response && response.ok === false) {
+        throw new Error(`webhook responded ${response.status}`);
       }
       songloft.log.info(`[ConversationMonitor] Webhook sent id=${wh.id} url=${wh.url}`);
     } catch (e) {

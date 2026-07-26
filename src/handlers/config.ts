@@ -6,6 +6,7 @@ import { parseJsonBody } from '../system/body';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
 import { ConfigManager } from '../config/manager';
 import { ConversationMonitor } from '../conversation/monitor';
+import { httpStatusForError } from '../system/response';
 import { Scheduler } from '../schedule/scheduler';
 import {
   migrateAISecrets,
@@ -21,13 +22,21 @@ import { setPollDebug } from '../utils/debug';
 /** 判断是否为本地回环地址 */
 function isLoopbackAddress(host: string): boolean {
   if (!host) return false;
-  let hostname = host;
   const protoIdx = host.indexOf('://');
-  if (protoIdx >= 0) {
-    const rest = host.slice(protoIdx + 3);
-    const slashIdx = rest.indexOf('/');
-    const colonIdx = rest.indexOf(':');
-    hostname = rest.slice(0, slashIdx >= 0 ? slashIdx : (colonIdx >= 0 ? colonIdx : undefined));
+  let hostname = protoIdx >= 0 ? host.slice(protoIdx + 3) : host;
+  // 必须先去路径再去端口：先取 ':' 会漏掉 "localhost:18191/x" 这类地址
+  const slashIdx = hostname.indexOf('/');
+  if (slashIdx >= 0) {
+    hostname = hostname.slice(0, slashIdx);
+  }
+  if (hostname.startsWith('[')) {
+    const bracketIdx = hostname.indexOf(']');
+    hostname = bracketIdx >= 0 ? hostname.slice(1, bracketIdx) : hostname.slice(1);
+  } else {
+    const colonIdx = hostname.indexOf(':');
+    if (colonIdx >= 0) {
+      hostname = hostname.slice(0, colonIdx);
+    }
   }
   hostname = hostname.toLowerCase().trim();
   return hostname === 'localhost' || hostname.startsWith('127.') || hostname === '::1';
@@ -113,7 +122,7 @@ export function registerConfigHandlers(
         },
       });
     } catch (e: any) {
-      return jsonResponse({ success: false, error: e.message || String(e) }, 500);
+      return jsonResponse({ success: false, error: e.message || String(e) }, httpStatusForError(e));
     }
   });
 
@@ -136,9 +145,9 @@ export function registerConfigHandlers(
         options.onServerHostChange?.(serverHost);
       }
 
-      // 更新 timezone
+      // 更新 timezone（只接受字符串：非字符串会让 Scheduler 的时区换算抛错并静默停摆）
       if (body.timezone !== undefined) {
-        config.timezone = body.timezone;
+        config.timezone = typeof body.timezone === 'string' ? body.timezone.trim() : '';
       }
 
       // 更新 conversation_monitor_enabled（联动 Monitor 启停）
@@ -319,7 +328,8 @@ export function registerConfigHandlers(
       }
       return jsonResponse(resp);
     } catch (e: any) {
-      return jsonResponse({ success: false, error: e.message || String(e) }, 500);
+      // 请求体不是合法 JSON 属于客户端错误，不能一律报 500
+      return jsonResponse({ success: false, error: e.message || String(e) }, httpStatusForError(e));
     }
   };
 

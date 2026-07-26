@@ -140,6 +140,15 @@ function fuzzyScore(keyword: string, candidate: string): number {
   }
 
   // 第三级：编辑距离模糊匹配
+  // 编辑距离不小于两串长度差，长度差过大时必然达不到 0.5 相似度阈值，
+  // 可直接短路，省掉 O(n*m) 的距离矩阵（语音点歌会对全库逐首调用本函数）。
+  const keywordLen = Array.from(keywordLower).length;
+  const candidateLen = Array.from(candidateLower).length;
+  const maxLen = Math.max(keywordLen, candidateLen);
+  if (maxLen === 0 || Math.abs(keywordLen - candidateLen) * 2 >= maxLen) {
+    return 0;
+  }
+
   const sim = similarity(keyword, candidate);
   if (sim > 0.5) {
     return sim * 30.0;
@@ -478,6 +487,21 @@ export class IndexingManager {
     let bestDirectLoc: SongLocation | null = null;
     let bestDirectScore = 0;
 
+    // 同一首歌常同时存在于多个歌单，按 标题+歌手 缓存评分，避免重复算编辑距离。
+    const directScoreCache = new Map<string, number>();
+    // NUL separator: a plain space would let ("a b","c") collide with ("a","b c").
+    const scoreKey = (title: string, artist: string): string => `${title}\u0000${artist}`;
+    const cachedScore = (title: string, artist: string): number => {
+      const key = scoreKey(title, artist);
+      const cached = directScoreCache.get(key);
+      if (cached !== undefined) {
+        return cached;
+      }
+      const computed = scoreSongMatch(songName, title, artist);
+      directScoreCache.set(key, computed);
+      return computed;
+    };
+
     for (const pl of this.playlists) {
       const plSongs = this.playlistSongsCache.get(pl.id) ?? [];
       for (let idx = 0; idx < plSongs.length; idx++) {
@@ -495,7 +519,7 @@ export class IndexingManager {
         }
 
         // b) 直接模糊评分（联合标题+歌手）
-        const score = scoreSongMatch(songName, s.title, s.artist);
+        const score = cachedScore(s.title, s.artist);
         if (score >= MIN_MATCH_SCORE && score > bestDirectScore) {
           bestDirectScore = score;
           bestDirectLoc = {

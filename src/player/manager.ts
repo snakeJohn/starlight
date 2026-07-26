@@ -240,6 +240,8 @@ export class PlaylistManager {
     this.stopCheckTimer();
     this.state = 'idle';
     this.playStartTimeMs = 0;
+    // Drop any frozen pause progress; it belongs to the previous song.
+    this.pausedElapsedSec = 0;
     this._lastLoadNotFound = false;
 
     // 加载歌单歌曲
@@ -302,6 +304,7 @@ export class PlaylistManager {
     this.clearVoiceSuspend();
     this.state = 'idle';
     this.playStartTimeMs = 0;
+    this.pausedElapsedSec = 0;
 
     if (!songs.length) {
       songloft.log.warn('[PlaylistManager] Empty standalone song queue');
@@ -703,6 +706,8 @@ export class PlaylistManager {
     this.playMode = playMode;
     this.playlistId = playlistId;
     this.state = 'idle';
+    this.playStartTimeMs = 0;
+    this.pausedElapsedSec = 0;
     this.autoAdvance = true;
     this.randomPlayed = new Set();
   }

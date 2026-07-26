@@ -126,7 +126,9 @@ export function mapLxMusicToSong(music: LxMusicInfo): CustomPlaylistSong {
   const duration = parseIntervalSeconds(music.interval);
   const cover_url = stringField(music.meta?.picUrl) || '';
   const source = stringField(music.source) || 'unknown';
-  const musicId = stringField(music.id) || `${title}:${artist}`;
+  // Numeric ids appear in third-party LX exports; stringField would drop them and
+  // collapse distinct songs onto the same `title:artist` stable_key.
+  const musicId = stringishField(music.id) || `${title}:${artist}`;
 
   if (isOnlinePlatform(source)) {
     const source_data = buildSourceData(music, source, duration);

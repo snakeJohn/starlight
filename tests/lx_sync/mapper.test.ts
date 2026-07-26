@@ -82,6 +82,11 @@ describe('lx_sync mapper', () => {
     });
   });
 
+  it('keeps numeric music ids in the stable key', () => {
+    const song = mapLxMusicToSong({ ...kwSong, id: 987654 as unknown as string });
+    expect(song.stable_key).toBe('lx:kw:987654');
+  });
+
   it('maps list data into love/default/user playlists', () => {
     const data: LxListData = {
       loveList: [kwSong],

@@ -84,6 +84,30 @@ export const LX_SHIM = String.raw`
       return buffer._hex;
     }
 
+    if (typeof Buffer !== 'undefined' && typeof Buffer.isBuffer === 'function' && Buffer.isBuffer(buffer)) {
+      return buffer.toString(format);
+    }
+
+    // Uint8Array.prototype.toString() ignores the encoding and returns comma
+    // separated bytes, so typed arrays must be converted explicitly.
+    if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(buffer)) {
+      var hex = bufferToHex(buffer);
+      if (format === 'hex') {
+        return hex;
+      }
+      if (typeof __go_buffer_to_string === 'function') {
+        return __go_buffer_to_string(hex, format);
+      }
+      if (typeof TextDecoder !== 'undefined') {
+        try {
+          return new TextDecoder(format).decode(buffer);
+        } catch (_) {
+          return hex;
+        }
+      }
+      return hex;
+    }
+
     if (buffer && typeof buffer.toString === 'function' && buffer.toString !== Object.prototype.toString) {
       return buffer.toString(format);
     }

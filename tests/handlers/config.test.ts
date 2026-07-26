@@ -220,6 +220,38 @@ describe('registerConfigHandlers', () => {
     }));
   });
 
+  it('flags host:port/path loopback addresses so the speaker warning is not skipped', async () => {
+    const { router } = createHarness(pluginConfig({ server_host: 'http://localhost:18191/songloft' }));
+
+    const saved = await router.handle(request('POST', '/config', { timezone: 'Asia/Shanghai' }));
+    expect(parseResponseBody(saved).warning).toContain('本地回环地址');
+
+    const status = await router.handle(request('GET', '/config'));
+    expect(parseResponseBody(status).data.server_host_status).toBe('loopback');
+  });
+
+  it('answers 400 instead of 500 when the config body is not valid JSON', async () => {
+    const { router, configManager } = createHarness();
+
+    const response = await router.handle({
+      ...request('POST', '/config'),
+      body: '{ not json',
+    } as unknown as HTTPRequest);
+
+    expect(response.statusCode).toBe(400);
+    expect(parseResponseBody(response).success).toBe(false);
+    expect(configManager.saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('ignores non-string timezone values so the scheduler timezone lookup cannot throw', async () => {
+    const { router, configManager } = createHarness();
+
+    const response = await router.handle(request('PUT', '/config', { timezone: { tz: 'Asia/Tokyo' } }));
+
+    expect(response.statusCode).toBe(200);
+    expect(configManager.saveConfig).toHaveBeenCalledWith(expect.objectContaining({ timezone: '' }));
+  });
+
   it('saves clamped runtime tuning fields before restarting conversation monitoring', async () => {
     const events: string[] = [];
     const { router, configManager, monitor } = createHarness(pluginConfig({

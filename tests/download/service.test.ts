@@ -482,6 +482,45 @@ describe('DownloadService', () => {
     });
   });
 
+  it('lists the Songloft library once per batch instead of once per song', async () => {
+    installRemoteImports([1101, 1102, 1103]);
+    const songsApi = songloft.songs as typeof songloft.songs & { list: ReturnType<typeof vi.fn>; download: ReturnType<typeof vi.fn> };
+    songsApi.list = vi.fn(async () => []);
+    songsApi.download = vi.fn(async () => ({ path: 'downloads/song.flac', status: 'ok' }));
+    const service = new DownloadService(createRuntime(), createPlatforms([]));
+    const batch = [
+      song,
+      { ...song, title: 'Second Song' },
+      { ...song, title: 'Third Song' },
+    ] satisfies SearchResultSong[];
+
+    await expect(service.startBatch(batch)).resolves.toEqual({ started: true, total: 3 });
+    for (let tick = 0; tick < 8; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(service.getBatchProgress()).toMatchObject({ current: 3, total: 3, done: true, success: 3 });
+    expect(songsApi.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses a song downloaded earlier in the same batch instead of downloading it twice', async () => {
+    installRemoteImports([1201, 1202]);
+    const songsApi = songloft.songs as typeof songloft.songs & { list: ReturnType<typeof vi.fn>; download: ReturnType<typeof vi.fn> };
+    songsApi.list = vi.fn(async () => []);
+    songsApi.download = vi.fn(async () => ({ path: 'downloads/song.flac', status: 'ok' }));
+    const service = new DownloadService(createRuntime(), createPlatforms([]));
+
+    await expect(service.startBatch([song, song])).resolves.toEqual({ started: true, total: 2 });
+    for (let tick = 0; tick < 8; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const progress = service.getBatchProgress();
+    expect(progress).toMatchObject({ current: 2, total: 2, done: true });
+    expect(progress.results[1]).toMatchObject({ song_id: 1201, status: 'existing' });
+    expect(songsApi.download).toHaveBeenCalledTimes(1);
+  });
+
   it('records the last failed candidate reason for a batch item and continues with the next song', async () => {
     installRemoteImport(901);
     const runtime = {

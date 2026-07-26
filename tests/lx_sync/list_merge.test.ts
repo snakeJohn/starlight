@@ -75,8 +75,56 @@ describe('list_merge actions', () => {
       },
     });
     expect(next.loveList.map((s) => s.id)).toEqual(['a']);
-    // handleMergeMusic(bottom): source (moved) then target → b before c
-    expect(next.defaultList.map((s) => s.id)).toEqual(['b', 'c']);
+    // addMusicLocationType 'bottom' appends the moved songs to the destination.
+    expect(next.defaultList.map((s) => s.id)).toEqual(['c', 'b']);
+  });
+
+  it('list_music_add appends on bottom and prepends on top', () => {
+    const base = emptyListData();
+    base.loveList = [song('a')];
+
+    const appended = applyListActionToData(base, {
+      action: 'list_music_add',
+      data: { id: 'love', musicInfos: [song('b')], addMusicLocationType: 'bottom' },
+    });
+    expect(appended.loveList.map((s) => s.id)).toEqual(['a', 'b']);
+
+    const prepended = applyListActionToData(base, {
+      action: 'list_music_add',
+      data: { id: 'love', musicInfos: [song('b')], addMusicLocationType: 'top' },
+    });
+    expect(prepended.loveList.map((s) => s.id)).toEqual(['b', 'a']);
+  });
+
+  it('list_music_move inside one list reorders instead of restoring removed songs', () => {
+    const base = emptyListData();
+    base.loveList = [song('a'), song('b'), song('c')];
+    const next = applyListActionToData(base, {
+      action: 'list_music_move',
+      data: {
+        fromId: 'love',
+        toId: 'love',
+        musicInfos: [song('a')],
+        addMusicLocationType: 'bottom',
+      },
+    });
+    expect(next.loveList.map((s) => s.id)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('list_create keeps the client order of multiple created lists', () => {
+    const base = emptyListData();
+    base.userList = [{ id: 'u0', name: 'Z', list: [] }];
+    const next = applyListActionToData(base, {
+      action: 'list_create',
+      data: {
+        position: 0,
+        listInfos: [
+          { id: 'u1', name: 'A', list: [] },
+          { id: 'u2', name: 'B', list: [] },
+        ],
+      },
+    });
+    expect(next.userList.map((u) => u.id)).toEqual(['u1', 'u2', 'u0']);
   });
 
   it('merge and overwrite helpers keep user lists as expected', () => {
@@ -107,6 +155,24 @@ describe('list_merge actions', () => {
     expect(merged.userList).toHaveLength(1);
     expect(merged.userList[0].id).toBe('u1');
     expect(merged.userList[0].list.map((s) => s.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('mergeListData gives the slot to the side with the newer locationUpdateTime', () => {
+    const source = emptyListData();
+    source.userList = [
+      { id: 'u1', name: 'A', locationUpdateTime: 100, list: [] },
+      { id: 'u2', name: 'B', locationUpdateTime: 100, list: [] },
+    ];
+    const target = emptyListData();
+    // Target reordered u2 to the front more recently → that position must win.
+    target.userList = [
+      { id: 'u2', name: 'B', locationUpdateTime: 500, list: [] },
+      { id: 'u1', name: 'A', locationUpdateTime: 100, list: [] },
+    ];
+
+    const merged = mergeListData(source, target);
+    expect(merged.userList.map((u) => u.id)).toEqual(['u2', 'u1']);
+    expect(merged.userList[0].locationUpdateTime).toBe(500);
   });
 
   it('mergeListData dedupes identical song ids within a shared user list', () => {
