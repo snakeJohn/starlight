@@ -201,7 +201,14 @@ export function registerDeviceHandlers(
       if (!device_id) {
         return jsonResponse({ success: false, error: 'device_id is required' });
       }
-      const ok = await minaService.stopPlay(account_id, device_id);
+      // 与 /mina/pause 同理：必须经 PlaylistManager，否则管理器仍是 playing、
+      // 自动切歌定时器还在跑，停完过一会儿又把下一首推给音箱。
+      const stopManager = playlistManagerMap
+        ? await playlistManagerMap.getOrCreate(account_id, device_id)
+        : null;
+      const ok = stopManager
+        ? await stopManager.stop()
+        : await minaService.stopPlay(account_id, device_id);
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to stop' });
       }

@@ -395,7 +395,10 @@ export class MinaHTTPClient {
    */
   async playerPause(deviceId: string): Promise<boolean> {
     const message = { action: 'pause', media: 'app_ios' };
-    return (await this.ubusRequest(deviceId, 'player_play_operation', 'mediaplayer', message)) !== null;
+    // 与 playURL 用同一个判据：`!== null` 只说明 HTTP 层收到了回复，
+    // 设备在 data.code 里明确拒绝时仍会被当成成功，上层据此谎报「已暂停」。
+    const result = await this.ubusRequest(deviceId, 'player_play_operation', 'mediaplayer', message);
+    return this.isDeviceResultOK(result, 'player_play_operation(pause)');
   }
 
   /**
@@ -412,7 +415,8 @@ export class MinaHTTPClient {
     // 部分小爱音箱型号单独调用 stop 不会真正停止播放，先暂停再停止
     await this.playerPause(deviceId);
     const message = { action: 'stop', media: 'app_ios' };
-    return (await this.ubusRequest(deviceId, 'player_play_operation', 'mediaplayer', message)) !== null;
+    const result = await this.ubusRequest(deviceId, 'player_play_operation', 'mediaplayer', message);
+    return this.isDeviceResultOK(result, 'player_play_operation(stop)');
   }
 
   // ===== 音量 =====

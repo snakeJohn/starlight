@@ -372,7 +372,12 @@ export class TaskExecutor {
    */
   private async executeStop(target: DeviceTarget): Promise<string> {
     const pm = await this.playlistManagerMap.getOrCreate(target.accountId, target.deviceId);
-    await pm.stop();
+    // stop() 返回设备是否真的停了。丢掉它的话，睡眠定时器会在音箱仍在播放时
+    // 记一条「停止播放成功」，用户第二天只看到成功日志、却整晚被吵。
+    const stopped = await pm.stop();
+    if (!stopped) {
+      throw new Error('停止播放失败：音箱未响应停止指令');
+    }
     return '停止播放成功';
   }
 

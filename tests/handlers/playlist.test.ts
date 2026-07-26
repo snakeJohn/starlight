@@ -108,6 +108,21 @@ describe('stop failure must not hide the real device state', () => {
     expect(parseResponseBody(status).data.state).not.toBe('stopped');
   });
 
+  it('also lets the real state through on the cached branch of /player/status', async () => {
+    // /player/status 有两条分支：4 秒缓存命中 与 缓存未命中。
+    // 压制规则在两条里各写了一遍，只改一条等于没改——缓存窗口内 bug 照旧。
+    const { updateDeviceStatusCache } = await import('../../src/handlers/playlist');
+    const { router, manager } = await harnessWithRealManager(false);
+    await manager.playStandalone([track] as never, 0, 'order');
+    await router.handle(request('POST', '/player/stop', { account_id: 'acc-1', device_id: 'dev-1' }));
+
+    // 预热缓存为「设备仍在播」，让这次状态查询走缓存命中分支
+    updateDeviceStatusCache('acc-1', 'dev-1', { state: 'playing', position: 33 });
+
+    const status = await router.handle(statusRequest());
+    expect(parseResponseBody(status).data.state).not.toBe('stopped');
+  });
+
   it('suppresses a stale device playing state when the stop actually succeeded', async () => {
     const { router, manager } = await harnessWithRealManager(true);
     await manager.playStandalone([track] as never, 0, 'order');

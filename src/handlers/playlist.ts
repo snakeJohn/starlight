@@ -449,9 +449,12 @@ export function registerPlaylistHandlers(
           }
         }
 
-        // 本地已 stop 时，不让设备残留的播放状态覆盖，避免前端进度条跳动
-        const reportState = localStatus.state === 'stopped' ? 'stopped' : cached.state;
-        const reportPosition = localStatus.state === 'stopped' ? 0 : position;
+        // 本地已 stop 时，不让设备残留的播放状态覆盖，避免前端进度条跳动。
+        // 与下方缓存未命中分支用同一个判据：仅当停止确实成功才压制，否则
+        // 4 秒缓存窗口内仍会谎报 stopped（两条分支必须同时改，只改一条等于没改）。
+        const cachedStopAuthoritative = manager.isStopAuthoritative();
+        const reportState = cachedStopAuthoritative ? 'stopped' : cached.state;
+        const reportPosition = cachedStopAuthoritative ? 0 : position;
 
         return jsonResponse({
           success: true,
