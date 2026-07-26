@@ -25,6 +25,7 @@ let currentDuration = 0;
 let currentLyrics = [];
 let currentLyricUrl = '';
 let currentLyricText = '';
+let currentLyricIndex = null;
 let currentCoverUrl = '';
 let currentCoverObjectUrl = '';
 let lastUpdateTime = 0;
@@ -195,18 +196,20 @@ function renderActiveLyric(position = currentPosition) {
     setText('[data-role="speaker-player-lyric"]', lyric);
 
     const list = $('[data-role="fullscreen-player-lyrics"]');
-    if (!list) return;
+    if (!list || index === currentLyricIndex) return;
 
     const previous = list.querySelector?.('.active');
     previous?.classList?.remove?.('active');
     const line = list.querySelector?.(`[data-lyric-index="${index}"]`);
     line?.classList?.add?.('active');
     line?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    currentLyricIndex = index;
 }
 
 function renderFullscreenLyrics(lyrics) {
     const list = $('[data-role="fullscreen-player-lyrics"]');
     if (!list) return;
+    currentLyricIndex = null;
     if (!lyrics.length) {
         list.innerHTML = '<div class="fullscreen-player-lyric-empty">暂无歌词</div>';
         return;

@@ -466,6 +466,44 @@ describe('speaker player module', () => {
     expect(elements.get('[data-role="global-player-lyric"]')?.textContent).toBe('第二句');
   });
 
+  it('scrolls the fullscreen lyric only when the active line changes', async () => {
+    const { elements } = installPlayerRenderDom();
+    const lyricList = new FakeElement();
+    const lines = [new FakeElement(), new FakeElement()];
+    lines.forEach((line, index) => { line.dataset.lyricIndex = String(index); });
+    lyricList.querySelector = vi.fn((selector: string) => {
+      if (selector === '.active') return lines.find(line => line.classList.contains('active')) || null;
+      const match = selector.match(/data-lyric-index="(\d+)"/);
+      return match ? lines[Number(match[1])] || null : null;
+    });
+    const scrollIntoView = vi.fn();
+    lines.forEach(line => { (line as unknown as { scrollIntoView: typeof scrollIntoView }).scrollIntoView = scrollIntoView; });
+    elements.set('[data-role="fullscreen-player-lyrics"]', lyricList);
+    let now = 1000;
+    let frame = null as null | (() => void);
+    vi.stubGlobal('performance', { now: () => now });
+    Object.assign(window, {
+      requestAnimationFrame: vi.fn((callback: () => void) => { frame = callback; return 1; }),
+      cancelAnimationFrame: vi.fn(),
+    });
+
+    const { renderPlayerStatus } = await import('../../static/js/speaker_modules/player.js') as SpeakerPlayerModule;
+    renderPlayerStatus({
+      state: 'playing', is_playing: true, position: 1, duration: 30,
+      current_song: { title: '测试歌曲', lyric_text: '[00:01.00]第一句\n[00:05.00]第二句' },
+    });
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+    now = 2000;
+    frame?.();
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+    now = 6000;
+    frame?.();
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(lines[1].classList.contains('active')).toBe(true);
+  });
+
   it('does not render a stale current song for stopped status', async () => {
     const { elements } = installPlayerRenderDom();
     const { renderPlayerStatus } = await import('../../static/js/speaker_modules/player.js') as SpeakerPlayerModule;

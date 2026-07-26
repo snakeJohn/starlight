@@ -9,6 +9,21 @@ function invalid(message: string): never {
   throw new StarlightError('BAD_REQUEST', message);
 }
 
+function responseHeader(response: Response, name: string): string {
+  const headers = (response as { headers?: unknown }).headers;
+  if (!headers || typeof headers !== 'object') return '';
+  const get = (headers as { get?: unknown }).get;
+  if (typeof get === 'function') {
+    const value = get.call(headers, name);
+    return value === null || value === undefined ? '' : String(value);
+  }
+  const expected = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (key.toLowerCase() === expected) return String(value ?? '');
+  }
+  return '';
+}
+
 export function normalizeGithubSourceUrl(value: unknown): { url: string; filename: string } {
   if (typeof value !== 'string' || !value.trim()) invalid('url is required');
 
@@ -55,9 +70,9 @@ export async function fetchGithubSource(value: unknown): Promise<{ filename: str
   }
   if (!response.ok) invalid(`online source returned HTTP ${response.status}`);
 
-  const declaredSize = Number(response.headers.get('content-length'));
+  const declaredSize = Number(responseHeader(response, 'content-length'));
   if (Number.isFinite(declaredSize) && declaredSize > MAX_SOURCE_BYTES) invalid('online source is too large');
-  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+  const contentType = responseHeader(response, 'content-type').toLowerCase();
   if (contentType && !/(javascript|text\/plain|octet-stream)/.test(contentType)) {
     invalid('online source did not return JavaScript');
   }

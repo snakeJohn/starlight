@@ -194,6 +194,23 @@ describe('registerMusicHandlers', () => {
     );
   });
 
+  test('imports an online source with Songloft-style plain response headers', async () => {
+    const { router, sources } = createHarness();
+    globalThis.fetch = vi.fn(async () => ({
+      status: 200,
+      ok: true,
+      headers: { 'content-type': 'text/plain', 'content-length': '24' },
+      text: () => 'globalThis.lx.send();',
+    } as unknown as Response));
+
+    const response = await router.handle(request('POST', '/api/music/sources/import-url', {
+      url: 'https://raw.githubusercontent.com/example/source/main/source.js',
+    }));
+
+    expect(response.statusCode).toBe(201);
+    expect(sources.importFromJS).toHaveBeenCalledWith('source.js', 'globalThis.lx.send();');
+  });
+
   test('rejects non-GitHub and private online source URLs', async () => {
     const { router, sources } = createHarness();
     for (const url of ['https://example.com/source.js', 'http://127.0.0.1/source.js']) {
