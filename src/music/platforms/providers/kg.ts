@@ -26,8 +26,36 @@ function kgAuthorNames(value: any): string {
   return stringValue(value);
 }
 
+// 酷狗的封面地址把尺寸写成 `{size}` 占位符（Image / album_sizable_cover / trans_param.union_cover），
+// 少数接口则直接写死尺寸段（c1.kgimg.com/custom/240/...）。实测 imge.kugou.com 与 c1.kgimg.com
+// 对 240/400/800/1000 都返回对应尺寸，取 800 可得 800x800。
+// LX Music（kg/songList.js、kg/album.js）统一填 240，实测偏糊，故这里取更高的 800。
+const KG_COVER_SIZE = 800;
+
+// 歌单/榜单封面在网格里只占一格，且部分歌单封面是 PNG（实测 800px 的 PNG 接近 1MB），
+// 所以列表封面单独取 400（实测 400x400），避免一屏几十张图把流量吃光。
+const KG_LIST_COVER_SIZE = 400;
+
+function kgLargerSize(current: string, target: number): string {
+  // 只升不降：上游已经给了更大的尺寸时保持原样。
+  return numberValue(current) >= target ? current : String(target);
+}
+
+function kgUpgradeCoverUrl(value: unknown, target = KG_COVER_SIZE): string {
+  const raw = stringValue(value).trim();
+  if (!raw) {
+    return '';
+  }
+  return raw
+    .replace(/\{size\}/gi, String(target))
+    .replace(
+      /(\/(?:stdmusic|custom|collection|singer|album|mixsong)\/)(\d+)(\/)/i,
+      (_match, prefix, size, suffix) => `${prefix}${kgLargerSize(size, target)}${suffix}`,
+    );
+}
+
 function kgImage(item: any): string {
-  return stringValue(
+  return kgUpgradeCoverUrl(
     item.Image
     || item.imgurl
     || item.img
@@ -36,7 +64,7 @@ function kgImage(item: any): string {
     || item.album_img
     || item.album_sizable_cover
     || item.trans_param?.union_cover,
-  ).replace('{size}', '400');
+  );
 }
 
 function sizeLabel(bytes: unknown): string {
@@ -147,7 +175,8 @@ function summarizeKgList(item: any): SongListSummary {
   return normalizeSongListSummary({
     id: item.specialid ? `id_${item.specialid}` : item.id,
     name: item.specialname || item.name,
-    img: item.imgurl || item.img,
+    // 歌单接口返回的 imgurl 同样带 `{size}` 占位符，之前没替换会原样发给前端。
+    img: kgUpgradeCoverUrl(item.imgurl || item.img, KG_LIST_COVER_SIZE),
     play_count: item.playcount || item.play_count || item.total_play_count,
     desc: item.intro,
   });

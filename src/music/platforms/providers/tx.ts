@@ -12,8 +12,30 @@ const BOARDS: Array<LeaderboardBoard & { bangid: string }> = [
   { id: 'tx__3', name: '欧美榜', bangid: '3' },
 ];
 
+// y.gtimg.cn 的封面尺寸写在 `T002R<宽>x<高>M000` 里，且只接受白名单尺寸：
+// 实测 150/300/500/800/1200 正常，1000x1000 返回 404，因此不能随意取值。
+// LX Music（tx/musicInfo.js、tx/songList.js）固定用 500x500，实测 800x800 在 15/15 张专辑上
+// 都稳定返回 800x800（约 190KB），故升到 800。
+const TX_COVER_SIZE = 800;
+
+// 歌单封面是另一套地址（p.qpic.cn/music_cover/<id>/<尺寸>），白名单为 150/300/600/1000，
+// 实测 500 与 800 直接返回 400，所以这里只能取 600。
+const TX_LIST_COVER_SIZE = 600;
+
 function singerNames(value: any): string {
   return Array.isArray(value) ? value.map((item) => stringValue(item.name || item.title || item)).filter(Boolean).join('、') : stringValue(value);
+}
+
+function txUpgradeListCover(value: unknown): string {
+  const raw = stringValue(value).trim();
+  if (!raw) {
+    return '';
+  }
+  // 只升不降：上游已经给了更大的尺寸时保持原样。
+  return raw.replace(
+    /(\/music_cover\/[^/?#]+\/)(\d+)(?=$|[?#])/i,
+    (_match, prefix, size) => `${prefix}${numberValue(size) >= TX_LIST_COVER_SIZE ? size : TX_LIST_COVER_SIZE}`,
+  );
 }
 
 function mapTxSong(item: any): SearchResultSong {
@@ -25,8 +47,8 @@ function mapTxSong(item: any): SearchResultSong {
     album: item.album?.name || item.albumName,
     duration: item.interval,
     img: albumMid
-      ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`
-      : singerMid ? `https://y.gtimg.cn/music/photo_new/T001R500x500M000${singerMid}.jpg` : '',
+      ? `https://y.gtimg.cn/music/photo_new/T002R${TX_COVER_SIZE}x${TX_COVER_SIZE}M000${albumMid}.jpg`
+      : singerMid ? `https://y.gtimg.cn/music/photo_new/T001R${TX_COVER_SIZE}x${TX_COVER_SIZE}M000${singerMid}.jpg` : '',
     musicId: item.id || item.songId,
     songmid: item.mid || item.songmid,
     strMediaMid: item.file?.media_mid || item.strMediaMid,
@@ -41,7 +63,15 @@ function summarizeTxList(item: any): SongListSummary {
   return normalizeSongListSummary({
     id: basic.tid || basic.dissid,
     name: basic.title || basic.dissname,
-    img: basic.cover?.medium_url || basic.cover?.default_url || basic.imgurl || basic.cover_url_medium,
+    // big_url / cover_url_big 优先，其余地址再按尺寸段放大。
+    img: txUpgradeListCover(
+      basic.cover?.big_url
+      || basic.cover?.medium_url
+      || basic.cover?.default_url
+      || basic.imgurl
+      || basic.cover_url_big
+      || basic.cover_url_medium,
+    ),
     play_count: basic.play_cnt || basic.listennum || basic.access_num,
     desc: basic.desc || basic.introduction,
   });
@@ -145,7 +175,7 @@ export class QQMusicProvider implements MusicPlatformProvider {
         songs: rawSongs.map(mapTxSong),
         total: numberValue(cd.total_song_num || cd.songnum || cd.songlist?.length),
         name: stringValue(cd.dissname),
-        cover_url: stringValue(cd.logo),
+        cover_url: txUpgradeListCover(cd.logo),
       };
     } catch {
       return { songs: [], total: 0, name: '' };

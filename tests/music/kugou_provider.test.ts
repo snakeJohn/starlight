@@ -46,7 +46,7 @@ describe('KugouProvider', () => {
       artist: '阿图表妹',
       album: '你有没有真的爱过我',
       duration: 243,
-      cover_url: 'http://imge.kugou.com/stdmusic/400/cover.jpg',
+      cover_url: 'http://imge.kugou.com/stdmusic/800/cover.jpg',
       source_data: {
         platform: 'kg',
         songInfo: expect.objectContaining({
@@ -101,12 +101,12 @@ describe('KugouProvider', () => {
     expect(result).toMatchObject({
       name: '古风民谣',
       total: 296,
-      cover_url: 'https://img.test/400/songlist.jpg',
+      cover_url: 'https://img.test/800/songlist.jpg',
       songs: [{
         title: '负重一万斤长大',
         artist: '太一',
         album: '第一次做人',
-        cover_url: 'https://img.test/400/kg-song.jpg',
+        cover_url: 'https://img.test/800/kg-song.jpg',
       }],
     });
   });

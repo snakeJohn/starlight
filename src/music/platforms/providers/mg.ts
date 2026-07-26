@@ -46,8 +46,30 @@ function singerNames(value: any): string {
   return Array.isArray(value) ? value.map((item) => stringValue(item.name || item.singerName || item)).filter(Boolean).join('、') : stringValue(value);
 }
 
+// 咪咕同一首歌返回三档图，实测 img1=200x200、img2=400x400、img3=800x800，取最大的 img3。
+// 榜单接口（querycontentbyId）没有 imgN，只有 albumImgs，其中 imgSizeType 实测
+// "01"=200x200、"02"=400x400、"03"=800x800，且数组顺序不保证，
+// 所以按 imgSizeType 取最大而不是取第一个。800x800 已是咪咕对外提供的最大档，
+// 更大的图只有 music.migu.cn 的 getSongPic（LX Music mg/pic.js 走这条）能拿到，
+// 但那是每首歌一次额外请求，会把列表变成 N+1，故不采用。
+function mgLargestAlbumImg(item: any): string {
+  const images = Array.isArray(item?.albumImgs) ? item.albumImgs : [];
+  let best = '';
+  let bestSize = -1;
+  for (const image of images) {
+    const url = stringValue(image?.img || image?.webpImg);
+    if (!url) continue;
+    const size = numberValue(image?.imgSizeType);
+    if (size > bestSize) {
+      bestSize = size;
+      best = url;
+    }
+  }
+  return best;
+}
+
 function mapMgSong(item: any): SearchResultSong {
-  const img = stringValue(item.img3 || item.img2 || item.img1 || item.img || item.albumImgs?.[0]?.img);
+  const img = stringValue(item.img3 || item.img2 || item.img1 || item.img) || mgLargestAlbumImg(item);
   return normalizeSong('mg', {
     name: item.name || item.songName,
     singer: singerNames(item.singerList || item.singers || item.singer),

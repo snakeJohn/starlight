@@ -25,6 +25,24 @@ function singerNames(value: any): string {
   return Array.isArray(value) ? value.map((item) => stringValue(item.name || item)).filter(Boolean).join('、') : stringValue(value);
 }
 
+// 网易云的 picUrl 本身就是原图（实测同一批搜索结果里有 500x500、2000x2000、3648x3648），
+// `?param=WxH` 只会把图缩小、不会放大（param=1400y1400 仍返回原图尺寸），
+// 所以这里不追加参数，只在上游带了缩略参数时把它去掉换回原图。
+// LX Music（wy/musicSearch.js、wy/songList.js）同样直接使用 al.picUrl，不做任何尺寸处理。
+function wyOriginalCover(value: unknown): string {
+  const raw = stringValue(value).trim();
+  if (!raw || raw.indexOf('param=') < 0) {
+    return raw;
+  }
+  const queryIndex = raw.indexOf('?');
+  if (queryIndex < 0) {
+    return raw;
+  }
+  const base = raw.slice(0, queryIndex);
+  const query = raw.slice(queryIndex + 1).split('&').filter((part) => !/^param=/i.test(part)).join('&');
+  return query ? `${base}?${query}` : base;
+}
+
 function mapWySong(item: any): SearchResultSong {
   const song = item.baseInfo?.simpleSongData || item;
   return normalizeSong('wy', {
@@ -32,7 +50,7 @@ function mapWySong(item: any): SearchResultSong {
     singer: singerNames(song.ar || song.artists),
     album: song.al?.name || song.album?.name,
     duration: numberValue(song.dt || song.duration) / 1000,
-    img: song.al?.picUrl || song.album?.picUrl,
+    img: wyOriginalCover(song.al?.picUrl || song.album?.picUrl),
     musicId: song.id,
     songmid: song.id,
     albumId: song.al?.id || song.album?.id,
@@ -44,7 +62,7 @@ function summarizeWyList(item: any): SongListSummary {
   return normalizeSongListSummary({
     id: item.id,
     name: item.name,
-    img: item.coverImgUrl,
+    img: wyOriginalCover(item.coverImgUrl),
     play_count: item.playCount,
     desc: item.description,
   });
@@ -125,7 +143,7 @@ export class NeteaseProvider implements MusicPlatformProvider {
         songs: pageTracks.map(mapWySong),
         total: numberValue(body.playlist?.trackCount || trackIds.length || tracks.length),
         name: stringValue(body.playlist?.name),
-        cover_url: stringValue(body.playlist?.coverImgUrl),
+        cover_url: wyOriginalCover(body.playlist?.coverImgUrl),
       };
     } catch {
       return { songs: [], total: 0, name: '' };

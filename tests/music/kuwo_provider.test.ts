@@ -37,7 +37,7 @@ describe('KuwoProvider', () => {
     expect(result.list[0]).toMatchObject({
       title: '风起天阑',
       artist: '河图',
-      cover_url: 'https://img4.kuwo.cn/star/albumcover/1000/44/10/2400396154.jpg',
+      cover_url: 'https://img4.kuwo.cn/star/albumcover/800/44/10/2400396154.jpg',
     });
   });
 
@@ -66,7 +66,7 @@ describe('KuwoProvider', () => {
     expect(result.list[0]).toMatchObject({
       title: '风起天阑',
       artist: '河图',
-      cover_url: 'https://img4.kuwo.cn/star/albumcover/120/s4s51/83/969487567.jpg',
+      cover_url: 'https://img4.kuwo.cn/star/albumcover/800/s4s51/83/969487567.jpg',
     });
   });
 
@@ -101,7 +101,8 @@ describe('KuwoProvider', () => {
     expect(result.list[0]).toMatchObject({
       title: '踏马寻花向自由 (雷鬼版)',
       artist: '超哥',
-      cover_url: 'http://img1.kuwo.cn/star/starheads/120/9/47/3225410740.jpg',
+      // 上游已经给了 1000，比目标尺寸大，保持不动（只升不降）。
+      cover_url: 'http://img1.kuwo.cn/star/starheads/1000/9/47/3225410740.jpg',
     });
   });
 
@@ -178,7 +179,7 @@ describe('KuwoProvider', () => {
     expect(result.songs[0]).toMatchObject({
       title: '两生契',
       artist: '河图',
-      cover_url: 'http://img1.kwcdn.kuwo.cn/star/albumcover/700/47/20/1695471835.jpg',
+      cover_url: 'http://img1.kwcdn.kuwo.cn/star/albumcover/800/47/20/1695471835.jpg',
     });
   });
 
@@ -213,7 +214,7 @@ describe('KuwoProvider', () => {
       songs: [{
         title: '踏马寻花向自由 (雷鬼版)',
         artist: '超哥',
-        cover_url: 'http://img4.kuwo.cn/pic_music/120/s4s35/42/48939081.jpg',
+        cover_url: 'http://img4.kuwo.cn/pic_music/800/s4s35/42/48939081.jpg',
       }],
     });
   });

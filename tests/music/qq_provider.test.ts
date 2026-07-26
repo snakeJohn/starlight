@@ -68,7 +68,7 @@ describe('QQMusicProvider', () => {
         title: '风起天阑',
         artist: '河图',
         album: '风起天阑',
-        cover_url: 'https://y.gtimg.cn/music/photo_new/T002R500x500M000album-mid-1.jpg',
+        cover_url: 'https://y.gtimg.cn/music/photo_new/T002R800x800M000album-mid-1.jpg',
       }],
     });
   });
@@ -111,7 +111,7 @@ describe('QQMusicProvider', () => {
       songs: [{
         title: '窗',
         artist: '虎二',
-        cover_url: 'https://y.gtimg.cn/music/photo_new/T002R500x500M000album-mid-1.jpg',
+        cover_url: 'https://y.gtimg.cn/music/photo_new/T002R800x800M000album-mid-1.jpg',
       }],
     });
   });

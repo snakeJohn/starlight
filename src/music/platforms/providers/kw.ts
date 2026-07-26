@@ -43,6 +43,30 @@ function kwSubSong(item: any): any | null {
   return Array.isArray(item?.SUBLIST) && item.SUBLIST[0] ? item.SUBLIST[0] : null;
 }
 
+// 酷我的封面尺寸写在路径里（/star/albumcover/120/...）或文件名后缀里（..._240.jpg），
+// 搜索接口给的 web_albumpic_short / pic120 都是 120px 缩略图，直接用会很糊。
+// 实测 img4.kuwo.cn 与 img1.kwcdn.kuwo.cn 对 120/150/300/500/800/1000 均返回对应尺寸，
+// 超过原图时自动回落到最大可用尺寸（不会 404），所以放大改写是安全的。
+// LX Music（kw/pic.js）向 artistpicserver 取 pictype=500，此处实测 800 同样稳定，故取 800。
+const KW_COVER_SIZE = 800;
+
+function kwLargerSize(current: string): string {
+  // 只升不降：上游已经给了更大的尺寸时保持原样。
+  return numberValue(current) >= KW_COVER_SIZE ? current : String(KW_COVER_SIZE);
+}
+
+function kwUpgradeCoverUrl(value: unknown): string {
+  const raw = stringValue(value).trim();
+  if (!raw) {
+    return '';
+  }
+  return raw
+    .replace(/(\/star\/(?:albumcover|starheads)\/)(\d+)(\/)/i, (_match, prefix, size, suffix) => `${prefix}${kwLargerSize(size)}${suffix}`)
+    .replace(/(\/pic_music\/)(\d+)(\/)/i, (_match, prefix, size, suffix) => `${prefix}${kwLargerSize(size)}${suffix}`)
+    .replace(/(_)(\d{2,4})(\.(?:jpg|jpeg|png|webp))/i, (_match, prefix, size, suffix) => `${prefix}${kwLargerSize(size)}${suffix}`)
+    .replace(/([?&](?:pictype|size)=)(\d+)/gi, (_match, prefix, size) => `${prefix}${kwLargerSize(size)}`);
+}
+
 function isUsableCover(value: unknown): boolean {
   const text = stringValue(value).trim();
   if (!text) return false;
@@ -55,9 +79,10 @@ function kwShortCover(value: unknown): string {
   const short = raw.replace(/^\/+/, '');
   if (!short) return '';
   if (!raw.startsWith('/') && /^\d+\//.test(short)) {
-    return `https://img4.kuwo.cn/star/albumcover/${short}`;
+    // 短链自带尺寸段（如 120/s3s94/93/xxx.jpg），换成高清尺寸段再拼域名。
+    return `https://img4.kuwo.cn/star/albumcover/${KW_COVER_SIZE}/${short.replace(/^\d+\//, '')}`;
   }
-  return `https://img4.kuwo.cn/star/albumcover/1000/${short}`;
+  return `https://img4.kuwo.cn/star/albumcover/${KW_COVER_SIZE}/${short}`;
 }
 
 function kwDirectCover(item: any): string {
@@ -66,7 +91,7 @@ function kwDirectCover(item: any): string {
     .map((value) => stringValue(value))
     .find((value) => isUsableCover(value));
   if (direct) {
-    return direct;
+    return kwUpgradeCoverUrl(direct);
   }
   return kwShortCover(item.web_albumpic_short);
 }
@@ -76,15 +101,8 @@ function kwCover(item: any): string {
 }
 
 function normalizeKwExternalCoverUrl(value: unknown): string {
-  const raw = stringValue(value).trim();
-  if (!raw) {
-    return '';
-  }
-  return raw
-    .replace(/(\/star\/starheads\/)\d+(\/)/i, '$1120$2')
-    .replace(/(\/pic_music\/)\d+(\/)/i, '$1120$2')
-    .replace(/([?&]pictype=)\d+/i, '$1120')
-    .replace(/([?&]size=)\d+/i, '$1120');
+  // artistpicserver 返回的地址同样把尺寸写在路径里，统一放大到高清尺寸。
+  return kwUpgradeCoverUrl(value);
 }
 
 function mapKwSong(item: any, coverOverride = ''): SearchResultSong {
@@ -107,7 +125,8 @@ function summarizeKwList(item: any): SongListSummary {
   return normalizeSongListSummary({
     id: item.playlistid || item.id,
     name: decodeHtml(item.name),
-    img: item.img || item.hts_pic || item.pic,
+    // 歌单封面走 userpl2015 路径，尺寸在文件名后缀（..._240.jpg），实测最大 700。
+    img: kwUpgradeCoverUrl(item.img || item.hts_pic || item.pic),
     play_count: item.playcnt || item.listencnt,
     desc: decodeHtml(item.intro || item.desc),
   });
@@ -127,7 +146,7 @@ export class KuwoProvider implements MusicPlatformProvider {
     try {
       const url = `http://search.kuwo.cn/r.s?stype=albuminfo&albumid=${encodeURIComponent(albumId)}&encoding=utf8&rformat=json`;
       const text = await fetchText(url);
-      const cover = stringValue(
+      const cover = kwUpgradeCoverUrl(
         parseQuotedField(text, 'hts_img')
         || parseQuotedField(text, 'img')
         || kwShortCover(parseQuotedField(text, 'pic')),
@@ -208,7 +227,7 @@ export class KuwoProvider implements MusicPlatformProvider {
         songs: Array.isArray(body.musiclist) ? await Promise.all(body.musiclist.map((item: any) => this.mapSongListSong(item))) : [],
         total: numberValue(body.total),
         name: stringValue(body.title),
-        cover_url: stringValue(body.pic),
+        cover_url: kwUpgradeCoverUrl(body.pic),
       };
     } catch {
       return { songs: [], total: 0, name: '' };
