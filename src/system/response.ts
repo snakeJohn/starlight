@@ -64,10 +64,6 @@ export function httpStatusForError(error: unknown): number {
   switch (error.code) {
     case 'BAD_REQUEST':
     case 'MUSIC_PLATFORM_UNSUPPORTED':
-    case 'SOURCE_ONLINE_URL_INVALID':
-    case 'SOURCE_ONLINE_REDIRECT_INVALID':
-    case 'SOURCE_ONLINE_CONTENT_INVALID':
-    case 'SOURCE_ONLINE_TOO_LARGE':
     case 'SOURCE_IMPORT_INVALID':
     case 'AUTH_PASSWORD_FAILED':
     case 'AUTH_QR_EXPIRED':
@@ -85,9 +81,6 @@ export function httpStatusForError(error: unknown): number {
       return 409;
     case 'DEVICE_OFFLINE':
       return 503;
-    case 'SOURCE_ONLINE_TIMEOUT':
-    case 'SOURCE_ONLINE_FETCH_FAILED':
-    case 'SOURCE_ONLINE_IMPORT_FAILED':
     case 'VOICE_AI_FAILED':
     case 'AUDIO_CONVERT_FAILED':
     case 'SOURCE_RUNTIME_FAILED':

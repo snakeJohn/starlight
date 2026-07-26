@@ -64,14 +64,6 @@ export class SourceStore {
    * Load scripts for a set of source IDs. Missing scripts map to null so
    * snapshot/restore can distinguish "absent" from empty content.
    */
-  async loadScripts(ids: string[]): Promise<Map<string, string | null>> {
-    const scripts = new Map<string, string | null>();
-    for (const id of ids) {
-      scripts.set(id, await this.loadScript(id));
-    }
-    return scripts;
-  }
-
   private scriptKey(id: string): string {
     return `${this.scriptPrefix}${id}`;
   }

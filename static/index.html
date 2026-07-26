@@ -584,16 +584,6 @@
                             <input type="file" data-role="source-file" accept=".js,.zip,application/javascript,application/zip">
                             <span>导入文件</span>
                         </label>
-                        <div class="online-source-import">
-                            <input
-                                type="url"
-                                data-role="online-source-input"
-                                placeholder="输入 HTTPS .js 地址"
-                                autocomplete="off"
-                                spellcheck="false"
-                            >
-                            <button class="primary-button" type="button" data-action="open-online-source-import">在线导入</button>
-                        </div>
                     </div>
                 <section class="surface-section">
                     <div class="section-bar">
@@ -1024,24 +1014,6 @@
                 <button class="primary-button" type="submit" data-action="confirm-songloft-target">确认加入</button>
             </div>
         </form>
-    </div>
-    <div class="online-source-dialog" data-role="online-source-dialog" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="onlineSourceImportTitle" hidden>
-        <div class="online-source-panel">
-            <div class="section-bar">
-                <div>
-                    <h2 id="onlineSourceImportTitle">在线导入音源</h2>
-                    <span class="section-caption">在线音源会作为脚本运行，请仅导入可信来源。</span>
-                </div>
-                <button class="ghost-button" type="button" data-action="online-import-cancel">取消</button>
-            </div>
-            <p class="online-source-url" data-role="online-source-url"></p>
-            <p class="online-source-existing" data-role="online-source-existing" hidden>将更新现有在线音源</p>
-            <div class="inline-actions online-source-actions">
-                <button class="primary-button" type="button" data-action="online-import-playback">仅播放</button>
-                <button class="primary-button" type="button" data-action="online-import-download">仅下载</button>
-                <button class="primary-button" type="button" data-action="online-import-both">播放及下载</button>
-            </div>
-        </div>
     </div>
     <script type="module" src="static/js/app.js"></script>
 </body>

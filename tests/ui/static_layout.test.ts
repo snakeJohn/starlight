@@ -316,30 +316,20 @@ describe('static UI layout copy', () => {
     expect(sourcesModule).toContain('/download/sources/batch-toggle');
   });
 
-  it('exposes online HTTPS .js source import controls and dialog', () => {
+  it('does not expose the removed online source URL import feature', () => {
     const html = indexHtml();
     const sourcesModule = musicSourcesJs();
     const sourcesHtml = settingsSection(html, 'sources');
     const stylesheet = css();
 
-    expect(sourcesHtml).toContain('data-role="online-source-input"');
-    expect(sourcesHtml).toContain('data-action="open-online-source-import"');
-    expect(html).toContain('data-role="online-source-dialog"');
-    expect(html).toContain('data-role="online-source-url"');
-    expect(html).toContain('data-role="online-source-existing"');
-    expect(html).toContain('data-action="online-import-playback"');
-    expect(html).toContain('data-action="online-import-download"');
-    expect(html).toContain('data-action="online-import-both"');
-    expect(html).toContain('data-action="online-import-cancel"');
-    expect(html).toContain('在线音源会作为脚本运行，请仅导入可信来源');
-    expect(html).toContain('将更新现有在线音源');
-    expect(sourcesModule).toContain('normalizeOnlineSourceInput');
-    expect(sourcesModule).toContain('openOnlineSourceImportDialog');
-    expect(sourcesModule).toContain('submitOnlineSourceImport');
-    expect(sourcesModule).toContain("api.post('/music/sources/import-url'");
-    expect(sourcesModule).toContain('bindOnlineSourceImport');
-    expect(stylesheet).toContain('.online-source-dialog');
-    expect(stylesheet).toContain('.online-source-import');
+    expect(sourcesHtml).not.toContain('data-role="online-source-input"');
+    expect(sourcesHtml).not.toContain('data-action="open-online-source-import"');
+    expect(html).not.toContain('data-role="online-source-dialog"');
+    expect(html).not.toContain('data-action="online-import-playback"');
+    expect(sourcesModule).not.toContain('/music/sources/import-url');
+    expect(sourcesModule).not.toContain('bindOnlineSourceImport');
+    expect(stylesheet).not.toContain('.online-source-dialog');
+    expect(stylesheet).not.toContain('.online-source-import');
   });
 
   it('imports zip packages by extracting contained JavaScript source files', () => {

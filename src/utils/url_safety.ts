@@ -1,5 +1,5 @@
 /**
- * Outbound URL validation for user-configured webhooks and online source import.
+ * Outbound URL validation for user-configured webhooks.
  * Blocks loopback, private, link-local, multicast, reserved, and documentation ranges.
  */
 
@@ -114,7 +114,7 @@ function isBlockedIpv6(host: string): boolean {
   return false;
 }
 
-/** True when host is a non-public address we refuse for outbound webhooks / online import. */
+/** True when host is a non-public address we refuse for outbound webhooks. */
 export function isBlockedHostname(hostname: string): boolean {
   const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
   if (!host) return true;

@@ -15,8 +15,6 @@ import { IndexingManager } from './indexing/manager';
 import { SourceStore } from './music/source_store';
 import { SourceManager } from './music/source_manager';
 import { RuntimeManager } from './music/runtime_manager';
-import { OnlineSourceFetcher } from './music/online_source_fetcher';
-import { OnlineSourceImportService } from './music/online_source_import_service';
 import { PlatformRegistry } from './music/platforms/registry';
 import { BridgeService } from './bridge/service';
 import { DownloadService } from './download/service';
@@ -114,13 +112,6 @@ async function onInit(): Promise<void> {
   }));
   await downloadSourceManager.init();
   downloadRuntimeManager = new RuntimeManager(downloadSourceManager, { runtimeNamespace: 'download' });
-  const onlineSourceImport = new OnlineSourceImportService({
-    fetcher: new OnlineSourceFetcher(),
-    playbackSources: sourceManager,
-    downloadSources: downloadSourceManager,
-    playbackRuntimes: runtimeManager,
-    downloadRuntimes: downloadRuntimeManager,
-  });
   platformRegistry = new PlatformRegistry();
   bridgeService = new BridgeService(platformRegistry, runtimeManager, minaService, playlistManagerMap);
   songloftPlaylistService = new SongloftPlaylistService(bridgeService, platformRegistry);
@@ -180,7 +171,6 @@ async function onInit(): Promise<void> {
   registerIndexingHandlers(miotRouter, indexingManager);
   registerMusicHandlers(router, sourceManager, runtimeManager, platformRegistry, {
     downloadRuntimes: downloadRuntimeManager,
-    onlineSourceImport,
   });
   registerBridgeHandlers(router, bridgeService);
   registerDownloadHandlers(router, downloadSourceManager, downloadRuntimeManager, downloadService);

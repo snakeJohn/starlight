@@ -8,7 +8,6 @@ import type { PlatformRegistry } from '../music/platforms/registry';
 import type { MusicPlatformProvider } from '../music/platforms/types';
 import { resolveMusicLyric } from '../music/platforms/lyrics';
 import type { RuntimeManager } from '../music/runtime_manager';
-import type { OnlineSourceImportService, OnlineSourceEnableMode } from '../music/online_source_import_service';
 import type { SourceManager } from '../music/source_manager';
 import type { LxSongInfo, MusicPlatform } from '../music/types';
 import { registerSourceCrudRoutes } from './sources_crud';
@@ -37,22 +36,9 @@ interface LyricBody {
   };
 }
 
-interface SourceImportUrlBody {
-  url?: unknown;
-  enable_mode?: unknown;
-  content?: unknown;
-  filename?: unknown;
-  script?: unknown;
-  resolvedUrl?: unknown;
-  sourceUrl?: unknown;
-}
-
 interface MusicHandlerOptions {
   downloadRuntimes?: RuntimeManager;
-  onlineSourceImport?: OnlineSourceImportService;
 }
-
-const ONLINE_ENABLE_MODES = new Set<OnlineSourceEnableMode>(['playback', 'download', 'both']);
 
 function page(value: unknown): number {
   return paginationInt(value, 'page', 1);
@@ -148,36 +134,6 @@ export function registerMusicHandlers(
   });
 
   router.get('/api/music/platforms', async () => runApi(() => platforms.all()));
-
-  router.post('/api/music/sources/import-url', async (req) =>
-    runApi(async () => {
-      if (!options.onlineSourceImport) {
-        throw new StarlightError('INTERNAL_ERROR', 'Online source import is not configured');
-      }
-
-      const body = parseJsonBody<SourceImportUrlBody>(req);
-      if (
-        body.content !== undefined
-        || body.filename !== undefined
-        || body.script !== undefined
-        || body.resolvedUrl !== undefined
-        || body.sourceUrl !== undefined
-      ) {
-        throw new StarlightError('BAD_REQUEST', 'only url and enable_mode are accepted');
-      }
-
-      const url = stringField(body.url);
-      if (!url) {
-        throw new StarlightError('BAD_REQUEST', 'url is required');
-      }
-
-      const mode = stringField(body.enable_mode) as OnlineSourceEnableMode;
-      if (!ONLINE_ENABLE_MODES.has(mode)) {
-        throw new StarlightError('BAD_REQUEST', 'enable_mode must be playback, download, or both');
-      }
-
-      return options.onlineSourceImport.importUrl(url, mode);
-    }, 201));
 
   router.post('/api/music/search', async (req) =>
     runApi(async () => {

@@ -298,7 +298,6 @@ songloft-plugin-starlight/
 - `GET /api/music/platforms`
 - `GET /api/music/sources`
 - `POST /api/music/sources/import`
-- `POST /api/music/sources/import-url`
 - `POST /api/music/sources/toggle`
 - `DELETE /api/music/sources/:id`
 - `POST /api/music/search`

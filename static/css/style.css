@@ -925,69 +925,6 @@ textarea:focus {
     margin-bottom: 12px;
 }
 
-.online-source-import {
-    display: flex;
-    flex: 1 1 280px;
-    align-items: center;
-    gap: 8px;
-    min-width: min(100%, 280px);
-}
-
-.online-source-import input[data-role="online-source-input"] {
-    flex: 1 1 auto;
-    min-width: 0;
-    min-height: 36px;
-    border: 1px solid var(--surface-line);
-    border-radius: var(--radius);
-    padding: 0 12px;
-    background: var(--surface-muted);
-    color: var(--text);
-}
-
-.online-source-dialog {
-    position: fixed;
-    inset: 0;
-    z-index: 85;
-    display: grid;
-    place-items: center;
-    padding: clamp(16px, 4vw, 32px);
-    background: color-mix(in srgb, #0b1220 48%, transparent);
-}
-
-.online-source-dialog[hidden] {
-    display: none;
-}
-
-.online-source-panel {
-    width: min(560px, 100%);
-    border: 1px solid var(--hairline);
-    border-radius: var(--radius-lg);
-    padding: 20px;
-    background: var(--surface-elevated);
-    box-shadow: var(--shadow-elevated);
-}
-
-.online-source-url {
-    margin: 12px 0 8px;
-    overflow-wrap: anywhere;
-    color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 13px;
-}
-
-.online-source-existing {
-    margin: 0 0 12px;
-    color: var(--warning, #c47b16);
-    font-size: 13px;
-}
-
-.online-source-actions {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    gap: 8px;
-    margin-top: 8px;
-}
-
 .songloft-target-panel {
     width: min(560px, 100%);
     max-height: min(720px, calc(100vh - 32px));

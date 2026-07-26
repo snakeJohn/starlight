@@ -13,14 +13,6 @@ export interface MusicSourceMeta {
   importedAt: string;
   enabled: boolean;
   supportedPlatforms: string[];
-  /** Normalized original HTTPS URL used as the online-source identity key. */
-  sourceUrl?: string;
-  /** Final URL after validated redirects. */
-  resolvedUrl?: string;
-  /** Content digest of the stored script body. */
-  contentHash?: string;
-  /** ISO timestamp of the last online upsert. */
-  updatedAt?: string;
 }
 
 export interface MusicSourceScript {
