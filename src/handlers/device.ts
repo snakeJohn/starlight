@@ -179,7 +179,16 @@ export function registerDeviceHandlers(
       if (!device_id) {
         return jsonResponse({ success: false, error: 'device_id is required' });
       }
-      const ok = await minaService.resumePlay(account_id, device_id);
+      // 与 /mina/pause、/mina/stop 对称：必须经 PlaylistManager。
+      // 直接调 resumePlay() 会跳过时间基准重建和自动切歌定时器重启，
+      // 于是设备确实继续放了，但当前曲播完不会切下一首——队列静默卡死。
+      // 管理器没有队列时（state 非 playing/paused）resumePlayback 返回 false，
+      // 这种情况回落到裸设备恢复：用户可能是在恢复插件之外的播放内容。
+      const resumeManager = playlistManagerMap
+        ? await playlistManagerMap.getOrCreate(account_id, device_id)
+        : null;
+      const ok = (resumeManager && await resumeManager.resumePlayback())
+        || await minaService.resumePlay(account_id, device_id);
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to resume' });
       }

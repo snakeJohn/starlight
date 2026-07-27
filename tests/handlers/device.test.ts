@@ -113,6 +113,73 @@ describe('registerDeviceHandlers', () => {
     expect(minaService.pausePlay).toHaveBeenCalledWith('acc-1', 'dev-1');
   });
 
+  it('routes /mina/resume through PlaylistManager so the auto-advance timer restarts', async () => {
+    // resumePlayback() 会重建时间基准并重启自动切歌定时器；直接调 resumePlay()
+    // 全都跳过，于是设备继续放了，但当前曲播完不会切下一首。
+    const router = createRouter();
+    const minaService = {
+      resumePlay: vi.fn(async () => true),
+    } as unknown as MinaService;
+    const manager = { resumePlayback: vi.fn(async () => true) };
+    const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
+
+    (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+      router, minaService, {} as AccountManager, playlistManagerMap,
+    );
+
+    const response = await router.handle(request('POST', '/mina/resume', {
+      account_id: 'acc-1', device_id: 'dev-1',
+    }));
+
+    expect(parseResponseBody(response).success).toBe(true);
+    expect(manager.resumePlayback).toHaveBeenCalledTimes(1);
+    // resumePlayback() 内部已调设备，handler 不该再调一次
+    expect(minaService.resumePlay).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a bare device resume when the manager holds no queue', async () => {
+    // 用户可能在恢复插件之外的播放内容，这时管理器没得可恢复，不该直接失败。
+    const router = createRouter();
+    const minaService = {
+      resumePlay: vi.fn(async () => true),
+    } as unknown as MinaService;
+    const manager = { resumePlayback: vi.fn(async () => false) };
+    const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
+
+    (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+      router, minaService, {} as AccountManager, playlistManagerMap,
+    );
+
+    const response = await router.handle(request('POST', '/mina/resume', {
+      account_id: 'acc-1', device_id: 'dev-1',
+    }));
+
+    expect(parseResponseBody(response).success).toBe(true);
+    expect(minaService.resumePlay).toHaveBeenCalledWith('acc-1', 'dev-1');
+  });
+
+  it('reports failure when neither the manager nor the device can resume', async () => {
+    const router = createRouter();
+    const minaService = {
+      resumePlay: vi.fn(async () => false),
+    } as unknown as MinaService;
+    const manager = { resumePlayback: vi.fn(async () => false) };
+    const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
+
+    updateDeviceStatusCache('acc-r', 'dev-r', { state: 'paused', position: 5 });
+
+    (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+      router, minaService, {} as AccountManager, playlistManagerMap,
+    );
+
+    const response = await router.handle(request('POST', '/mina/resume', {
+      account_id: 'acc-r', device_id: 'dev-r',
+    }));
+
+    expect(parseResponseBody(response).success).toBe(false);
+    expect(getDeviceStatusCache('acc-r', 'dev-r')?.state).not.toBe('playing');
+  });
+
   it('rejects non-finite volume values before calling Mina service', async () => {
     const router = createRouter();
     const minaService = {
