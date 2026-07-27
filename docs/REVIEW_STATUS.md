@@ -5,9 +5,9 @@
 | | |
 |---|---|
 | `npm run typecheck` | ✅ 通过 |
-| 测试 | ✅ **786 通过 / 119 文件**（起点 632 / 100） |
+| 测试 | ✅ **791 通过 / 120 文件**（起点 632 / 100） |
 | `npm run build` | ✅ 成功 |
-| 未推送提交 | 11 个（`0f18015` → `0f03c95`） |
+| 未推送提交 | 12 个（`0f18015` → `89cc6bf`） |
 
 ---
 
@@ -26,6 +26,7 @@
 | 9 | `2bed9e4` | 补齐安全相关改动的证伪测试 |
 | 10 | `9e9f83d` | 补完前几轮只改了一半的 pause/stop 失败处理 |
 | 11 | `0f03c95` | 清空自审 backlog 五项（入口不变量 / 配置写入 / 字段泄漏 / 前瞻 / pause 守卫） |
+| 12 | `89cc6bf` | 状态轮询序号守卫 + /mina/resume 经管理器 |
 
 ---
 
@@ -59,11 +60,11 @@
 | P2 · `getCurrentSong()` 泄漏内部字段 | ✅ `0f03c95` | 抽出共享投影 + `getCurrentSongForResponse()` |
 | P3 · 随机模式前瞻取错曲目 | ✅ `0f03c95` | 新增无副作用 `peekNextIndex()`，random 返回 −1 |
 | P3 · `pause()` 无来源状态守卫 | ✅ `0f03c95` | 非 playing/paused 直接返回，不再伪造可恢复态 |
-| P3 · 状态轮询无请求序号防护 | ✅ `10ad4e4` | `statusRequestId` 单调守卫，计数器在函数入口自增 |
+| P3 · 状态轮询无请求序号防护 | ✅ `89cc6bf` | `statusRequestId` 单调守卫，计数器在函数入口自增 |
 
 ### 本轮新发现并修复（审计 `updateDeviceStatusCache` 12 处写入点时）
 
-- **P2 · `/mina/resume` 绕过 PlaylistManager** ✅ `10ad4e4`
+- **P2 · `/mina/resume` 绕过 PlaylistManager** ✅ `89cc6bf`
   R1 的镜像：pause 不停定时器 / resume 不重启定时器。直接调 `resumePlay()` 跳过了
   `resumePlayback()` 的时间基准重建与自动切歌定时器重启，后果是**设备确实继续放了，
   但当前曲播完不会切下一首，队列静默卡死**。管理器无队列时回落到裸设备恢复
