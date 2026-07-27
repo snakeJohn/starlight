@@ -7,8 +7,10 @@ import {
     getBrowserQueueSnapshot,
     hasBrowserQueue,
     pauseBrowserPlayback,
+    pauseSpeakerForBrowserPlayback,
     playBrowserQueue,
     subscribeBrowserPlayback,
+    warnSpeakerStillAudible,
 } from './browser_player.js';
 import {
     clearPendingTargetHint,
@@ -31,6 +33,13 @@ let currentCoverObjectUrl = '';
 /** Monotonic tokens so late cover/lyric fetches for a previous track are ignored. */
 let coverRequestId = 0;
 let lyricRequestId = 0;
+/**
+ * Monotonic token for the status poll/refresh fetch. Bumped on every call to
+ * refreshPlayerStatus() (poll tick or user action alike) so a response that was
+ * issued before a newer one — but lands after it — is dropped instead of
+ * repainting the UI with stale state.
+ */
+let statusRequestId = 0;
 let lastUpdateTime = 0;
 let progressAnimationFrame = null;
 let playerPollTimer = null;
@@ -697,32 +706,6 @@ export async function handoffBrowserQueueToSpeaker() {
 /**
  * Load the last speaker queue into the browser player and start playback.
  */
-/**
- * 浏览器开始播放时把音箱停下来，否则两端会同时出声。
- *
- * 用幂等的 /miot/mina/pause，而不是「先查状态再发 /player/toggle」：
- * toggle 是翻转语义，查询与翻转之间音箱状态一旦变化（自动切歌、语音口令、
- * 智能续播都会改它），就会把已暂停的音箱反过来唤醒。pause 无论当前状态如何
- * 都只会暂停，天然没有这个竞态，也保留播放位置便于切回。
- * 停不下来不应中断浏览器播放，因此失败只吞掉。
- */
-async function pauseSpeakerForBrowserPlayback() {
-    if (!state.accountId || !state.deviceId) return true;
-    try {
-        await api.post('/miot/mina/pause', selectedDevicePayload());
-        return true;
-    } catch {
-        // 设备拒绝暂停或不可达时接口会返回失败（api.post 抛错）。
-        // 这时不能假装已经停了——调用方要据此提示用户，否则两端会同时出声。
-        return false;
-    }
-}
-
-/** 音箱没停下时告知用户，避免以为「切过去了」实际两边都在响。 */
-function warnSpeakerStillAudible() {
-    toast('音箱未能暂停，可能仍在播放，请手动停止', 'error');
-}
-
 export async function handoffSpeakerQueueToBrowser() {
     // Prefer a fresh speaker status (includes queue) when device is selected.
     let playback = lastSpeakerPlayback;
@@ -756,10 +739,7 @@ export async function handoffSpeakerQueueToBrowser() {
         startIndex,
         playMode: normalizePlayMode(playback?.play_mode),
     });
-    // 与「浏览器 → 音箱」对称：新目标接受播放后，再停掉旧目标。
-    if (!await pauseSpeakerForBrowserPlayback()) {
-        warnSpeakerStillAudible();
-    }
+    // 停音箱已由 playBrowserQueue() 内部完成（对所有浏览器播放入口统一保证）
     const status = getBrowserPlaybackStatus();
     renderPlayerStatus(status);
     toast('已在浏览器继续播放');
@@ -767,6 +747,12 @@ export async function handoffSpeakerQueueToBrowser() {
 }
 
 export async function refreshPlayerStatus() {
+    // Claim this call's slot before anything else so any call — including the
+    // synchronous browser-target branches below — invalidates an older
+    // in-flight speaker status fetch that hasn't resolved yet.
+    statusRequestId += 1;
+    const requestId = statusRequestId;
+
     if (getSelectedPlaybackTarget() === 'browser') {
         if (hasBrowserQueue()) {
             const browserStatus = getBrowserPlaybackStatus();
@@ -789,6 +775,10 @@ export async function refreshPlayerStatus() {
         return retained;
     }
     const result = await api.get(`/miot/player/status?account_id=${encodeURIComponent(state.accountId)}&device_id=${encodeURIComponent(state.deviceId)}`);
+    // A newer refreshPlayerStatus() call (poll tick or user action) was issued
+    // while this fetch was in flight — it already owns the UI. Drop this
+    // response wholesale rather than applying any part of it.
+    if (requestId !== statusRequestId) return null;
     if (explicitlyStoppedTarget === 'speaker' && result?.state !== 'playing' && result?.is_playing !== true) {
         renderPlayerStatus({ state: 'stopped', target: 'speaker' });
         return { state: 'stopped', target: 'speaker' };

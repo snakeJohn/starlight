@@ -68,6 +68,25 @@ const PREFETCH_TIMEOUT_MS = 5000;
 /** 切歌偏移允许范围（秒），与设置页保持一致 */
 const MAX_TRANSITION_OFFSET_SEC = 30;
 
+/**
+ * 当前歌曲的对外字段白名单。
+ *
+ * source_data 和 file_path 之类的内部字段绝不能出现在 API 响应里；
+ * getStatus() 和各 handler 共用这一份，避免只改一边。
+ */
+function projectCurrentSong(song: PlayerSong | null): PlayerStatus['current_song'] | null {
+  if (!song) return null;
+  return {
+    id: song.id,
+    title: song.title,
+    artist: song.artist,
+    cover_url: song.cover_url,
+    lyric_url: song.lyric_url,
+    // 内联歌词只随当前歌曲下发，避免整条队列重复携带大段 LRC 文本
+    ...(song.lyric_text ? { lyric_text: song.lyric_text } : {}),
+  };
+}
+
 /** 两个地址是否同源（按 origin 比较，避免前缀域名误判） */
 function isSameOrigin(url: string, base: string): boolean {
   if (!base) return false;
@@ -398,6 +417,14 @@ export class PlaylistManager {
    * 本地还会继续把下一首推给一台我们已经控制不住的音箱，只会更糟。
    */
   async pause(): Promise<boolean> {
+    // 空闲/已停止的管理器没有「暂停」可言。不加这道守卫的话，对着空管理器
+    // 调一次 pause 就会把它翻成 paused，随后 /player/toggle 会认为「有东西
+    // 可以恢复」而走 resumePlayback()，而不是从头 play() 一个歌单。
+    // /mina/pause 是无条件调用的，所以这条路径真实存在。
+    if (this.state !== 'playing' && this.state !== 'paused') {
+      return true;
+    }
+
     this.stopCheckTimer();
     this.clearVoiceSuspend();
 
@@ -546,15 +573,7 @@ export class PlaylistManager {
     let duration = 0;
     if (this.currentIndex >= 0 && this.currentIndex < this.songs.length) {
       const song = this.songs[this.currentIndex];
-      currentSong = {
-        id: song.id,
-        title: song.title,
-        artist: song.artist,
-        cover_url: song.cover_url,
-        lyric_url: song.lyric_url,
-        // 内联歌词只随当前歌曲下发，避免整条队列重复携带大段 LRC 文本
-        ...(song.lyric_text ? { lyric_text: song.lyric_text } : {}),
-      };
+      currentSong = projectCurrentSong(song) ?? undefined;
       duration = song.duration;
     }
 
@@ -592,11 +611,28 @@ export class PlaylistManager {
   /**
    * 获取当前歌曲
    */
+  /**
+   * 队列里的原始歌曲对象，**仅供插件内部使用**。
+   *
+   * 带着 source_data（整个 songInfo）和 lyric_text（大段 LRC）。
+   * 要放进 HTTP 响应请用 getCurrentSongForResponse()。
+   */
   getCurrentSong(): PlayerSong | null {
     if (this.currentIndex >= 0 && this.currentIndex < this.songs.length) {
       return this.songs[this.currentIndex];
     }
     return null;
+  }
+
+  /**
+   * 对外响应用的当前歌曲投影，与 getStatus().current_song 同一份字段白名单。
+   *
+   * handler 直接回吐 getCurrentSong() 会把 source_data 一并发出去——那是音源
+   * 内部结构，不该出现在 API 里，体积也不小。两处共用一个投影函数，避免以后
+   * 只改一边。
+   */
+  getCurrentSongForResponse(): PlayerStatus['current_song'] | null {
+    return projectCurrentSong(this.getCurrentSong());
   }
 
   /**
@@ -1014,7 +1050,9 @@ export class PlaylistManager {
     if (current) targets.push(current);
 
     if (this.songs.length > 1 && this.playMode !== 'single') {
-      const nextIdx = this.getNextIndex();
+      // peek 而非 getNextIndex：后者在 random 模式会改写 randomPlayed，
+      // 光是「看一眼下一首」就会打乱随机序列。
+      const nextIdx = this.peekNextIndex();
       if (nextIdx >= 0 && nextIdx !== this.currentIndex) {
         targets.push(this.songs[nextIdx]);
       }
@@ -1054,7 +1092,9 @@ export class PlaylistManager {
     }
 
     // 单曲循环时下一首就是当前曲，宿主已在放，无需预热。
-    const nextIndex = this.playMode === 'single' ? -1 : this.getNextIndex();
+    // 用 peek：getNextIndex() 有副作用，且 random 模式下每次返回的都不一样——
+    // 预热的会是一首根本不会播的歌，白花用户流量还打乱随机序列。
+    const nextIndex = this.playMode === 'single' ? -1 : this.peekNextIndex();
     if (nextIndex < 0 || nextIndex === this.currentIndex) {
       return;
     }
@@ -1087,6 +1127,36 @@ export class PlaylistManager {
    * 获取下一首索引（根据播放模式）
    * @returns 下一首索引，-1表示没有下一首
    */
+  /**
+   * 「下一首是哪个」的**无副作用**版本，供预取和歌词预填这类前瞻使用。
+   *
+   * getNextIndex() 在 random 分支会写 randomPlayed（提前把当前曲标记为已播、
+   * 集合满了还会重置），而且每次调用返回的都是新的随机结果。拿它当纯函数
+   * 「看一眼下一首」有两个后果：随机序列被打乱，且预取/预填的根本不是
+   * 稍后真正会播的那首。
+   *
+   * random 模式下诚实地返回 -1——下一首本来就还没定，与其预热一首错的，
+   * 不如不预热。调用方据此跳过。
+   */
+  private peekNextIndex(): number {
+    const len = this.songs.length;
+    if (len === 0) return -1;
+
+    switch (this.playMode) {
+      case 'order':
+      case 'once':
+        return this.currentIndex < len - 1 ? this.currentIndex + 1 : -1;
+      case 'loop':
+        return (this.currentIndex + 1) % len;
+      case 'single':
+        return this.currentIndex;
+      case 'random':
+        return -1;
+      default:
+        return -1;
+    }
+  }
+
   private getNextIndex(): number {
     const len = this.songs.length;
     if (len === 0) return -1;

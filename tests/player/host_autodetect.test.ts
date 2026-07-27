@@ -27,6 +27,7 @@ describe('playlist host auto-detection', () => {
     const manager = {
       play: vi.fn(async () => true),
       getCurrentSong: vi.fn(() => ({ title: 'Song' })),
+      getCurrentSongForResponse: vi.fn(() => ({ title: 'Song' })),
     };
     const managerMap = {
       getOrCreate: vi.fn(async () => manager),
@@ -54,6 +55,7 @@ describe('playlist host auto-detection', () => {
     const manager = {
       play: vi.fn(async () => true),
       getCurrentSong: vi.fn(() => ({ title: 'Song' })),
+      getCurrentSongForResponse: vi.fn(() => ({ title: 'Song' })),
       setPlayMode: vi.fn(async () => {}),
     };
     const managerMap = {
@@ -105,6 +107,7 @@ describe('playlist host auto-detection', () => {
       replayCurrent: vi.fn(async () => true),
       play: vi.fn(async () => true),
       getCurrentSong: vi.fn(() => currentSong),
+      getCurrentSongForResponse: vi.fn(() => currentSong),
     };
     const managerMap = {
       getOrCreate: vi.fn(async () => manager),
@@ -135,6 +138,7 @@ describe('playlist host auto-detection', () => {
     const manager = {
       seekToPosition: vi.fn(async () => false),
       getCurrentSong: vi.fn(() => ({ title: 'Song' })),
+      getCurrentSongForResponse: vi.fn(() => ({ title: 'Song' })),
     };
     const managerMap = {
       get: vi.fn(() => manager),
@@ -160,6 +164,7 @@ describe('playlist host auto-detection', () => {
     const manager = {
       play: vi.fn(async () => true),
       getCurrentSong: vi.fn(() => ({ title: 'Song' })),
+      getCurrentSongForResponse: vi.fn(() => ({ title: 'Song' })),
       setPlayMode: vi.fn(async () => {}),
     };
     const managerMap = {

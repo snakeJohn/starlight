@@ -101,6 +101,10 @@ export function registerConfigHandlers(
           scheduled_tasks_enabled: config.scheduled_tasks_enabled,
           timezone: config.timezone,
           force_mp3: !!config.force_mp3,
+          // 默认开启预取；未设置时按 true 上报，与 PlaylistManager 的判定
+          // （prefetch_next_song !== false）保持一致。
+          prefetch_next_song: config.prefetch_next_song !== false,
+          song_transition_offset: config.song_transition_offset ?? 0,
           external_search_enabled: !!config.external_search_enabled,
           external_search_url: config.external_search_url || '',
           has_external_search_token: secretFlags.has_external_search_token,
@@ -168,6 +172,21 @@ export function registerConfigHandlers(
         const enabled = !!body.voice_command_enabled;
         config.voice_command_enabled = enabled;
         voiceEngine.setEnabled(enabled);
+      }
+
+      // 更新 prefetch_next_song（没有写入路径时用户根本关不掉预取）
+      if (body.prefetch_next_song !== undefined) {
+        config.prefetch_next_song = !!body.prefetch_next_song;
+      }
+
+      // 更新 song_transition_offset：收敛到 ±30s，非数字按 0 处理。
+      // 与 PlaylistManager.normalizeTransitionOffset 同一套规则——写入侧不校验的话，
+      // 一个 1e9 的偏移会让自动切歌定时器永远不触发。
+      if (body.song_transition_offset !== undefined) {
+        const raw = Number(body.song_transition_offset);
+        config.song_transition_offset = Number.isFinite(raw)
+          ? Math.max(-30, Math.min(30, Math.trunc(raw)))
+          : 0;
       }
 
       // 更新 force_mp3

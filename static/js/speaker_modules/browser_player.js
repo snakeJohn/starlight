@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { authenticateSongloftResourceUrl } from '../auth.js';
-import { $, durationLabel } from '../state.js';
+import { $, durationLabel, selectedDevicePayload, state, toast } from '../state.js';
 import {
     clearPendingTargetHint,
     setActivePlayingTarget,
@@ -189,6 +189,33 @@ async function handleEnded() {
  * @param {BrowserSong[]} songs
  * @param {{ startIndex?: number, playMode?: 'loop'|'once'|'single'|'random'|'order' }} [options]
  */
+/**
+ * 浏览器开始播放前把音箱停下来，否则两端同时出声。
+ *
+ * 用幂等的 /miot/mina/pause，而不是「先查状态再发 /player/toggle」：
+ * toggle 是翻转语义，查询与翻转之间音箱状态一旦变化（自动切歌、语音口令、
+ * 智能续播都会改它），就会把已暂停的音箱反过来唤醒。pause 无论当前状态如何
+ * 都只会暂停，天然没有这个竞态，也保留播放位置便于切回。
+ *
+ * @returns {Promise<boolean>} 音箱是否确实停下了
+ */
+export async function pauseSpeakerForBrowserPlayback() {
+    if (!state.accountId || !state.deviceId) return true;
+    try {
+        await api.post('/miot/mina/pause', selectedDevicePayload());
+        return true;
+    } catch {
+        // 设备拒绝暂停或不可达时接口会返回失败（api.post 抛错）。
+        // 这时不能假装已经停了——要提示用户，否则两端会同时出声。
+        return false;
+    }
+}
+
+/** 音箱没停下时告知用户，避免以为「切过去了」实际两边都在响。 */
+export function warnSpeakerStillAudible() {
+    toast('音箱未能暂停，可能仍在播放，请手动停止', 'error');
+}
+
 export async function playBrowserQueue(songs, options = {}) {
     if (!Array.isArray(songs) || songs.length === 0) {
         throw new Error('没有可播放的歌曲');
@@ -199,6 +226,14 @@ export async function playBrowserQueue(songs, options = {}) {
     clearPendingTargetHint();
     setActivePlayingTarget('browser');
     await playIndex(index, { restart: true });
+
+    // 停音箱放在这里而不是各个调用点：「浏览器一开播就必须停音箱」是不变量，
+    // 靠每个入口自己记得调用的话，漏掉一个就是两端同时出声——音乐页那三个
+    // 入口就漏了。放在唯一的入口函数里，新增调用点也自动获得该保证。
+    // 放在起播之后：先确保新目标真的接上了，再停旧目标。
+    if (!await pauseSpeakerForBrowserPlayback()) {
+        warnSpeakerStillAudible();
+    }
 }
 
 async function playIndex(next, options = {}) {

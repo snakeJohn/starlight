@@ -33,6 +33,7 @@ function createHarness() {
     getOrCreate: vi.fn(async () => ({
       play,
       getCurrentSong: vi.fn(() => null),
+      getCurrentSongForResponse: vi.fn(() => null),
     })),
   } as unknown as PlaylistManagerMap;
   const minaService = {} as MinaService;
@@ -153,6 +154,53 @@ describe('stop failure must not hide the real device state', () => {
     await (manager as unknown as { onSongFinished(): Promise<void> }).onSongFinished();
 
     expect(parseResponseBody(await router.handle(statusRequest())).data.state).toBe('stopped');
+  });
+});
+
+describe('current_song in responses must not leak internal fields', () => {
+  it('omits source_data from /player/next and /player/previous', async () => {
+    // handler 曾直接回吐 getCurrentSong()，把整个 songInfo 发给前端。
+    // 断言的是响应体本身，不是内部投影函数——否则换个 handler 又会漏。
+    const { PlaylistManager } = await import('../../src/player/manager');
+    const minaService = {
+      playURL: vi.fn(async () => true),
+      pausePlay: vi.fn(async () => true),
+      stopPlay: vi.fn(async () => true),
+      resumePlay: vi.fn(async () => true),
+      getPlayerStatus: vi.fn(async () => ({ data: { info: JSON.stringify({ status: 1 }) } })),
+    } as unknown as MinaService;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ force_mp3: false, server_host: 'http://songloft.test:18191', prefetch_next_song: false })),
+      updateDevice: vi.fn(async () => undefined),
+    } as unknown as import('../../src/config/manager').ConfigManager;
+
+    const manager = new PlaylistManager('acc-1', 'dev-1', minaService, configManager);
+    const withSource = {
+      id: 0, type: 'local', title: '风起天阑', artist: '河图', album: '', duration: 100,
+      file_path: '/srv/media/private/风起天阑.flac',
+      url: 'https://cdn.example.com/a.mp3',
+      cover_path: '', cover_url: '', lyric_url: '', file_size: 0, format: 'mp3',
+      bit_rate: 0, sample_rate: 0, is_live: false, cache_hash: '',
+      source_data: { platform: 'kw', quality: 'flac', songInfo: { songmid: 'SECRET-MID' } },
+    };
+    await manager.playStandalone([withSource, { ...withSource, title: '第二首' }] as never, 0, 'order');
+
+    const playlistManagerMap = {
+      get: vi.fn(() => manager),
+      getOrCreate: vi.fn(async () => manager),
+    } as unknown as PlaylistManagerMap;
+    const router = createRouter();
+    registerPlaylistHandlers(router, playlistManagerMap, minaService);
+
+    for (const route of ['/player/next', '/player/previous']) {
+      const response = await router.handle(request('POST', route, {
+        account_id: 'acc-1', device_id: 'dev-1',
+      }));
+      const raw = JSON.stringify(parseResponseBody(response));
+      expect(raw, `${route} leaked source_data`).not.toContain('SECRET-MID');
+      expect(raw, `${route} leaked source_data`).not.toContain('source_data');
+      expect(raw, `${route} leaked file_path`).not.toContain('/srv/media/private');
+    }
   });
 });
 

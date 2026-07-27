@@ -146,7 +146,7 @@ export function registerPlaylistHandlers(
           message: 'playlist started',
           playlist_id: playlistId,
           play_mode: mode,
-          current_song: manager.getCurrentSong(),
+          current_song: manager.getCurrentSongForResponse(),
         },
       });
     } catch (e: any) {
@@ -224,7 +224,7 @@ export function registerPlaylistHandlers(
             data: {
               message: 'playlist resumed',
               state: 'playing',
-              current_song: manager.getCurrentSong(),
+              current_song: manager.getCurrentSongForResponse(),
             },
           });
         }
@@ -239,7 +239,7 @@ export function registerPlaylistHandlers(
             data: {
               message: 'playlist resumed',
               state: 'playing',
-              current_song: manager.getCurrentSong(),
+              current_song: manager.getCurrentSongForResponse(),
             },
           });
         }
@@ -258,7 +258,7 @@ export function registerPlaylistHandlers(
         data: {
           message: 'playlist resumed',
           state: 'playing',
-          current_song: manager.getCurrentSong(),
+          current_song: manager.getCurrentSongForResponse(),
         },
       });
     } catch (e: any) {
@@ -287,7 +287,7 @@ export function registerPlaylistHandlers(
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to play previous' });
       }
-      return jsonResponse({ success: true, data: { message: 'playing previous song', current_song: manager.getCurrentSong() } });
+      return jsonResponse({ success: true, data: { message: 'playing previous song', current_song: manager.getCurrentSongForResponse() } });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });
     }
@@ -314,7 +314,7 @@ export function registerPlaylistHandlers(
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to play next' });
       }
-      return jsonResponse({ success: true, data: { message: 'playing next song', current_song: manager.getCurrentSong() } });
+      return jsonResponse({ success: true, data: { message: 'playing next song', current_song: manager.getCurrentSongForResponse() } });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });
     }
@@ -389,7 +389,7 @@ export function registerPlaylistHandlers(
         data: {
           message: 'position seeked',
           position: targetSeconds,
-          current_song: manager.getCurrentSong(),
+          current_song: manager.getCurrentSongForResponse(),
         },
       });
     } catch (e: any) {

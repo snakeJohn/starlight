@@ -222,6 +222,50 @@ describe('registerConfigHandlers', () => {
     }));
   });
 
+  it('exposes the playback tuning keys so the settings form can read them', async () => {
+    // 这两项原本只有默认值和读取端，GET 不返回、POST 不接受 —— 用户根本关不掉预取。
+    const { router } = createHarness(pluginConfig({
+      prefetch_next_song: false,
+      song_transition_offset: -5,
+    }));
+
+    const response = await router.handle(request('GET', '/config'));
+
+    expect(parseResponseBody(response).data).toEqual(expect.objectContaining({
+      prefetch_next_song: false,
+      song_transition_offset: -5,
+    }));
+  });
+
+  it('lets the user turn prefetch off', async () => {
+    const { router, configManager } = createHarness(pluginConfig({ prefetch_next_song: true }));
+
+    await router.handle(request('POST', '/config', { prefetch_next_song: false }));
+
+    expect(configManager.saveConfig).toHaveBeenCalledWith(expect.objectContaining({
+      prefetch_next_song: false,
+    }));
+  });
+
+  it('clamps the transition offset to +/-30s and rejects non-numeric input', async () => {
+    // 写入侧不收敛的话，1e9 的偏移会让自动切歌定时器永远不触发。
+    const cases: Array<[unknown, number]> = [
+      [45, 30],
+      [-45, -30],
+      [1e9, 30],
+      ['abc', 0],
+      [null, 0],
+      [7.9, 7],
+    ];
+
+    for (const [input, expected] of cases) {
+      const { router, configManager } = createHarness(pluginConfig());
+      await router.handle(request('POST', '/config', { song_transition_offset: input }));
+      expect(configManager.saveConfig, `input ${JSON.stringify(input)}`)
+        .toHaveBeenCalledWith(expect.objectContaining({ song_transition_offset: expected }));
+    }
+  });
+
   it('flags host:port/path loopback addresses so the speaker warning is not skipped', async () => {
     const { router } = createHarness(pluginConfig({ server_host: 'http://localhost:18191/songloft' }));
 
