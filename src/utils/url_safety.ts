@@ -176,7 +176,8 @@ export function isBlockedHostname(hostname: string): boolean {
 
   const normalized = isIpv4(host) ? host : normalizeIpv4Literal(host);
   if (!normalized) {
-    // Hostnames are allowed at the string layer; DNS resolution must still verify public A/AAAA.
+    // Hostnames are allowed only with HTTPS below. TLS hostname verification then prevents
+    // a DNS-rebound address from impersonating the configured webhook endpoint.
     return false;
   }
 
@@ -199,11 +200,17 @@ export function isBlockedHostname(hostname: string): boolean {
   return false;
 }
 
+function isIpLiteralHostname(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return host.includes(':') || isIpv4(host) || normalizeIpv4Literal(host) !== null;
+}
+
 /**
  * Validate a webhook / outbound URL.
  * - Only http: and https:
  * - Reject credentials in userinfo
  * - Reject loopback / private / link-local / multicast / reserved IP literals
+ * - Require TLS for hostnames so DNS rebinding cannot reach plain-HTTP internal services
  */
 export function validateOutboundWebhookUrl(raw: unknown): UrlValidationResult {
   if (typeof raw !== 'string' || !raw.trim()) {
@@ -228,6 +235,9 @@ export function validateOutboundWebhookUrl(raw: unknown): UrlValidationResult {
   }
   if (isBlockedHostname(parsed.hostname)) {
     return { ok: false, error: 'url host is not allowed (loopback/private/link-local)' };
+  }
+  if (parsed.protocol === 'http:' && !isIpLiteralHostname(parsed.hostname)) {
+    return { ok: false, error: 'hostname webhooks must use https' };
   }
 
   return { ok: true, url: parsed.toString() };

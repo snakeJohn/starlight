@@ -71,6 +71,36 @@ describe('webhook delivery re-validates the stored URL', () => {
     expect(String((fetchMock.mock.calls as unknown as unknown[][])[0][0])).toContain('hooks.example.com');
   });
 
+  it('rejects a plain-http hostname so DNS cannot redirect the request into an internal HTTP service', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await deliver(monitorWith([
+      { id: 'w-http', name: 'hook', url: 'http://hooks.example.com/x', created_at: '' } as WebhookConfig,
+    ]));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('disables automatic redirects so every destination remains subject to validation', async () => {
+    const warn = vi.spyOn(songloft.log, 'warn');
+    const fetchMock = vi.fn(async () => new Response('', {
+      status: 307,
+      headers: { Location: 'http://169.254.169.254/latest/meta-data' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await deliver(monitorWith([
+      { id: 'w-redirect', name: 'hook', url: 'https://hooks.example.com/x', created_at: '' } as WebhookConfig,
+    ]));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://hooks.example.com/x',
+      expect.objectContaining({ redirect: 'manual' }),
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Webhook failed'));
+  });
+
   it('treats a non-2xx reply as a failure instead of logging success', async () => {
     // 只 await fetch 而不看 response.ok 时，接收端 500 也会打印「Webhook sent」。
     const warn = vi.spyOn(songloft.log, 'warn');

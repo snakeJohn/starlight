@@ -1,8 +1,9 @@
 import { api } from '../api.js';
 import { authenticateSongloftResourceUrl } from '../auth.js';
-import { $, durationLabel, selectedDevicePayload, state, toast } from '../state.js';
+import { $, durationLabel, selectedDevicePayload, toast } from '../state.js';
 import {
     clearPendingTargetHint,
+    getActivePlayingTarget,
     setActivePlayingTarget,
 } from './playback_target.js';
 
@@ -199,10 +200,10 @@ async function handleEnded() {
  *
  * @returns {Promise<boolean>} 音箱是否确实停下了
  */
-export async function pauseSpeakerForBrowserPlayback() {
-    if (!state.accountId || !state.deviceId) return true;
+export async function pauseSpeakerForBrowserPlayback(target = selectedDevicePayload()) {
+    if (!target.account_id || !target.device_id) return true;
     try {
-        await api.post('/miot/mina/pause', selectedDevicePayload());
+        await api.post('/miot/mina/pause', target);
         return true;
     } catch {
         // 设备拒绝暂停或不可达时接口会返回失败（api.post 抛错）。
@@ -220,18 +221,20 @@ export async function playBrowserQueue(songs, options = {}) {
     if (!Array.isArray(songs) || songs.length === 0) {
         throw new Error('没有可播放的歌曲');
     }
+    const speakerTarget = selectedDevicePayload();
     queue = songs.slice();
     index = Math.max(0, Math.min(options.startIndex || 0, queue.length - 1));
     if (options.playMode) playMode = normalizeMode(options.playMode);
     clearPendingTargetHint();
     setActivePlayingTarget('browser');
-    await playIndex(index, { restart: true });
+    const started = await playIndex(index, { restart: true });
+    if (!started || getActivePlayingTarget() !== 'browser') return;
 
     // 停音箱放在这里而不是各个调用点：「浏览器一开播就必须停音箱」是不变量，
     // 靠每个入口自己记得调用的话，漏掉一个就是两端同时出声——音乐页那三个
     // 入口就漏了。放在唯一的入口函数里，新增调用点也自动获得该保证。
     // 放在起播之后：先确保新目标真的接上了，再停旧目标。
-    if (!await pauseSpeakerForBrowserPlayback()) {
+    if (!await pauseSpeakerForBrowserPlayback(speakerTarget)) {
         warnSpeakerStillAudible();
     }
 }
@@ -250,7 +253,7 @@ async function playIndex(next, options = {}) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`浏览器播放失败: ${message}`);
     }
-    if (generation !== playGeneration) return;
+    if (generation !== playGeneration) return false;
     if (!url) {
         throw new Error('浏览器播放失败: 无效的音频地址');
     }
@@ -290,9 +293,10 @@ async function playIndex(next, options = {}) {
         }
         throw new Error(`浏览器播放失败: ${message}`);
     }
-    if (generation !== playGeneration) return;
+    if (generation !== playGeneration) return false;
     lastError = '';
     emitStatus();
+    return true;
 }
 
 export async function browserPlayerAction(command, options = {}) {

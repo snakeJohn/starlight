@@ -115,6 +115,72 @@ describe('browser player state transitions', () => {
     expect(FakeAudio.instances[0].src).toBe('https://media.test/b.mp3');
   });
 
+  it('does not let a stale browser start pause the speaker after handoff', async () => {
+    installBrowserGlobals();
+    const preview = deferred<Response>();
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === 'api/bridge/preview-url') return preview.promise;
+      if (url === 'api/bridge/play-songlist') return apiResponse({ urls: ['https://media.test/a.mp3'] });
+      if (url.includes('/miot/player/status')) {
+        return apiResponse({ state: 'playing', current_index: 0, queue: [{ title: 'A' }] });
+      }
+      if (url === 'api/miot/mina/pause') return apiResponse({ message: 'paused' });
+      throw new Error(`Unexpected fetch ${url}`);
+    }));
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'account-1';
+    state.deviceId = 'speaker-1';
+    const browser = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+    };
+    const pendingStart = browser.playBrowserQueue([{ title: 'A' }]);
+    const player = await import('../../static/js/speaker_modules/player.js') as {
+      handoffBrowserQueueToSpeaker(): Promise<unknown>;
+    };
+
+    await player.handoffBrowserQueueToSpeaker();
+    preview.resolve(apiResponse({ url: 'https://media.test/a.mp3' }));
+    await pendingStart;
+
+    expect(calls.filter((url) => url === 'api/miot/mina/pause')).toHaveLength(0);
+  });
+
+  it('pauses the device selected when browser playback started, not a later selection', async () => {
+    installBrowserGlobals();
+    const preview = deferred<Response>();
+    const pauseBodies: Array<{ account_id?: string; device_id?: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'api/bridge/preview-url') return preview.promise;
+      if (url === 'api/miot/mina/pause') {
+        pauseBodies.push(JSON.parse(String(init?.body || '{}')));
+        return apiResponse({ message: 'paused' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    }));
+    const { state } = await import('../../static/js/state.js') as {
+      state: { accountId: string; deviceId: string };
+    };
+    state.accountId = 'account-a';
+    state.deviceId = 'speaker-a';
+    const browser = await import('../../static/js/speaker_modules/browser_player.js') as {
+      playBrowserQueue(songs: unknown[]): Promise<void>;
+    };
+
+    const pendingStart = browser.playBrowserQueue([{ title: 'A' }]);
+    state.accountId = 'account-b';
+    state.deviceId = 'speaker-b';
+    preview.resolve(apiResponse({ url: 'https://media.test/a.mp3' }));
+    await pendingStart;
+
+    expect(pauseBodies).toEqual([{ account_id: 'account-a', device_id: 'speaker-a' }]);
+  });
+
   it('captures automatic-next failures without an unhandled rejection', async () => {
     installBrowserGlobals();
     vi.stubGlobal('fetch', vi.fn()

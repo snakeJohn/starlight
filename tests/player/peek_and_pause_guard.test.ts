@@ -118,8 +118,8 @@ describe('pause() must not fabricate a resumable state', () => {
     await expect(manager.pause()).resolves.toBe(true);
 
     expect(manager.getStatus().state).not.toBe('paused');
-    // 空转的 pause 不该白跑一趟设备指令
-    expect(minaService.pausePlay).not.toHaveBeenCalled();
+    // 本地没有队列不代表物理音箱没有在播放插件外内容。
+    expect(minaService.pausePlay).toHaveBeenCalledWith('acc', 'dev');
   });
 
   it('does not resurrect a stopped manager as paused', async () => {

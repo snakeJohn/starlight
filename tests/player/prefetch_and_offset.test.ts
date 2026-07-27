@@ -106,6 +106,83 @@ describe('auto-next timer offset', () => {
     expect(setTimeoutSpy.mock.calls.map((call) => call[1])).toContain(100_000);
     manager.cleanup();
   });
+
+  it('keeps the transition offset after pause and resume', async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetch();
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+      const { manager } = createManager({ song_transition_offset: 5, prefetch_next_song: false });
+
+      await manager.playStandalone([hostSong(1, '第一首', 100)], 0, 'order');
+      await vi.advanceTimersByTimeAsync(10_000);
+      await manager.pause();
+      setTimeoutSpy.mockClear();
+
+      await manager.resumePlayback();
+
+      expect(setTimeoutSpy.mock.calls.map((call) => call[1])).toContain(95_000);
+      manager.cleanup();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not double-count positive offset time elapsed before pausing', async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetch();
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+      const { manager } = createManager({ song_transition_offset: 5, prefetch_next_song: false });
+
+      await manager.playStandalone([hostSong(1, '第一首', 100)], 0, 'order');
+      await vi.advanceTimersByTimeAsync(103_000);
+      await manager.pause();
+      setTimeoutSpy.mockClear();
+
+      await manager.resumePlayback();
+
+      expect(setTimeoutSpy.mock.calls.map((call) => call[1])).toContain(2_000);
+      manager.cleanup();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores transition offset for pause progress when auto-advance is disabled', async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetch();
+      const { manager } = createManager({ song_transition_offset: -30, prefetch_next_song: false });
+
+      await manager.playStandalone(
+        [hostSong(1, '独立单曲', 100)],
+        0,
+        'single',
+        { autoAdvance: false },
+      );
+      await vi.advanceTimersByTimeAsync(80_000);
+      await manager.pause();
+
+      expect(manager.getPosition()).toBe(80);
+      manager.cleanup();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the transition offset when device progress recalibrates the timer', async () => {
+    stubFetch();
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    const { manager } = createManager({ song_transition_offset: 5, prefetch_next_song: false });
+
+    await manager.playStandalone([hostSong(1, '第一首', 100)], 0, 'order');
+    setTimeoutSpy.mockClear();
+    manager.resetAutoNextTimer(10);
+
+    expect(setTimeoutSpy.mock.calls.map((call) => call[1])).toContain(95_000);
+    manager.cleanup();
+  });
 });
 
 describe('on-demand lyric fill', () => {

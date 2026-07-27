@@ -482,6 +482,7 @@ export class ConversationMonitor {
           headers: { 'Content-Type': 'application/json' },
           body: payload,
           signal: controller.signal,
+          redirect: 'manual',
         });
       } else {
         response = await Promise.race([
@@ -489,6 +490,7 @@ export class ConversationMonitor {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: payload,
+            redirect: 'manual',
           }),
           new Promise<never>((_, reject) => {
             timer = setTimeout(() => reject(new Error('webhook timeout')), timeoutMs);

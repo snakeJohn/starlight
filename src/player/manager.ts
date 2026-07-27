@@ -268,6 +268,7 @@ export class PlaylistManager {
   private currentIndex: number = 0;
   private checkTimer: any = null;       // 定时器ID（基于歌曲时长的切歌定时器）
   private playStartTimeMs: number = 0;  // 当前歌曲开始播放的时间戳(ms)（playing 时相对墙钟）
+  private currentTransitionOffsetSec: number = 0;
   /** 暂停时冻结的已播秒数；>0 表示处于暂停且恢复时以此为进度基准 */
   private pausedElapsedSec: number = 0;
   private randomPlayed: Set<number> = new Set(); // 随机模式已播放索引
@@ -417,12 +418,12 @@ export class PlaylistManager {
    * 本地还会继续把下一首推给一台我们已经控制不住的音箱，只会更糟。
    */
   async pause(): Promise<boolean> {
-    // 空闲/已停止的管理器没有「暂停」可言。不加这道守卫的话，对着空管理器
-    // 调一次 pause 就会把它翻成 paused，随后 /player/toggle 会认为「有东西
-    // 可以恢复」而走 resumePlayback()，而不是从头 play() 一个歌单。
-    // /mina/pause 是无条件调用的，所以这条路径真实存在。
+    // 空闲/已停止的管理器不能被翻成 paused，否则 /player/toggle 会误以为有队列
+    // 可恢复；但物理音箱仍可能正在播放插件外内容，所以仍要发送设备暂停命令。
     if (this.state !== 'playing' && this.state !== 'paused') {
-      return true;
+      return this.accountId && this.deviceId
+        ? this.minaService.pausePlay(this.accountId, this.deviceId)
+        : true;
     }
 
     this.stopCheckTimer();
@@ -431,7 +432,9 @@ export class PlaylistManager {
     if (this.state === 'playing' && this.playStartTimeMs > 0) {
       const elapsed = (Date.now() - this.playStartTimeMs) / 1000;
       const song = this.getCurrentSong();
-      const capped = song && song.duration > 0 ? Math.min(elapsed, song.duration) : Math.max(0, elapsed);
+      const capped = song && song.duration > 0
+        ? Math.min(elapsed, this.autoAdvance ? this.autoAdvanceTargetDuration(song) : song.duration)
+        : Math.max(0, elapsed);
       this.pausedElapsedSec = Math.max(0, capped);
     } else if (this.state !== 'paused') {
       this.pausedElapsedSec = 0;
@@ -679,7 +682,7 @@ export class PlaylistManager {
 
     if (this.autoAdvance && song && song.duration > 0 && this.playStartTimeMs > 0) {
       const elapsedSec = (Date.now() - this.playStartTimeMs) / 1000;
-      const remaining = song.duration - elapsedSec;
+      const remaining = this.autoAdvanceTargetDuration(song) - elapsedSec;
       if (remaining > 0) {
         this.startCheckTimer(remaining);
         songloft.log.info(`[PlaylistManager] Timer reset after resume: remaining=${remaining.toFixed(1)}s`);
@@ -773,8 +776,9 @@ export class PlaylistManager {
     }
 
     const elapsedSec = (Date.now() - this.playStartTimeMs) / 1000;
-    const remainingSec = song.duration - elapsedSec;
-    if (remainingSec <= 15 || elapsedSec >= Math.max(45, song.duration * 0.5)) {
+    const targetDuration = this.autoAdvanceTargetDuration(song);
+    const remainingSec = targetDuration - elapsedSec;
+    if (remainingSec <= 15 || elapsedSec >= Math.max(45, targetDuration * 0.5)) {
       return false;
     }
 
@@ -795,11 +799,11 @@ export class PlaylistManager {
 
     let remaining: number;
     if (typeof devicePositionSec === 'number' && devicePositionSec >= 0) {
-      remaining = song.duration - devicePositionSec;
+      remaining = this.autoAdvanceTargetDuration(song) - devicePositionSec;
       this.playStartTimeMs = Date.now() - devicePositionSec * 1000;
     } else if (this.playStartTimeMs > 0) {
       const elapsedSec = (Date.now() - this.playStartTimeMs) / 1000;
-      remaining = song.duration - elapsedSec;
+      remaining = this.autoAdvanceTargetDuration(song) - elapsedSec;
     } else {
       return;
     }
@@ -952,6 +956,7 @@ export class PlaylistManager {
     }
 
     const config = await this.configManager.getConfig();
+    const transitionOffsetSec = normalizeTransitionOffset(config.song_transition_offset);
     if (config.server_host) {
       setHostBaseUrl(config.server_host);
     }
@@ -1009,6 +1014,7 @@ export class PlaylistManager {
     this.state = 'playing';
     this.playStartTimeMs = Date.now();
     this.pausedElapsedSec = 0;
+    this.currentTransitionOffsetSec = transitionOffsetSec;
     // 重新播起来了，上一次 stop 失败的标记不该再影响后续状态上报。
     // 放在这里是因为所有播放入口最终都会走到 playCurrentOnce。
     this.deviceStopConfirmed = true;
@@ -1017,7 +1023,7 @@ export class PlaylistManager {
     if (this.autoAdvance && song.duration > 0) {
       // 切歌偏移用于补偿音箱缓冲差异：正数延后、负数提前。
       // 下限 1 秒，避免偏移大于曲长时立刻触发切歌。
-      this.startCheckTimer(Math.max(1, song.duration + normalizeTransitionOffset(config.song_transition_offset)));
+      this.startCheckTimer(this.autoAdvanceTargetDuration(song));
     } else if (!this.autoAdvance) {
       songloft.log.info('[PlaylistManager] Auto-next timer disabled for standalone playback');
     } else {
@@ -1247,6 +1253,10 @@ export class PlaylistManager {
         }
         return -1;
     }
+  }
+
+  private autoAdvanceTargetDuration(song: PlayerSong): number {
+    return Math.max(1, song.duration + this.currentTransitionOffsetSec);
   }
 
   /**

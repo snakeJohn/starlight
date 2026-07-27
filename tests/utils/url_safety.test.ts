@@ -61,6 +61,12 @@ describe('validateOutboundWebhookUrl', () => {
     expect(result).toEqual({ ok: true, url: 'https://hooks.example.com/path' });
   });
 
+  it('requires https for hostname webhooks while allowing checked public IP literals', () => {
+    expect(validateOutboundWebhookUrl('http://hooks.example.com/path').ok).toBe(false);
+    expect(validateOutboundWebhookUrl('https://hooks.example.com/path').ok).toBe(true);
+    expect(validateOutboundWebhookUrl('http://8.8.8.8/path').ok).toBe(true);
+  });
+
   it('rejects missing url, non-http schemes, and private hosts', () => {
     expect(validateOutboundWebhookUrl('').ok).toBe(false);
     expect(validateOutboundWebhookUrl('ftp://example.com').ok).toBe(false);
