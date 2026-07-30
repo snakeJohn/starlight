@@ -5536,6 +5536,25 @@ label > .field-help,
     line-height: 1.6;
 }
 
+.platform-import-status {
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm, 6px);
+    background: color-mix(in srgb, var(--surface-2, #1c1c1e) 88%, transparent);
+}
+
+.platform-import-status.is-loading {
+    color: var(--text-secondary, #a1a1aa);
+}
+
+.platform-import-status.is-success {
+    color: var(--success, #34c759);
+}
+
+.platform-import-status.is-error {
+    color: var(--danger, #ff453a);
+}
+
 #tab-settings p.field-help {
     line-height: 1.6;
 }

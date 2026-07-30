@@ -3,6 +3,7 @@ import { asArray, resultCount } from '../shared/arrays.js';
 import { $, setState, state, toast } from '../state.js';
 import { bindPagination, clearPagination, pageSizes, renderPaginationInto } from './pagination.js';
 import { renderEmptyState, renderListScroller, renderSongListItem, renderSongRow, songListTitle } from './renderers.js';
+import { importPlatformPlaylistToSongloft } from './custom_playlists.js';
 import { songloftImportSummary, trackSongloftImportJob } from './songloft_playlist_target.js';
 
 let songlistDependencies = null;
@@ -149,20 +150,10 @@ export function bindSongLists() {
             }
             if (button.dataset.action === 'import-songlist-to-playlist') {
                 const quality = state.songlistQuery?.quality || $('[data-role="songlist-quality"]')?.value || state.songlistQuality;
-                const started = await api.post('/songloft/playlists/import-source-songlist/jobs', {
-                    source_id: platform,
-                    id,
+                await importPlatformPlaylistToSongloft(platform, id, {
+                    playlistName: songListTitle(item),
                     quality,
-                    playlist_name: songListTitle(item),
                 });
-                toast('已开始整单加入歌单，正在后台处理');
-                if (started?.job_id) {
-                    void trackSongloftImportJob(started.job_id, {
-                        targetPlaylistName: songListTitle(item),
-                    });
-                } else {
-                    toast(songloftImportSummary(started));
-                }
             }
         } catch (error) {
             toast(error.message, 'error');

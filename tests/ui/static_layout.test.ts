@@ -126,11 +126,13 @@ describe('static UI layout copy', () => {
     const music = readFileSync(resolve(process.cwd(), 'static/js/music.js'), 'utf8');
     const customPlaylists = musicCustomPlaylistsJs();
 
-    expect(html).toContain('<h2>导入歌单</h2>');
+    expect(html).toContain('<h2>导入平台歌单</h2>');
+    expect(html).toContain('导入到 Songloft');
     expect(html).toContain('Songloft 目标歌单');
     expect(html).toContain('搜索结果、榜单和歌单详情里的“加入歌单”会保存到选中的 Songloft 歌单');
     expect(music).toContain("from './music_modules/custom_playlists.js'");
-    expect(customPlaylists).toContain("api.post('/custom-playlists/import'");
+    expect(customPlaylists).toContain("import-source-songlist/jobs");
+    expect(customPlaylists).toContain('importPlatformPlaylistToSongloft');
     expect(customPlaylists).toContain("api.post(`/custom-playlists/${encodeURIComponent(playlistId)}/sync-songloft`)");
     expect(customPlaylists).toContain('data-action="add-selected-custom-playlist-songs"');
   });
@@ -140,7 +142,7 @@ describe('static UI layout copy', () => {
     const playlists = panelHtml(html, 'playlists');
     const discover = panelHtml(html, 'discover');
     const myPlaylists = playlists.indexOf('<h2>我的歌单</h2>');
-    const importPlaylists = playlists.indexOf('<h2>导入歌单</h2>');
+    const importPlaylists = playlists.indexOf('<h2>导入平台歌单</h2>');
 
     expect(myPlaylists).toBeGreaterThanOrEqual(0);
     expect(importPlaylists).toBeGreaterThan(myPlaylists);
@@ -689,7 +691,7 @@ describe('static UI layout copy', () => {
     expect(search).toContain('add-selected-search-to-playlist');
     expect(search).not.toContain('add-selected-search-to-songloft');
     expect(songlists).toContain('add-selected-songlist-detail-to-playlist');
-    expect(songlists).toContain('/songloft/playlists/import-source-songlist');
+    expect(songlists).toContain('importPlatformPlaylistToSongloft');
     expect(rankings).toContain('add-selected-ranking-to-playlist');
     expect(customPlaylists).toContain('add-selected-custom-playlist-songs');
     expect(customPlaylists).toContain('add-custom-playlist-song');

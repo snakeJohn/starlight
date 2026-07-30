@@ -106,7 +106,10 @@ export function toast(message, type = 'success') {
     node.className = `toast ${type}`;
     node.textContent = message;
     document.body.appendChild(node);
-    window.setTimeout(() => node.remove(), 3600);
+    const text = String(message || '');
+    // Long import summaries need more reading time.
+    const holdMs = text.length > 80 ? 9000 : type === 'error' ? 6000 : 3600;
+    window.setTimeout(() => node.remove(), holdMs);
 }
 
 export function selectedDevicePayload() {

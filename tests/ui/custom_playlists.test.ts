@@ -10,6 +10,7 @@ interface CustomPlaylistUiModule {
   playCustomPlaylistOnSpeaker(playlist: Record<string, unknown>): Promise<unknown>;
   syncCustomPlaylistToSongloft(playlistId: string): Promise<unknown>;
   importCustomPlaylistFromSource(sourceId: string, listId: string): Promise<unknown>;
+  importPlatformPlaylistToSongloft(sourceId: string, listId: string): Promise<unknown>;
   favoriteSongListFromSource(sourceId: string, listId: string): Promise<unknown>;
   refreshCustomPlaylist(playlistId: string): Promise<unknown>;
 }
@@ -37,6 +38,8 @@ function installToastDom() {
   vi.stubGlobal('window', {
     setTimeout: vi.fn(),
     dispatchEvent: vi.fn(),
+    confirm: vi.fn(() => true),
+    prompt: vi.fn(() => 'renamed'),
   });
   vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
 }
@@ -87,6 +90,65 @@ describe('custom playlist music UI helpers', () => {
       id: '3360244412',
     });
     expect(calls.map((call) => call[0])).toContain('api/custom-playlists/imported_1/refresh');
+  });
+
+  it('imports platform playlists into Songloft with overwrite on same-name conflict', async () => {
+    installToastDom();
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    vi.stubGlobal('window', {
+      ...((globalThis as { window?: object }).window || {}),
+      setTimeout: (fn: () => void) => {
+        fn();
+        return 0;
+      },
+      dispatchEvent: vi.fn(),
+      confirm: vi.fn(() => true),
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/music/songlist/detail')) {
+        return okResponse({ name: '华语热歌', songs: [], total: 0 }) as Response;
+      }
+      if (String(url).includes('/songloft/playlists/import-jobs/')) {
+        return okResponse({
+          id: 'job-import-1',
+          status: 'done',
+          result: {
+            playlist: { id: 3, name: '华语热歌' },
+            added: 12,
+            imported: 12,
+            skipped: 0,
+            conflict_resolution: 'overwrite',
+          },
+        }) as Response;
+      }
+      if (String(url).includes('/songloft/playlists') && !String(url).includes('import')) {
+        return okResponse([{ id: 3, name: '华语热歌' }]) as Response;
+      }
+      if (String(url).includes('import-source-songlist/jobs')) {
+        return okResponse({ job_id: 'job-import-1', status: 'running' }) as Response;
+      }
+      if (String(url).includes('/custom-playlists')) {
+        return okResponse([]) as Response;
+      }
+      return okResponse({}) as Response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { importPlatformPlaylistToSongloft } = await loadMusicModule() as {
+      importPlatformPlaylistToSongloft(sourceId: string, listId: string): Promise<unknown>;
+    };
+
+    const result = await importPlatformPlaylistToSongloft('kw', '3360244412');
+    expect(result).toMatchObject({ added: 12, conflict_resolution: 'overwrite' });
+
+    const importCall = (fetchMock.mock.calls as unknown as Array<[string, RequestInit]>)
+      .find(([url]) => String(url).includes('import-source-songlist/jobs'));
+    expect(importCall).toBeTruthy();
+    expect(JSON.parse(String(importCall?.[1]?.body))).toMatchObject({
+      source_id: 'kw',
+      id: '3360244412',
+      playlist_name: '华语热歌',
+      conflict_action: 'overwrite',
+    });
   });
 
   it('favorites discovered songlists through the custom playlist import API', async () => {

@@ -636,6 +636,101 @@ describe('BridgeService', () => {
     expect(secondProvider.search).not.toHaveBeenCalled();
   });
 
+  it('reuses Songloft library songs with same title+artist and still returns their ids for playlist linking', async () => {
+    const listMock = vi.fn(async () => ([
+      { id: 9001, title: 'Song', artist: 'Singer', type: 'remote' },
+      { id: 9002, title: 'Other', artist: 'Band', type: 'remote' },
+    ]));
+    (songloft.songs as unknown as { list: typeof listMock }).list = listMock;
+    const fetchMock = vi.fn(async () => {
+      throw new Error('should not remote-import when library already has the track');
+    });
+    globalThis.fetch = fetchMock;
+    const { service, runtimes } = createService({ url: null });
+
+    const result = await service.importSongsBestEffort([song]);
+    expect(result).toMatchObject({
+      total: 1,
+      skipped: 0,
+      songs: [{ id: 9001, title: 'Song', artist: 'Singer' }],
+      payloads: [],
+      errors: [],
+    });
+    expect(runtimes.getMusicUrl).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(listMock).toHaveBeenCalled();
+  });
+
+  it('falls back to 网易云→QQ→酷我… order when original Kuwo track cannot resolve for import', async () => {
+    const wySong = {
+      ...song,
+      source_data: {
+        platform: 'wy' as const,
+        quality: '320k' as const,
+        songInfo: {
+          source: 'wy',
+          name: 'Song',
+          singer: 'Singer',
+          album: 'Album',
+          duration: 200,
+          musicId: 'wy-ok',
+        },
+      },
+    } satisfies SearchResultSong;
+    const wyProvider = createProvider('wy', [wySong]);
+    const txProvider = createProvider('tx', []);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/v1/songs/remote')) {
+        return responseJson({
+          songs: [{ id: 501, type: 'remote', title: 'Song', artist: 'Singer' }],
+          count: 1,
+        }, 201);
+      }
+      if (url.includes('/lyrics')) {
+        return responseJson({ message: 'ok' });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+
+    const runtimes = {
+      getMusicUrl: vi.fn(async (platform: string, _quality: string, songInfo: { musicId?: string }) => {
+        // Original Kuwo id is dead; NetEase replacement works.
+        if (platform === 'kw') return null;
+        if (platform === 'wy' && songInfo.musicId === 'wy-ok') return 'https://audio.test/wy.mp3';
+        return null;
+      }),
+    } as unknown as RuntimeManager;
+    const platforms = {
+      all: vi.fn(() => [
+        { id: 'wy', name: '网易云' },
+        { id: 'tx', name: 'QQ' },
+        { id: 'kw', name: '酷我' },
+      ]),
+      get: vi.fn((id: string) => {
+        if (id === 'wy') return wyProvider;
+        if (id === 'tx') return txProvider;
+        return null;
+      }),
+    } as unknown as PlatformRegistry;
+    const service = new BridgeService(platforms, runtimes, {} as MinaService);
+
+    const result = await service.importSongsBestEffort([song]);
+    expect(result).toMatchObject({
+      total: 1,
+      skipped: 0,
+      songs: [{ id: 501, title: 'Song' }],
+    });
+    // Payload should carry the NetEase replacement, not the dead Kuwo track.
+    expect(result.payloads[0]).toMatchObject({
+      source_data: expect.stringContaining('"platform":"wy"'),
+    });
+    expect(wyProvider.search).toHaveBeenCalledWith('Song Singer', 1, 5);
+    // Ordered: wy first, so QQ may or may not be called depending early return — first playable is wy.
+    expect(txProvider.search).not.toHaveBeenCalled();
+  });
+
   it('returns an empty import result without fetching Songloft for an explicit empty song list', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
     globalThis.fetch = fetchMock;

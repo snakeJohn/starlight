@@ -48,8 +48,7 @@ describe('music songlist and ranking helpers', () => {
     expect(source).toContain('add-selected-songlist-detail-to-playlist');
     expect(source).not.toContain('import-songlist-to-songloft');
     expect(source).not.toContain('add-selected-songlist-detail-to-songloft');
-    expect(source).toContain('/songloft/playlists/import-source-songlist/jobs');
-    expect(source).toContain('trackSongloftImportJob');
+    expect(source).toContain('importPlatformPlaylistToSongloft');
     expect(source).toContain('openSongloftPlaylistTarget');
     expect(songlists.songListId({ id: '3360244412' })).toBe('3360244412');
   });

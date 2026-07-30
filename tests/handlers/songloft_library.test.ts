@@ -202,10 +202,13 @@ describe('registerSongloftLibraryHandlers', () => {
 
     expect(response).not.toBe('timeout');
     expect((response as HTTPResponse).statusCode).toBe(202);
-    expect(playlistService.importSongsToPlaylist).toHaveBeenCalledWith({
-      playlist_id: 12,
-      songs: [searchSong],
-    });
+    expect(playlistService.importSongsToPlaylist).toHaveBeenCalledWith(
+      {
+        playlist_id: 12,
+        songs: [searchSong],
+      },
+      expect.objectContaining({ onProgress: expect.any(Function) }),
+    );
     expect(parseResponseBody(response as HTTPResponse).data).toMatchObject({
       started: true,
       status: 'running',

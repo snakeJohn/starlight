@@ -69,6 +69,8 @@ describe('SongloftPlaylistService', () => {
     vi.clearAllMocks();
     delete (songloft.playlists as unknown as Record<string, unknown>).create;
     delete (songloft.playlists as unknown as Record<string, unknown>).addSongs;
+    delete (songloft.playlists as unknown as Record<string, unknown>).list;
+    delete (songloft.playlists as unknown as Record<string, unknown>).setSongs;
   });
 
   it('creates playlists through the Songloft SDK when available', async () => {
@@ -181,8 +183,10 @@ describe('SongloftPlaylistService', () => {
   it('creates a target playlist by name before adding imported songs', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith('/api/v1/playlists')) {
-        expect(init?.method).toBe('POST');
+      if (url.endsWith('/api/v1/playlists') && (!init?.method || init.method === 'GET')) {
+        return responseJson({ list: [] });
+      }
+      if (url.endsWith('/api/v1/playlists') && init?.method === 'POST') {
         expect(JSON.parse(String(init?.body))).toEqual({ name: 'New Mix' });
         return responseJson({ id: 13, name: 'New Mix' }, 201);
       }
@@ -203,6 +207,108 @@ describe('SongloftPlaylistService', () => {
       playlist: { id: 13, name: 'New Mix' },
       imported: 1,
       added: 1,
+      conflict_resolution: 'created',
+    });
+  });
+
+  it('rejects same-name import without conflict_action', async () => {
+    (songloft.playlists as unknown as Record<string, unknown>).list = vi.fn(async () => [
+      { id: 9, name: 'Network Mix' },
+    ]);
+    const provider = {
+      id: 'kw',
+      name: '酷我',
+      songListDetail: vi.fn(async () => ({
+        name: 'Network Mix',
+        total: 1,
+        songs: [song],
+      })),
+    } as unknown as MusicPlatformProvider;
+    const service = new SongloftPlaylistService(createBridge(), createRegistry(provider));
+
+    await expect(service.importSourceSonglist({
+      source_id: 'kw',
+      id: '1',
+    })).rejects.toMatchObject({
+      code: 'PLAYLIST_NAME_CONFLICT',
+    });
+  });
+
+  it('overwrites an existing Songloft playlist when conflict_action is overwrite', async () => {
+    (songloft.playlists as unknown as Record<string, unknown>).list = vi.fn(async () => [
+      { id: 9, name: 'Network Mix' },
+    ]);
+    const provider = {
+      id: 'kw',
+      name: '酷我',
+      songListDetail: vi.fn(async () => ({
+        name: 'Network Mix',
+        total: 1,
+        songs: [song],
+      })),
+    } as unknown as MusicPlatformProvider;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/playlists/9') && init?.method === 'DELETE') {
+        return responseJson({ ok: true });
+      }
+      if (url.endsWith('/api/v1/playlists') && init?.method === 'POST') {
+        return responseJson({ id: 19, name: 'Network Mix' }, 201);
+      }
+      if (url.endsWith('/api/v1/playlists/19/songs') && init?.method === 'POST') {
+        return responseJson({ added: 1 });
+      }
+      throw new Error(`Unexpected fetch ${url} ${init?.method}`);
+    });
+    globalThis.fetch = fetchMock;
+    const service = new SongloftPlaylistService(createBridge(), createRegistry(provider));
+
+    await expect(service.importSourceSonglist({
+      source_id: 'kw',
+      id: '1',
+      conflict_action: 'overwrite',
+    })).resolves.toMatchObject({
+      playlist: { id: 19, name: 'Network Mix' },
+      conflict_resolution: 'overwrite',
+      added: 1,
+    });
+  });
+
+  it('renames when conflict_action is rename', async () => {
+    (songloft.playlists as unknown as Record<string, unknown>).list = vi.fn(async () => [
+      { id: 9, name: 'Network Mix' },
+    ]);
+    const provider = {
+      id: 'kw',
+      name: '酷我',
+      songListDetail: vi.fn(async () => ({
+        name: 'Network Mix',
+        total: 1,
+        songs: [song],
+      })),
+    } as unknown as MusicPlatformProvider;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/v1/playlists') && init?.method === 'POST') {
+        expect(JSON.parse(String(init?.body))).toEqual({ name: 'Network Mix (2)' });
+        return responseJson({ id: 20, name: 'Network Mix (2)' }, 201);
+      }
+      if (url.endsWith('/api/v1/playlists/20/songs')) {
+        return responseJson({ added: 1 });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    globalThis.fetch = fetchMock;
+    const service = new SongloftPlaylistService(createBridge(), createRegistry(provider));
+
+    await expect(service.importSourceSonglist({
+      source_id: 'kw',
+      id: '1',
+      conflict_action: 'rename',
+      rename_to: 'Network Mix (2)',
+    })).resolves.toMatchObject({
+      playlist: { id: 20, name: 'Network Mix (2)' },
+      conflict_resolution: 'rename',
     });
   });
 
@@ -210,7 +316,7 @@ describe('SongloftPlaylistService', () => {
     const provider = {
       id: 'kw',
       name: '酷我',
-      songListDetail: vi.fn(async (_id: string, page: number, pageSize: number) => ({
+      songListDetail: vi.fn(async (_id: string, page: number, _pageSize: number) => ({
         name: 'Network Mix',
         total: 2,
         songs: page === 1 ? [song] : page === 2 ? [secondSong] : [],
@@ -218,7 +324,10 @@ describe('SongloftPlaylistService', () => {
     } as unknown as MusicPlatformProvider;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith('/api/v1/playlists')) {
+      if (url.endsWith('/api/v1/playlists') && (!init?.method || init.method === 'GET')) {
+        return responseJson({ list: [] });
+      }
+      if (url.endsWith('/api/v1/playlists') && init?.method === 'POST') {
         return responseJson({ id: 14, name: 'Network Mix' }, 201);
       }
       if (url.endsWith('/api/v1/playlists/14/songs')) {

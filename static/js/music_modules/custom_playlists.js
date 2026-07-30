@@ -9,6 +9,7 @@ import {
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from '../state.js';
 import { clampPage, pageCount, pageFromPagination, pageSizes, renderPagination } from './pagination.js';
 import { renderArtwork, renderEmptyState, renderListScroller, renderSongloftSongRow, songAlbum, songArtist, songTitle } from './renderers.js';
+import { songloftImportSummary, trackSongloftImportJob } from './songloft_playlist_target.js';
 
 let customPlaylistDependencies = null;
 
@@ -275,15 +276,150 @@ async function createCustomPlaylist(name) {
     return result;
 }
 
+/** Custom-playlist snapshot import (收藏等内部用途，不写 Songloft 曲库). */
 export async function importCustomPlaylistFromSource(sourceId, listId) {
     const result = await api.post('/custom-playlists/import', { source_id: sourceId, id: listId });
-    toast('歌单已导入');
+    toast('歌单已导入到我的歌单');
     await loadCustomPlaylists();
     return result;
 }
 
 export async function favoriteSongListFromSource(sourceId, listId) {
     return importCustomPlaylistFromSource(sourceId, listId);
+}
+
+function normalizePlaylistName(name) {
+    return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function nextAvailablePlaylistName(baseName, playlists) {
+    const base = String(baseName || '').trim() || '导入歌单';
+    const used = new Set(
+        asArray(playlists).map(item => normalizePlaylistName(songloftPlaylistName(item))).filter(Boolean),
+    );
+    if (!used.has(normalizePlaylistName(base))) return base;
+    for (let n = 2; n < 1000; n += 1) {
+        const candidate = `${base} (${n})`;
+        if (!used.has(normalizePlaylistName(candidate))) return candidate;
+    }
+    return `${base} (${Date.now()})`;
+}
+
+/**
+ * Import a platform songlist into Songloft (host library + playlist).
+ * If a same-name Songloft playlist exists, prompt:
+ * - OK → overwrite update
+ * - Cancel → rename then create a new playlist
+ */
+export async function importPlatformPlaylistToSongloft(sourceId, listId, options = {}) {
+    const source = String(sourceId || state.platform || '').trim();
+    const id = String(listId || '').trim();
+    if (!source || !id) {
+        throw new Error('请选择平台并填写歌单链接或 ID');
+    }
+
+    // Resolve display name from first detail page (cheap) for conflict check.
+    let playlistName = String(options.playlistName || '').trim();
+    if (!playlistName) {
+        try {
+            const detail = await api.get(
+                `/music/songlist/detail?source_id=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}&page=1&page_size=1`,
+            );
+            playlistName = String(detail?.name || detail?.title || '').trim();
+        } catch {
+            playlistName = '';
+        }
+    }
+    if (!playlistName) {
+        playlistName = id;
+    }
+
+    const playlists = await fetchSongloftPlaylists().catch(() => []);
+    const existing = asArray(playlists).find(
+        item => normalizePlaylistName(songloftPlaylistName(item)) === normalizePlaylistName(playlistName),
+    );
+
+    let conflict_action;
+    let rename_to;
+    if (existing) {
+        const overwrite = typeof window.confirm === 'function'
+            ? window.confirm(
+                `Songloft 已存在同名歌单「${playlistName}」。\n\n确定 = 覆盖更新该歌单\n取消 = 重命名后导入为新歌单`,
+            )
+            : true;
+        if (overwrite) {
+            conflict_action = 'overwrite';
+        } else {
+            conflict_action = 'rename';
+            const suggested = nextAvailablePlaylistName(playlistName, playlists);
+            const typed = typeof window.prompt === 'function'
+                ? window.prompt('请输入新歌单名称', suggested)
+                : suggested;
+            if (typed === null) {
+                throw new Error('已取消导入');
+            }
+            rename_to = String(typed || '').trim() || suggested;
+        }
+    }
+
+    const quality = options.quality
+        || state.songlistQuality
+        || state.quality
+        || 'flac24bit';
+    const payload = {
+        source_id: source,
+        id,
+        quality,
+        playlist_name: playlistName,
+        ...(conflict_action ? { conflict_action } : {}),
+        ...(rename_to ? { rename_to } : {}),
+    };
+
+    const targetName = rename_to || playlistName;
+    setPlatformImportStatus(`正在提交导入任务「${targetName}」…`, 'loading');
+    setState({ message: `正在导入 Songloft 歌单「${targetName}」` });
+
+    const started = await api.post('/songloft/playlists/import-source-songlist/jobs', payload);
+    if (started?.job_id) {
+        setPlatformImportStatus(`任务已创建，正在导入「${targetName}」…`, 'loading');
+        // Await the job so the form stays busy until success/failure is visible.
+        const result = await trackSongloftImportJob(started.job_id, {
+            targetPlaylistName: targetName,
+            throwOnError: true,
+            silent: true, // form owns status line + final toast
+            onProgress: (progress) => {
+                if (progress?.message) {
+                    setPlatformImportStatus(progress.message, progress.status === 'failed' ? 'error' : 'loading');
+                    setState({ message: progress.message });
+                }
+            },
+        });
+        const summary = songloftImportSummary(result, { targetPlaylistName: targetName });
+        setPlatformImportStatus(summary, Number(result?.skipped) > 0 ? 'info' : 'success');
+        toast(summary, Number(result?.skipped) > 0 ? 'info' : 'success');
+        setState({ message: summary });
+        await loadCustomPlaylists().catch(() => undefined);
+        return result;
+    }
+
+    // Synchronous import path (no job).
+    const summary = songloftImportSummary(started, { targetPlaylistName: targetName });
+    toast(summary, Number(started?.skipped) > 0 ? 'info' : 'success');
+    setPlatformImportStatus(summary, Number(started?.skipped) > 0 ? 'info' : 'success');
+    setState({ message: summary });
+    await loadCustomPlaylists().catch(() => undefined);
+    return started;
+}
+
+function setPlatformImportStatus(message, tone = 'info') {
+    const node = $('[data-role="platform-import-status"]');
+    if (!node) return;
+    node.hidden = !message;
+    node.textContent = message || '';
+    node.dataset.tone = tone || 'info';
+    node.classList.toggle('is-error', tone === 'error');
+    node.classList.toggle('is-success', tone === 'success');
+    node.classList.toggle('is-loading', tone === 'loading');
 }
 
 export async function refreshCustomPlaylist(playlistId) {
@@ -384,10 +520,13 @@ export function bindCustomPlaylists() {
         if (!body.id?.trim()) return;
         setControlDisabled(button, true);
         try {
-            await importCustomPlaylistFromSource(body.source_id || state.platform, body.id.trim());
+            await importPlatformPlaylistToSongloft(body.source_id || state.platform, body.id.trim());
             importForm.reset();
         } catch (error) {
-            toast(error.message, 'error');
+            const message = error?.message || '导入失败';
+            setPlatformImportStatus(message, 'error');
+            setState({ message });
+            toast(message, 'error');
         } finally {
             setControlDisabled(button, false);
         }

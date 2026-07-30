@@ -238,7 +238,7 @@
                 </section>
                 <section class="surface-section">
                     <div class="section-bar">
-                        <h2>导入歌单</h2>
+                        <h2>导入平台歌单</h2>
                     </div>
                     <form class="inline-form" data-role="custom-playlist-import-form">
                         <label>
@@ -249,8 +249,10 @@
                             <span>链接或 ID</span>
                             <input name="id" placeholder="歌单链接或 ID" autocomplete="off">
                         </label>
-                        <button class="primary-button" type="submit">导入歌单</button>
+                        <button class="primary-button" type="submit">导入到 Songloft</button>
                     </form>
+                    <p class="field-help">导入后写入 Songloft 歌单库。若已有同名歌单，将提示覆盖更新或重命名后新建。300+ 首大歌单可能需要十几分钟，请保持本页打开；状态行会显示入库进度（如 90/320）。</p>
+                    <p class="field-help platform-import-status" data-role="platform-import-status" hidden></p>
                 </section>
             </section>
 

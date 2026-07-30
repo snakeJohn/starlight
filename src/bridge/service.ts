@@ -3,7 +3,7 @@
 import { StarlightError } from '../system/errors';
 import { PlatformRegistry } from '../music/platforms/registry';
 import { RuntimeManager } from '../music/runtime_manager';
-import type { MusicQuality, SearchResultSong } from '../music/types';
+import type { MusicPlatform, MusicQuality, SearchResultSong } from '../music/types';
 import { resolveMusicLyric } from '../music/platforms/lyrics';
 import { updateHostSongLyrics } from '../music/host_lyrics';
 import { toRemoteSong, type RemoteSongPayload } from './mapper';
@@ -26,6 +26,18 @@ export const PLAYBACK_QUALITY_LADDER: readonly MusicQuality[] = [
   'flac',
   '320k',
   '128k',
+];
+
+/**
+ * Multi-source fallback order for import when the original platform track is dead:
+ * 网易云 → QQ → 酷我 → 酷狗 → 咪咕
+ */
+export const IMPORT_PLATFORM_FALLBACK_ORDER: readonly MusicPlatform[] = [
+  'wy',
+  'tx',
+  'kw',
+  'kg',
+  'mg',
 ];
 
 const QUALITY_RANK: Record<string, number> = {
@@ -136,18 +148,126 @@ export class BridgeService {
     );
   }
 
+  /**
+   * Resolve a playable song for Songloft library import.
+   * 1) Prefer the original platform track (quality ladder).
+   * 2) On failure, search 网易云 → QQ → 酷我 → 酷狗 → 咪咕 for same title+artist
+   *    and use the first playable match.
+   */
+  async resolveSongForImport(song: SearchResultSong): Promise<{
+    song: SearchResultSong;
+    url: string;
+    quality: MusicQuality;
+    fallbackPlatform?: string;
+  }> {
+    try {
+      const playback = await this.resolvePlayback(song);
+      return {
+        song: withPlaybackQuality(song, playback.quality),
+        url: playback.url,
+        quality: playback.quality,
+      };
+    } catch (originalError) {
+      const title = String(song.title || '').trim();
+      const artist = String(song.artist || '').trim();
+      if (!title) {
+        throw originalError;
+      }
+
+      const originalPlatform = String(song.source_data?.platform || '');
+      const fallback = await this.findFirstPlayableInPlatformOrder(title, artist);
+      if (!fallback) {
+        throw originalError;
+      }
+
+      songloft.log.info(
+        `[BridgeService] Import multi-source fallback `
+        + `${originalPlatform || '?'} → ${fallback.song.source_data.platform} `
+        + `for "${title}"${artist ? ` - ${artist}` : ''}`,
+      );
+      return {
+        song: fallback.song,
+        url: fallback.url,
+        quality: fallback.quality,
+        fallbackPlatform: fallback.song.source_data.platform,
+      };
+    }
+  }
+
+  /**
+   * Walk IMPORT_PLATFORM_FALLBACK_ORDER and return the first playable title/artist match.
+   */
+  private async findFirstPlayableInPlatformOrder(
+    title: string,
+    artist: string,
+  ): Promise<{ song: SearchResultSong; url: string; quality: MusicQuality; matchScore: number } | null> {
+    const keyword = [title, artist].map((item) => item.trim()).filter(Boolean).join(' ');
+    if (!keyword) {
+      return null;
+    }
+
+    for (const platformId of IMPORT_PLATFORM_FALLBACK_ORDER) {
+      const provider = this.platforms.get(platformId);
+      if (!provider) {
+        continue;
+      }
+
+      try {
+        const result = await provider.search(keyword, 1, 5);
+        const candidates = (result.list ?? [])
+          .map((item) => ({ song: item, score: scoreResolvedCandidate(title, artist, item) }))
+          .filter((item) => item.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3);
+
+        for (const candidate of candidates) {
+          try {
+            const playback = await this.resolvePlayback(candidate.song);
+            return {
+              song: withPlaybackQuality(candidate.song, playback.quality),
+              url: playback.url,
+              quality: playback.quality,
+              matchScore: candidate.score,
+            };
+          } catch (error) {
+            songloft.log.warn(
+              `[BridgeService] Fallback candidate not playable on ${platformId}: ${sanitizeProviderError(error)}`,
+            );
+          }
+        }
+      } catch (error) {
+        songloft.log.warn(
+          `[BridgeService] Fallback search on ${platformId} failed: ${sanitizeProviderError(error)}`,
+        );
+      }
+    }
+
+    return null;
+  }
+
   async importSongs(songs: SearchResultSong[]): Promise<{ total: number; payloads: RemoteSongPayload[]; songs: SongloftRemoteSong[] }> {
     if (songs.length === 0) {
       return { total: 0, payloads: [], songs: [] };
     }
 
+    const libraryIndex = await loadLibraryTitleArtistIndex();
+    const reusedSongs: SongloftRemoteSong[] = [];
     const payloads: RemoteSongPayload[] = [];
     const acceptedSongs: SearchResultSong[] = [];
     for (const song of songs) {
-      const playback = await this.resolvePlayback(song);
-      const enriched = withPlaybackQuality(song, playback.quality);
-      payloads.push(toImportRemoteSong(enriched, playback.url));
-      acceptedSongs.push(enriched);
+      const existing = lookupLibraryByTitleArtist(libraryIndex, song.title, song.artist);
+      if (existing) {
+        // 曲库已有同名同作者：跳过重新解析/入库，仍返回 id 供歌单挂载。
+        reusedSongs.push(existing);
+        continue;
+      }
+      const resolved = await this.resolveSongForImport(song);
+      payloads.push(toImportRemoteSong(resolved.song, resolved.url));
+      acceptedSongs.push(resolved.song);
+    }
+
+    if (payloads.length === 0) {
+      return { total: reusedSongs.length, payloads: [], songs: reusedSongs };
     }
 
     const token = await songloft.plugin.getToken();
@@ -169,6 +289,7 @@ export class BridgeService {
           ? compactRemoteSongs(await completeImportedSongs(host, token, [payload], single.songs))
           : await existingSongsForPayloads(host, token, [payload]);
         importedSongs.push(...resolvedSongs);
+        rememberLibrarySongs(libraryIndex, resolvedSongs);
         if (sourceSong && resolvedSongs.length > 0) {
           startImportedSongLyricSync(host, token, [sourceSong], resolvedSongs);
         }
@@ -177,10 +298,17 @@ export class BridgeService {
       // 歌词同步按下标配对，必须先用保持 payload 顺序（含空位）的结果同步，再压缩。
       const completed = await completeImportedSongs(host, token, payloads, imported.songs);
       startImportedSongLyricSync(host, token, acceptedSongs, completed);
-      importedSongs.push(...compactRemoteSongs(completed));
+      const compacted = compactRemoteSongs(completed);
+      importedSongs.push(...compacted);
+      rememberLibrarySongs(libraryIndex, compacted);
     }
 
-    return { total: payloads.length, payloads, songs: importedSongs };
+    // total = 复用 + 本次尝试入库数；songs 仅含可用 id（供歌单挂载）
+    return {
+      total: reusedSongs.length + payloads.length,
+      payloads,
+      songs: [...reusedSongs, ...importedSongs],
+    };
   }
 
   async importSongsBestEffort(songs: SearchResultSong[]): Promise<{
@@ -194,15 +322,27 @@ export class BridgeService {
       return { total: 0, skipped: 0, payloads: [], songs: [], errors: [] };
     }
 
+    // Snapshot once per batch: 曲库同名同作者 → 复用 id，仍交给上层写入歌单。
+    const libraryIndex = await loadLibraryTitleArtistIndex();
+    const reusedSongs: SongloftRemoteSong[] = [];
     const payloads: RemoteSongPayload[] = [];
     const acceptedSongs: SearchResultSong[] = [];
     const errors: Array<{ title: string; message: string }> = [];
     for (const song of songs) {
       try {
-        const playback = await this.resolvePlayback(song);
-        const enriched = withPlaybackQuality(song, playback.quality);
-        payloads.push(toImportRemoteSong(enriched, playback.url));
-        acceptedSongs.push(enriched);
+        const existing = lookupLibraryByTitleArtist(libraryIndex, song.title, song.artist);
+        if (existing) {
+          reusedSongs.push(existing);
+          songloft.log.info(
+            `[BridgeService] Library title+artist hit, reuse id=${existing.id} `
+            + `"${song.title}" - ${song.artist || ''} (still link to playlist)`,
+          );
+          continue;
+        }
+        // Original platform first; on dead/VIP/offline links, search 网易云→QQ→酷我→酷狗→咪咕.
+        const resolved = await this.resolveSongForImport(song);
+        payloads.push(toImportRemoteSong(resolved.song, resolved.url));
+        acceptedSongs.push(resolved.song);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         errors.push({ title: song.title, message });
@@ -211,7 +351,13 @@ export class BridgeService {
     }
 
     if (payloads.length === 0) {
-      return { total: 0, skipped: errors.length, payloads: [], songs: [], errors };
+      return {
+        total: reusedSongs.length,
+        skipped: errors.length,
+        payloads: [],
+        songs: reusedSongs,
+        errors,
+      };
     }
 
     const token = await songloft.plugin.getToken();
@@ -221,7 +367,13 @@ export class BridgeService {
       if (!isDuplicateRemoteSongError(imported.body)) {
         errors.push({ title: 'Songloft 歌曲库', message: remoteImportError(imported.status, imported.body).message });
         songloft.log.warn(`[BridgeService] Remote song import failed: ${imported.status} ${sanitizeProviderError(imported.body)}`);
-        return { total: 0, skipped: songs.length, payloads: [], songs: [], errors };
+        return {
+          total: reusedSongs.length,
+          skipped: songs.length - reusedSongs.length,
+          payloads: [],
+          songs: reusedSongs,
+          errors,
+        };
       }
 
       const acceptedPayloads: RemoteSongPayload[] = [];
@@ -233,6 +385,7 @@ export class BridgeService {
           const resolvedSongs = compactRemoteSongs(await completeImportedSongs(host, token, [payload], single.songs));
           acceptedPayloads.push(payload);
           importedSongs.push(...resolvedSongs);
+          rememberLibrarySongs(libraryIndex, resolvedSongs);
           if (sourceSong && resolvedSongs.length > 0) {
             startImportedSongLyricSync(host, token, [sourceSong], resolvedSongs);
           }
@@ -241,6 +394,7 @@ export class BridgeService {
           if (resolvedSongs.length > 0) {
             acceptedPayloads.push(payload);
             importedSongs.push(...resolvedSongs);
+            rememberLibrarySongs(libraryIndex, resolvedSongs);
             if (sourceSong) {
               startImportedSongLyricSync(host, token, [sourceSong], resolvedSongs);
             }
@@ -251,23 +405,26 @@ export class BridgeService {
           errors.push({ title: payload.title, message: remoteImportError(single.status, single.body).message });
         }
       }
+      // total counts reuse + accepted remote attempts; songs only those with usable ids for playlist add.
       return {
-        total: acceptedPayloads.length,
-        skipped: songs.length - acceptedPayloads.length,
+        total: reusedSongs.length + acceptedPayloads.length,
+        skipped: songs.length - reusedSongs.length - acceptedPayloads.length,
         payloads: acceptedPayloads,
-        songs: importedSongs,
+        songs: [...reusedSongs, ...importedSongs],
         errors,
       };
     }
 
     const completed = await completeImportedSongs(host, token, payloads, imported.songs);
     startImportedSongLyricSync(host, token, acceptedSongs, completed);
+    const newlyImported = compactRemoteSongs(completed);
+    rememberLibrarySongs(libraryIndex, newlyImported);
 
     return {
-      total: payloads.length,
-      skipped: songs.length - payloads.length,
+      total: reusedSongs.length + payloads.length,
+      skipped: songs.length - reusedSongs.length - payloads.length,
       payloads,
-      songs: compactRemoteSongs(completed),
+      songs: [...reusedSongs, ...newlyImported],
       errors,
     };
   }
@@ -536,9 +693,9 @@ export class BridgeService {
       return;
     }
 
-    for (const platform of this.platforms.all()) {
-      attemptedSources?.add(platform.id);
-      const provider = this.platforms.get(platform.id);
+    for (const platformId of orderedPlatformIds(this.platforms)) {
+      attemptedSources?.add(platformId);
+      const provider = this.platforms.get(platformId);
       if (!provider) {
         continue;
       }
@@ -565,17 +722,128 @@ export class BridgeService {
           } catch (error) {
             failures?.push(sanitizeProviderError(error));
             songloft.log.warn(
-              `[BridgeService] Resolved search hit is not playable on ${platform.id}: ${sanitizeProviderError(error)}`,
+              `[BridgeService] Resolved search hit is not playable on ${platformId}: ${sanitizeProviderError(error)}`,
             );
           }
         }
       } catch (error) {
         failures?.push(sanitizeProviderError(error));
         songloft.log.warn(
-          `[BridgeService] Resolve search provider ${platform.id} failed: ${sanitizeProviderError(error)}`,
+          `[BridgeService] Resolve search provider ${platformId} failed: ${sanitizeProviderError(error)}`,
         );
       }
     }
+  }
+}
+
+/** Prefer the documented fallback order, then any other registered platforms. */
+function orderedPlatformIds(platforms: PlatformRegistry): string[] {
+  const available = new Set(platforms.all().map((item) => item.id));
+  const ordered: string[] = [];
+  for (const id of IMPORT_PLATFORM_FALLBACK_ORDER) {
+    if (available.has(id)) {
+      ordered.push(id);
+      available.delete(id);
+    }
+  }
+  for (const id of available) {
+    ordered.push(id);
+  }
+  return ordered;
+}
+
+const LIBRARY_LIST_LIMIT = 10000;
+
+function titleArtistKey(title: string, artist: string): string {
+  const t = normalizeSongText(title);
+  const a = normalizeSongText(artist);
+  if (!t || !a) return '';
+  return `${t}\0${a}`;
+}
+
+function librarySongField(song: SongloftRemoteSong, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = (song as Record<string, unknown>)[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return '';
+}
+
+function librarySongId(song: SongloftRemoteSong): number {
+  const id = (song as { id?: unknown }).id;
+  if (typeof id === 'number' && Number.isInteger(id) && id > 0) return id;
+  if (typeof id === 'string' && id.trim() !== '') {
+    const parsed = Number(id);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+  return 0;
+}
+
+function songRowsFromList(value: unknown): SongloftRemoteSong[] {
+  if (Array.isArray(value)) return value as SongloftRemoteSong[];
+  if (!value || typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  for (const key of ['songs', 'list', 'items'] as const) {
+    if (Array.isArray(record[key])) return record[key] as SongloftRemoteSong[];
+  }
+  if (record.data && typeof record.data === 'object') {
+    return songRowsFromList(record.data);
+  }
+  return [];
+}
+
+/**
+ * Build a title+artist → song index from the host library.
+ * Used to skip re-import while still returning ids for playlist linking.
+ */
+async function loadLibraryTitleArtistIndex(): Promise<Map<string, SongloftRemoteSong>> {
+  const index = new Map<string, SongloftRemoteSong>();
+  try {
+    const listApi = songloft.songs?.list;
+    if (typeof listApi !== 'function') {
+      return index;
+    }
+    const raw = await listApi.call(songloft.songs, { limit: LIBRARY_LIST_LIMIT });
+    for (const row of songRowsFromList(raw)) {
+      const id = librarySongId(row);
+      if (!id) continue;
+      const title = librarySongField(row, 'title', 'name', 'songName');
+      const artist = librarySongField(row, 'artist', 'singer', 'author', 'singerName');
+      const key = titleArtistKey(title, artist);
+      if (!key || index.has(key)) continue;
+      index.set(key, { ...row, id });
+    }
+  } catch (error) {
+    songloft.log.warn(
+      `[BridgeService] Library title+artist index failed: ${sanitizeProviderError(error)}`,
+    );
+  }
+  return index;
+}
+
+function lookupLibraryByTitleArtist(
+  index: Map<string, SongloftRemoteSong>,
+  title: string,
+  artist: string,
+): SongloftRemoteSong | null {
+  const key = titleArtistKey(title, artist);
+  if (!key) return null;
+  return index.get(key) ?? null;
+}
+
+function rememberLibrarySongs(
+  index: Map<string, SongloftRemoteSong>,
+  songs: SongloftRemoteSong[],
+): void {
+  for (const song of songs) {
+    const id = librarySongId(song);
+    if (!id) continue;
+    const title = librarySongField(song, 'title', 'name', 'songName');
+    const artist = librarySongField(song, 'artist', 'singer', 'author', 'singerName');
+    const key = titleArtistKey(title, artist);
+    if (!key) continue;
+    index.set(key, { ...song, id });
   }
 }
 

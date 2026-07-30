@@ -13,6 +13,15 @@ interface NormalizedList {
   total: number;
 }
 
+export interface SongloftImportJobProgress {
+  stage: string;
+  current: number;
+  total: number;
+  message: string;
+}
+
+export type SongloftImportProgressReporter = (progress: SongloftImportJobProgress) => void;
+
 interface SongloftLibraryHandlerOptions {
   playlistManagerMap?: PlaylistManagerMap;
   playlistService?: SongloftPlaylistHandlerService;
@@ -20,8 +29,14 @@ interface SongloftLibraryHandlerOptions {
 
 interface SongloftPlaylistHandlerService {
   createPlaylist(name: string): Promise<unknown>;
-  importSongsToPlaylist(input: ImportSongsToPlaylistBody): Promise<unknown>;
-  importSourceSonglist(input: ImportSourceSonglistBody): Promise<unknown>;
+  importSongsToPlaylist(
+    input: ImportSongsToPlaylistBody,
+    options?: { onProgress?: SongloftImportProgressReporter },
+  ): Promise<unknown>;
+  importSourceSonglist(
+    input: ImportSourceSonglistBody,
+    options?: { onProgress?: SongloftImportProgressReporter },
+  ): Promise<unknown>;
 }
 
 type SongloftImportJobType = 'songs' | 'source-songlist';
@@ -33,6 +48,7 @@ interface SongloftImportJob {
   status: SongloftImportJobStatus;
   started_at: string;
   updated_at: string;
+  progress?: SongloftImportJobProgress;
   result?: unknown;
   error?: {
     code: string;
@@ -45,6 +61,8 @@ interface SongloftImportJob {
 interface ImportSongsToPlaylistBody {
   playlist_id?: unknown;
   playlist_name?: string;
+  conflict_action?: 'overwrite' | 'rename';
+  rename_to?: string;
   songs: PlaylistImportSong[];
 }
 
@@ -53,6 +71,8 @@ interface ImportSourceSonglistBody {
   id: string;
   quality?: string;
   playlist_name?: string;
+  conflict_action?: 'overwrite' | 'rename';
+  rename_to?: string;
 }
 
 const LIST_KEYS = ['list', 'items', 'songs', 'playlists'] as const;
@@ -61,7 +81,10 @@ const MAX_IMPORT_JOBS = 50;
 class SongloftImportJobs {
   private readonly jobs = new Map<string, SongloftImportJob>();
 
-  start(type: SongloftImportJobType, runner: () => Promise<unknown>): SongloftImportJob {
+  start(
+    type: SongloftImportJobType,
+    runner: (report: SongloftImportProgressReporter) => Promise<unknown>,
+  ): SongloftImportJob {
     const now = new Date().toISOString();
     const job: SongloftImportJob = {
       id: importJobId(),
@@ -69,16 +92,44 @@ class SongloftImportJobs {
       status: 'running',
       started_at: now,
       updated_at: now,
+      progress: {
+        stage: 'queued',
+        current: 0,
+        total: 0,
+        message: '任务已排队',
+      },
     };
     this.jobs.set(job.id, job);
     this.prune();
+    songloft.log.info(`[SongloftImportJobs] start type=${type} job=${job.id}`);
+
+    const report: SongloftImportProgressReporter = (progress) => {
+      if (job.status !== 'running') return;
+      job.progress = {
+        stage: String(progress.stage || 'running'),
+        current: Math.max(0, Math.floor(Number(progress.current) || 0)),
+        total: Math.max(0, Math.floor(Number(progress.total) || 0)),
+        message: String(progress.message || '').slice(0, 240),
+      };
+      job.updated_at = new Date().toISOString();
+    };
 
     try {
-      const pending = runner();
+      const pending = Promise.resolve().then(() => runner(report));
       pending.then((result) => {
         job.status = 'done';
         job.result = result;
         job.updated_at = new Date().toISOString();
+        const summary = summarizeImportResult(result);
+        job.progress = {
+          stage: 'done',
+          current: Number((result as { added?: number })?.added || 0),
+          total: Number((result as { source_total?: number; imported?: number })?.source_total
+            || (result as { imported?: number })?.imported
+            || 0),
+          message: summary,
+        };
+        songloft.log.info(`[SongloftImportJobs] done type=${type} job=${job.id} ${summary}`);
       }).catch((error) => {
         this.fail(job, error);
       });
@@ -108,7 +159,9 @@ class SongloftImportJobs {
       details: starlightError.details,
     };
     job.updated_at = new Date().toISOString();
-    songloft.log.warn(`[SongloftImportJobs] ${job.type} job failed: ${starlightError.message}`);
+    songloft.log.error(
+      `[SongloftImportJobs] failed type=${job.type} job=${job.id} code=${starlightError.code}: ${starlightError.message}`,
+    );
   }
 
   private snapshot(job: SongloftImportJob, started = false): SongloftImportJob & { started?: true; job_id?: string } {
@@ -132,6 +185,28 @@ class SongloftImportJobs {
 
 function importJobId(): string {
   return generateId('slimp');
+}
+
+function summarizeImportResult(result: unknown): string {
+  if (!result || typeof result !== 'object') {
+    return 'result=empty';
+  }
+  const record = result as Record<string, unknown>;
+  const playlist = record.playlist && typeof record.playlist === 'object'
+    ? record.playlist as Record<string, unknown>
+    : null;
+  const name = typeof playlist?.name === 'string' ? playlist.name : '';
+  const id = playlist?.id ?? '';
+  const parts = [
+    name ? `name="${name}"` : '',
+    id !== '' && id !== undefined ? `playlist_id=${String(id)}` : '',
+    typeof record.imported === 'number' ? `imported=${record.imported}` : '',
+    typeof record.added === 'number' ? `added=${record.added}` : '',
+    typeof record.skipped === 'number' ? `skipped=${record.skipped}` : '',
+    typeof record.source_total === 'number' ? `source_total=${record.source_total}` : '',
+    typeof record.conflict_resolution === 'string' ? `resolution=${record.conflict_resolution}` : '',
+  ].filter(Boolean);
+  return parts.join(' ') || 'ok';
 }
 
 function normalizeList(value: unknown): NormalizedList {
@@ -260,26 +335,39 @@ function requireSearchSong(value: unknown): void {
   }
 }
 
+function parseConflictAction(value: unknown): 'overwrite' | 'rename' | undefined {
+  if (value === 'overwrite' || value === 'rename') return value;
+  return undefined;
+}
+
 function parseImportSongsBody(req: JsonBodyRequest): ImportSongsToPlaylistBody {
   const body = parseJsonBody<Record<string, unknown>>(req);
   const playlistName = optionalStringValue(body.playlist_name);
   if (body.playlist_id === undefined && !playlistName) {
     throw new StarlightError('BAD_REQUEST', 'playlist_id or playlist_name is required');
   }
+  const conflictAction = parseConflictAction(body.conflict_action);
+  const renameTo = optionalStringValue(body.rename_to);
   return {
     ...(body.playlist_id !== undefined ? { playlist_id: body.playlist_id } : {}),
     ...(playlistName ? { playlist_name: playlistName } : {}),
+    ...(conflictAction ? { conflict_action: conflictAction } : {}),
+    ...(renameTo ? { rename_to: renameTo } : {}),
     songs: requireSearchSongs(body.songs),
   };
 }
 
 function parseImportSourceSonglistBody(req: JsonBodyRequest): ImportSourceSonglistBody {
   const body = parseJsonBody<Record<string, unknown>>(req);
+  const conflictAction = parseConflictAction(body.conflict_action);
+  const renameTo = optionalStringValue(body.rename_to);
   return {
     source_id: requireStringValue(body.source_id, 'source_id'),
     id: requireStringValue(body.id ?? body.sourceListId ?? body.source_list_id ?? body.link ?? body.url, 'id'),
     ...(optionalStringValue(body.quality) ? { quality: optionalStringValue(body.quality) } : {}),
     ...(optionalStringValue(body.playlist_name) ? { playlist_name: optionalStringValue(body.playlist_name) } : {}),
+    ...(conflictAction ? { conflict_action: conflictAction } : {}),
+    ...(renameTo ? { rename_to: renameTo } : {}),
   };
 }
 
@@ -390,7 +478,7 @@ export function registerSongloftLibraryHandlers(router: Router, options: Songlof
     runApi(() => {
       const service = requirePlaylistService(options);
       const input = parseImportSongsBody(req);
-      return importJobs.start('songs', () => service.importSongsToPlaylist(input));
+      return importJobs.start('songs', (report) => service.importSongsToPlaylist(input, { onProgress: report }));
     }, 202));
 
   router.post('/api/songloft/playlists/import-source-songlist', async (req) =>
@@ -400,7 +488,9 @@ export function registerSongloftLibraryHandlers(router: Router, options: Songlof
     runApi(() => {
       const service = requirePlaylistService(options);
       const input = parseImportSourceSonglistBody(req);
-      return importJobs.start('source-songlist', () => service.importSourceSonglist(input));
+      return importJobs.start('source-songlist', (report) =>
+        service.importSourceSonglist(input, { onProgress: report }),
+      );
     }, 202));
 
   router.get('/api/songloft/playlists/import-jobs/:id', async (_req, params) =>
