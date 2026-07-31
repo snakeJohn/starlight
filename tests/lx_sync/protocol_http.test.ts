@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import type { HTTPRequest } from '@songloft/plugin-sdk';
 import {
   handleLxProtocolHttp,
@@ -174,8 +174,74 @@ describe('auth rate-limit bookkeeping', () => {
   });
 });
 
-describe('generatePassword', () => {
-  it('produces high-entropy secrets longer than six digits', () => {
+describe('LX /socket reached over plain HTTP (host without WS dispatch)', () => {
+  const service = {} as unknown as LxSyncService;
+  let logError: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    logError = vi.fn();
+    (globalThis as { songloft?: unknown }).songloft = {
+      log: { info: vi.fn(), warn: vi.fn(), error: logError },
+    };
+  });
+
+  it('reports an explicit cause instead of falling through to a bare 404', async () => {
+    const response = await handleLxProtocolHttp(
+      req({
+        method: 'GET',
+        path: '/api/v1/jsplugin/starlight/socket',
+        query: 'i=cid&t=token',
+        headers: { upgrade: 'websocket', connection: 'Upgrade' },
+      }),
+      service,
+    );
+
+    expect(response).not.toBeNull();
+    expect(response!.statusCode).toBe(501);
+    expect(String(response!.body)).toMatch(/2\.9\.5/);
+    expect(logError).toHaveBeenCalledWith(expect.stringContaining('onWebSocket'));
+  });
+
+  it('names the stripped Connection header when a proxy drops it', async () => {
+    const response = await handleLxProtocolHttp(
+      req({
+        path: '/api/v1/jsplugin/starlight/socket',
+        // Upgrade survived but hop-by-hop Connection did not.
+        headers: { upgrade: 'websocket' },
+      }),
+      service,
+    );
+
+    expect(response!.statusCode).toBe(501);
+    expect(String(response!.body)).toMatch(/Connection: Upgrade/);
+    expect(String(response!.body)).toMatch(/reverse proxy/i);
+    expect(logError).toHaveBeenCalledWith(expect.stringContaining('connection=none'));
+  });
+
+  it('matches the bare /socket path the host passes with the prefix stripped', async () => {
+    const response = await handleLxProtocolHttp(
+      req({ path: '/socket', headers: { upgrade: 'websocket', connection: 'upgrade' } }),
+      service,
+    );
+    expect(response!.statusCode).toBe(501);
+  });
+
+  it('still answers a non-upgrade probe without claiming a host version problem', async () => {
+    const response = await handleLxProtocolHttp(req({ path: '/socket' }), service);
+    expect(response!.statusCode).toBe(501);
+    expect(String(response!.body)).toMatch(/WebSocket upgrade request/);
+  });
+
+  it('does not intercept unrelated paths', async () => {
+    const response = await handleLxProtocolHttp(
+      req({ path: '/api/lx-sync/config' }),
+      service,
+    );
+    expect(response).toBeNull();
+  });
+});
+
+describe('generatePassword', () => {  it('produces high-entropy secrets longer than six digits', () => {
     const a = generatePassword();
     const b = generatePassword();
     expect(a.length).toBeGreaterThanOrEqual(16);

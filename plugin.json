@@ -9,7 +9,7 @@
   "icon": "icon.png",
   "entryPath": "starlight",
   "main": "main.js",
-  "minHostVersion": "2.0.0",
+  "minHostVersion": "2.9.5",
   "permissions": [
     "storage",
     "songs.read",

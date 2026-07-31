@@ -84,7 +84,16 @@ export async function handleLxProtocolHttp(
       ? '/id'
       : path.endsWith('/ah')
         ? '/ah'
-        : path;
+        : path.endsWith('/socket')
+          ? '/socket'
+          : path;
+
+  if (normalized === '/socket') {
+    // Reaching onHTTPRequest at all means the host did not dispatch this upgrade
+    // to onWebSocket. Without this branch the SDK router 404s and LX clients only
+    // report the opaque "Expect HTTP 101 response but was '404 Not Found'".
+    return handleSocketUpgradeFallback(req);
+  }
 
   if (normalized === '/hello') {
     const meta = await service.getServerMeta();
@@ -103,6 +112,51 @@ export async function handleLxProtocolHttp(
   }
 
   return null;
+}
+
+/**
+ * `/socket` reached the plain HTTP handler instead of onWebSocket.
+ *
+ * The host dispatches WebSocket upgrades to onWebSocket only when gorilla's
+ * `isWebSocketUpgrade` matches (host >= 2.9.5 has that branch at all). Anything
+ * else — an older host, or upgrade headers lost in transit — is forwarded to
+ * onHTTPRequest, where no `/socket` route exists, so the client sees a bare 404
+ * and reports "Expect HTTP 101 response but was '404 Not Found'".
+ *
+ * Replies 501 with the headers actually received so the cause is visible from the
+ * LX client status line and the plugin log, instead of an opaque 404.
+ */
+function handleSocketUpgradeFallback(req: HTTPRequest): HTTPResponse {
+  const upgrade = header(req, 'upgrade').toLowerCase();
+  const connection = header(req, 'connection').toLowerCase();
+  const isUpgradeAttempt = upgrade === 'websocket';
+  // gorilla/websocket requires BOTH headers; `Connection` is hop-by-hop, so a
+  // reverse proxy that does not forward it makes the host treat the upgrade as a
+  // plain GET and route it here instead of onWebSocket.
+  const connectionDropped = isUpgradeAttempt && !connection.includes('upgrade');
+
+  songloft.log.error(
+    '[LxSync] /socket reached onHTTPRequest instead of onWebSocket' +
+      ` (upgrade=${upgrade || 'none'} connection=${connection || 'none'}).` +
+      (connectionDropped
+        ? ' The "Connection: Upgrade" header was lost — check the reverse proxy in front of Songloft.'
+        : ' Inbound plugin WebSockets need Songloft >= 2.9.5; upgrade the host.'),
+  );
+
+  if (connectionDropped) {
+    return textResponse(
+      'LX sync WebSocket blocked: the "Connection: Upgrade" header did not reach Songloft.'
+        + ' A reverse proxy is stripping it — enable WebSocket passthrough for this path.',
+      501,
+    );
+  }
+
+  return textResponse(
+    isUpgradeAttempt
+      ? 'LX sync WebSocket unavailable: Songloft host does not route plugin WebSocket upgrades (requires host >= 2.9.5).'
+      : 'LX sync WebSocket endpoint. Connect with a WebSocket upgrade request.',
+    501,
+  );
 }
 
 async function handleAuth(req: HTTPRequest, service: LxSyncService): Promise<HTTPResponse> {
