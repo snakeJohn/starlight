@@ -89,6 +89,7 @@ export interface PluginConfig {
   voice_command_enabled: boolean;
   scheduled_tasks_enabled: boolean;
   force_mp3: boolean;
+  radio_force_mp3: boolean;
   /** 自动切歌偏移（秒，-30~+30）：正数延后切歌、负数提前，用于补偿音箱缓冲差异 */
   song_transition_offset: number;
   /** 播放当前曲目后预取下一首（宿主 `?prefetch=1`，返回 202 表示已受理预热） */

@@ -471,6 +471,7 @@ describe('static UI layout copy', () => {
     expect(speakerHtml).toContain('name="conversation_monitor_enabled" type="checkbox"');
     expect(speakerHtml).toContain('name="voice_command_enabled" type="checkbox" disabled');
     expect(speakerHtml).toContain('name="force_mp3" type="checkbox"');
+    expect(speakerHtml).toContain('name="radio_force_mp3" type="checkbox"');
     expect(speakerHtml).toContain('name="server_host"');
     expect(speakerHtml).not.toContain('name="scheduled_tasks_enabled"');
     expect(automationHtml).toContain('data-role="schedule-config-form"');

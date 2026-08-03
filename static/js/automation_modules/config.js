@@ -86,6 +86,7 @@ export function configFromForm(form) {
         'voice_command_enabled',
         'scheduled_tasks_enabled',
         'force_mp3',
+        'radio_force_mp3',
     ]) {
         if (hasField(form, name)) {
             payload[name] = boolValue(form, name);
@@ -119,6 +120,7 @@ export async function loadConfig() {
             'voice_command_enabled',
             'scheduled_tasks_enabled',
             'force_mp3',
+            'radio_force_mp3',
         ]) {
             setField(form, name, config[name]);
         }

@@ -56,6 +56,7 @@ describe('settings config helpers', () => {
         voice_command_enabled: { checked: false },
         scheduled_tasks_enabled: { checked: false },
         force_mp3: { checked: true },
+        radio_force_mp3: { checked: false },
       },
     });
 
@@ -65,6 +66,7 @@ describe('settings config helpers', () => {
       voice_command_enabled: false,
       scheduled_tasks_enabled: false,
       force_mp3: true,
+      radio_force_mp3: false,
     });
     expect(payload).not.toHaveProperty('timezone');
     expect(payload).not.toHaveProperty('extra_music_api_models');
@@ -93,6 +95,18 @@ describe('settings config helpers', () => {
       force_mp3: false,
     });
     expect(payload).not.toHaveProperty('scheduled_tasks_enabled');
+  });
+
+  it('serializes radio MP3 independently from the general MP3 setting', async () => {
+    installDom();
+    const { configFromForm } = await loadAutomationModule();
+
+    expect(configFromForm({
+      elements: {
+        force_mp3: { checked: false },
+        radio_force_mp3: { checked: true },
+      },
+    })).toEqual({ force_mp3: false, radio_force_mp3: true });
   });
 
   it('saves the automation schedule toggle without touching speaker settings', async () => {

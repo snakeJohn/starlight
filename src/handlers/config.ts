@@ -101,6 +101,7 @@ export function registerConfigHandlers(
           scheduled_tasks_enabled: config.scheduled_tasks_enabled,
           timezone: config.timezone,
           force_mp3: !!config.force_mp3,
+          radio_force_mp3: !!config.radio_force_mp3,
           // 默认开启预取；未设置时按 true 上报，与 PlaylistManager 的判定
           // （prefetch_next_song !== false）保持一致。
           prefetch_next_song: config.prefetch_next_song !== false,
@@ -192,6 +193,10 @@ export function registerConfigHandlers(
       // 更新 force_mp3
       if (body.force_mp3 !== undefined) {
         config.force_mp3 = !!body.force_mp3;
+      }
+
+      if (body.radio_force_mp3 !== undefined) {
+        config.radio_force_mp3 = !!body.radio_force_mp3;
       }
 
       // 更新 external_search_url

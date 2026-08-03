@@ -34,6 +34,7 @@ function pluginConfig(overrides: Partial<PluginConfig> = {}): PluginConfig {
     voice_command_enabled: false,
     scheduled_tasks_enabled: false,
     force_mp3: false,
+    radio_force_mp3: false,
     song_transition_offset: 0,
     prefetch_next_song: true,
     external_search_enabled: false,
@@ -184,6 +185,20 @@ describe('registerConfigHandlers', () => {
     expect(data.ai_config.has_api_key).toBe(true);
     expect(JSON.stringify(data)).not.toContain('tok-secret');
     expect(JSON.stringify(data)).not.toContain('sk-secret');
+  });
+
+  it('returns and persists the independent radio MP3 setting', async () => {
+    const { router, configManager } = createHarness(pluginConfig({ radio_force_mp3: false }));
+
+    const loaded = await router.handle(request('GET', '/config'));
+    expect(parseResponseBody(loaded).data).toEqual(expect.objectContaining({
+      radio_force_mp3: false,
+    }));
+
+    await router.handle(request('POST', '/config', { radio_force_mp3: true }));
+    expect(configManager.saveConfig).toHaveBeenCalledWith(expect.objectContaining({
+      radio_force_mp3: true,
+    }));
   });
 
   it('preserves external_search_token when update omits or blanks it', async () => {

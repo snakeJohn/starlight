@@ -28,12 +28,14 @@ export class URLBuilder {
    *
    * @param song 歌曲对象（需要 id 和 url 字段）
    * @param options.forceMp3 是否追加 format=mp3 强制服务端转码
+   * @param options.radioForceMp3 是否只为电台歌曲追加 radio_transcode=mp3
    * @returns 播放 URL（相对路径会自动附加 access_token）
    */
   static async buildSongURL(song: {
     id?: number;
     url?: string;
-  }, options?: { forceMp3?: boolean }): Promise<string> {
+    type?: string;
+  }, options?: { forceMp3?: boolean; radioForceMp3?: boolean }): Promise<string> {
     const songUrl = song.url || '';
 
     if (!songUrl) {
@@ -52,6 +54,9 @@ export class URLBuilder {
     let url = serverHost + songUrl + separator + 'access_token=' + accessToken;
     if (options?.forceMp3) {
       url += '&format=mp3';
+    }
+    if (options?.radioForceMp3 && song.type === 'radio') {
+      url += '&radio_transcode=mp3';
     }
 
     if (isLoopbackUrl(url)) {

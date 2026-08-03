@@ -4,13 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlaylistManager, type PlayerSong } from '../../src/player/manager';
 import type { ConfigManager } from '../../src/config/manager';
 import type { MinaService } from '../../src/service/service';
+import { URLBuilder } from '../../src/player/url_builder';
+import { setHostBaseUrl } from '../../src/utils/http';
 
 const root = resolve(process.cwd());
 
-function song(id: number): PlayerSong {
+function song(id: number, type = 'local'): PlayerSong {
   return {
     id,
-    type: 'local',
+    type,
     title: `Song ${id}`,
     artist: 'Artist',
     album: '',
@@ -29,7 +31,7 @@ function song(id: number): PlayerSong {
   };
 }
 
-function createManager() {
+function createManager(config = { force_mp3: false, radio_force_mp3: false, server_host: 'http://songloft.test:18191' }) {
   const minaService = {
     playURL: vi.fn(async () => true),
     pausePlay: vi.fn(async () => true),
@@ -37,7 +39,7 @@ function createManager() {
     resumePlay: vi.fn(async () => true),
   } as unknown as MinaService;
   const configManager = {
-    getConfig: vi.fn(async () => ({ force_mp3: false, server_host: 'http://songloft.test:18191' })),
+    getConfig: vi.fn(async () => config),
     updateDevice: vi.fn(async () => undefined),
   } as unknown as ConfigManager;
   return {
@@ -49,6 +51,9 @@ function createManager() {
 describe('PlaylistManager song-id playlist targeting', () => {
   beforeEach(() => {
     songloft.playlists.getSongs = vi.fn(async () => []);
+    (globalThis as unknown as { songloft: { plugin: { getToken: () => Promise<string> } } })
+      .songloft.plugin.getToken = async () => 'token';
+    setHostBaseUrl('http://songloft.test:18191');
   });
 
   it('selects the requested song id from the freshly loaded playlist order', async () => {
@@ -70,6 +75,44 @@ describe('PlaylistManager song-id playlist targeting', () => {
     await expect(manager.playPlaylistFromSong(9, 99, 'order', 2)).resolves.toBe(true);
 
     expect(manager.getStatus().current_index).toBe(2);
+  });
+
+  it('passes radio MP3 transcoding URLs through the speaker lifecycle', async () => {
+    const { manager, minaService } = createManager({
+      force_mp3: false,
+      radio_force_mp3: true,
+      server_host: 'http://songloft.test:18191',
+    });
+    songloft.playlists.getSongs = vi.fn(async () => [song(7, 'radio')]) as typeof songloft.playlists.getSongs;
+
+    await expect(manager.playPlaylistFromSong(9, 7)).resolves.toBe(true);
+
+    expect(minaService.playURL).toHaveBeenCalledWith(
+      'acc-1',
+      'dev-1',
+      expect.stringContaining('access_token=token&radio_transcode=mp3'),
+      expect.any(Object),
+    );
+  });
+});
+
+describe('URLBuilder radio MP3 transcoding', () => {
+  beforeEach(() => {
+    (globalThis as unknown as { songloft: { plugin: { getToken: () => Promise<string> } } })
+      .songloft.plugin.getToken = async () => 'token';
+    setHostBaseUrl('http://songloft.test:18191');
+  });
+
+  it('adds radio transcoding after the access token only for radio songs', async () => {
+    const radioSong = { id: 7, type: 'radio', url: '/api/v1/songs/7/play' };
+    const localSong = { id: 8, type: 'local', url: '/api/v1/songs/8/play' };
+
+    await expect(URLBuilder.buildSongURL(radioSong, { radioForceMp3: true }))
+      .resolves.toBe('http://songloft.test:18191/api/v1/songs/7/play?access_token=token&radio_transcode=mp3');
+    await expect(URLBuilder.buildSongURL(localSong, { radioForceMp3: true }))
+      .resolves.not.toContain('radio_transcode');
+    await expect(URLBuilder.buildSongURL(radioSong, { forceMp3: true, radioForceMp3: false }))
+      .resolves.toContain('&format=mp3');
   });
 });
 

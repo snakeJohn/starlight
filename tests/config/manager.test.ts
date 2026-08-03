@@ -21,5 +21,6 @@ describe('ConfigManager defaults', () => {
     expect(config.max_song_index).toBe(10000);
     expect(config.external_search_timeout).toBe(6);
     expect(config.server_host).toBe('');
+    expect(config.radio_force_mp3).toBe(false);
   });
 });
