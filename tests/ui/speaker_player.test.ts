@@ -867,7 +867,7 @@ describe('speaker playlist browser', () => {
         ]);
       }
       if (url === 'api/songloft/playlists/12/songs') {
-        return okResponse([{ title: '稻香', artist: '周杰伦', duration: 210 }]);
+        return okResponse([{ id: 21, title: '稻香', artist: '周杰伦', duration: 210 }]);
       }
       throw new Error(`Unexpected request: ${url}`);
     });
@@ -877,7 +877,7 @@ describe('speaker playlist browser', () => {
       state: {
         speakerPlaylistId: string;
         speakerPlaylists: Array<{ id: number; name: string; type: string }>;
-        speakerPlaylistSongs: Array<{ title: string }>;
+        speakerPlaylistSongs: Array<{ id?: number; title: string }>;
       };
     };
 
@@ -890,13 +890,14 @@ describe('speaker playlist browser', () => {
     expect(playlists.map(playlist => playlist.name)).toEqual(['收藏', '网络音乐']);
     expect(state.speakerPlaylists.map(playlist => playlist.name)).toEqual(['收藏', '网络音乐']);
     expect(state.speakerPlaylistId).toBe('12');
-    expect(state.speakerPlaylistSongs).toEqual([{ title: '稻香', artist: '周杰伦', duration: 210 }]);
+    expect(state.speakerPlaylistSongs).toEqual([{ id: 21, title: '稻香', artist: '周杰伦', duration: 210 }]);
     expect(playlistSelect.innerHTML).toContain('收藏');
     expect(playlistSelect.innerHTML).not.toContain('电台收藏');
     expect(playlistList.innerHTML).toContain('speaker-playlist-count');
     expect(playlistList.innerHTML).toContain('普通歌单');
     expect(playlistList.innerHTML).not.toContain('电台收藏');
     expect(playlistSummary.textContent).toBe('1 首');
+    expect(playlistSongs.innerHTML).toContain('data-song-id="21"');
     expect(fetchMock).toHaveBeenCalledWith('api/songloft/playlists/12/songs', expect.any(Object));
   });
 
@@ -929,14 +930,14 @@ describe('speaker playlist browser', () => {
         deviceId: string;
         speakerPlaylists: Array<{ id: number; name: string }>;
         speakerPlaylistId: string;
-        speakerPlaylistSongs: Array<{ title: string }>;
+        speakerPlaylistSongs: Array<{ id?: number; title: string }>;
       };
     };
     state.accountId = 'acc-1';
     state.deviceId = 'speaker-1';
     state.speakerPlaylists = [{ id: 12, name: '测试歌单' }];
     state.speakerPlaylistId = '12';
-    state.speakerPlaylistSongs = [{ title: '第一首' }, { title: '第二首' }];
+    state.speakerPlaylistSongs = [{ id: 20, title: '第一首' }, { id: 21, title: '第二首' }];
 
     const { bindSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
       bindSpeakerPlaylists(options?: { refreshPlayerStatus?: () => Promise<unknown> }): void;
@@ -946,6 +947,7 @@ describe('speaker playlist browser', () => {
 
     const songButton = new FakeElement();
     songButton.dataset.index = '1';
+    songButton.dataset.songId = '21';
     songButton.closest = vi.fn((selector: string) => (
       selector === '[data-action="speaker-playlist-song"]' ? songButton : null
     ));
@@ -959,6 +961,7 @@ describe('speaker playlist browser', () => {
         device_id: 'speaker-1',
         playlist_id: 12,
         start_index: 1,
+        song_id: 21,
         play_mode: 'random',
       }),
     }));
@@ -997,7 +1000,7 @@ describe('speaker playlist browser', () => {
     vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
 
     const fetchMock = vi.fn(async (url: string) => {
-      if (url.includes('/songloft/playlists/')) return okResponse([{ title: '第一首', artist: '歌手A', duration: 180 }, { title: '第二首', artist: '歌手B', duration: 220 }]);
+      if (url.includes('/songloft/playlists/')) return okResponse([{ id: 20, title: '第一首', artist: '歌手A', duration: 180 }, { id: 21, title: '第二首', artist: '歌手B', duration: 220 }]);
       if (url.includes('/songloft/playlists')) return okResponse([{ id: 12, name: '测试歌单', song_count: 2 }]);
       return okResponse({ message: 'started' });
     });
@@ -1026,5 +1029,27 @@ describe('speaker playlist browser', () => {
     expect(playlistsContainer.innerHTML).toContain('测试歌单');
     expect(songsContainer.innerHTML).toContain('第一首');
     expect(songsContainer.innerHTML).toContain('第二首');
+    expect(songsContainer.innerHTML).toContain('data-song-id="21"');
+
+    const songButton = new FakeElement();
+    songButton.dataset.index = '1';
+    songButton.dataset.songId = '21';
+    songButton.closest = vi.fn((selector: string) => (
+      selector === '[data-action="speaker-song-list-song"]' ? songButton : null
+    ));
+
+    await songsContainer.dispatch('click', songButton);
+
+    expect(fetchMock).toHaveBeenCalledWith('api/miot/player/play', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        account_id: 'acc-1',
+        device_id: 'speaker-1',
+        playlist_id: 12,
+        start_index: 1,
+        song_id: 21,
+        play_mode: 'loop',
+      }),
+    }));
   });
 });

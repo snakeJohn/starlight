@@ -28,10 +28,14 @@ type SongloftPlaylistsStub = {
 function createHarness() {
   const router = createRouter();
   const play = vi.fn(async () => true);
+  const playPlaylistFromSong = vi.fn(async () => true);
+  const getStatus = vi.fn(() => ({ current_index: 1 }));
   const playlistManagerMap = {
     get: vi.fn(() => undefined),
     getOrCreate: vi.fn(async () => ({
       play,
+      playPlaylistFromSong,
+      getStatus,
       getCurrentSong: vi.fn(() => null),
       getCurrentSongForResponse: vi.fn(() => null),
     })),
@@ -39,7 +43,7 @@ function createHarness() {
   const minaService = {} as MinaService;
 
   registerPlaylistHandlers(router, playlistManagerMap, minaService);
-  return { router, playlistManagerMap, play };
+  return { router, playlistManagerMap, play, playPlaylistFromSong };
 }
 
 /** /player/status 从 req.query 读参数，request() 把 query 写死为空串，故单列。 */
@@ -247,5 +251,27 @@ describe('registerPlaylistHandlers input validation', () => {
     }));
     expect(parseResponseBody(dynamic).success).toBe(true);
     expect(play).toHaveBeenCalledWith(-2, 0, 'order');
+  });
+
+  it('targets a fresh playlist song by id and returns its resolved current index', async () => {
+    const { router, play, playPlaylistFromSong } = createHarness();
+
+    const response = await router.handle(request('POST', '/player/play', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+      playlist_id: 9,
+      start_index: 0,
+      song_id: 21,
+    }));
+
+    expect(parseResponseBody(response)).toMatchObject({
+      success: true,
+      data: {
+        playlist_id: 9,
+        current_index: 1,
+      },
+    });
+    expect(playPlaylistFromSong).toHaveBeenCalledWith(9, 21, 'order', 0);
+    expect(play).not.toHaveBeenCalled();
   });
 });

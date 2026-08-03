@@ -108,7 +108,7 @@ export function registerPlaylistHandlers(
   router.post('/player/play', async (req: HTTPRequest) => {
     try {
       const body = parseJsonBody<any>(req);
-      const { account_id, device_id, playlist_id, start_index, play_mode } = body;
+      const { account_id, device_id, playlist_id, start_index, play_mode, song_id } = body;
 
       if (!account_id) {
         return jsonResponse({ success: false, error: 'account_id is required' });
@@ -135,7 +135,10 @@ export function registerPlaylistHandlers(
 
       const manager = await playlistManagerMap.getOrCreate(account_id, device_id);
       const mode: PlayMode = modeValue;
-      const ok = await manager.play(playlistId, startIndex, mode);
+      const songId = Number(song_id);
+      const ok = songId > 0
+        ? await manager.playPlaylistFromSong(playlistId, songId, mode, startIndex)
+        : await manager.play(playlistId, startIndex, mode);
       if (!ok) {
         return jsonResponse({ success: false, error: 'failed to start playlist' });
       }
@@ -146,6 +149,7 @@ export function registerPlaylistHandlers(
           message: 'playlist started',
           playlist_id: playlistId,
           play_mode: mode,
+          current_index: manager.getStatus().current_index,
           current_song: manager.getCurrentSongForResponse(),
         },
       });

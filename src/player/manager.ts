@@ -358,6 +358,55 @@ export class PlaylistManager {
   }
 
   /**
+   * 播放歌单中指定歌曲 ID 对应的歌曲。
+   * 歌单在开始播放前会重新加载，故不能信任客户端快照中的下标。
+   */
+  async playPlaylistFromSong(playlistId: number, songId: number, mode?: PlayMode, fallbackIndex?: number): Promise<boolean> {
+    this.stopCheckTimer();
+    this.state = 'idle';
+    this.playStartTimeMs = 0;
+    this.pausedElapsedSec = 0;
+    this._lastLoadNotFound = false;
+
+    const loaded = await this.loadPlaylistSongs(playlistId);
+    if (!loaded) {
+      songloft.log.error('[PlaylistManager] Failed to load playlist songs: ' + playlistId);
+      return false;
+    }
+
+    if (this.songs.length === 0) {
+      songloft.log.warn('[PlaylistManager] Playlist is empty: ' + playlistId);
+      return false;
+    }
+
+    let resolvedIndex = this.songs.findIndex(song => song.id === songId);
+    if (resolvedIndex < 0) {
+      resolvedIndex = fallbackIndex !== undefined
+        && fallbackIndex >= 0
+        && fallbackIndex < this.songs.length
+        ? fallbackIndex
+        : 0;
+    }
+
+    this.playlistId = playlistId;
+    this.currentIndex = resolvedIndex;
+    this.playMode = mode || 'order';
+    this.autoAdvance = true;
+    this.randomPlayed = new Set();
+
+    const ok = await this.playCurrent();
+    if (!ok) {
+      songloft.log.error('[PlaylistManager] Failed to play current song');
+      return false;
+    }
+
+    await this.persistState();
+
+    songloft.log.info(`[PlaylistManager] Playlist started id=${playlistId} index=${this.currentIndex} mode=${this.playMode} total=${this.songs.length}`);
+    return true;
+  }
+
+  /**
    * 上次播放失败是否因歌单 ID 已失效（歌单不存在）。
    * 用于上层在扫描导致 auto-create 歌单 ID 变化后，刷新索引并重试。
    */

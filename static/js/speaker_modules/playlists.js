@@ -53,10 +53,12 @@ function renderPlaylistRow(playlist, active, { action = 'speaker-song-list-playl
 // 渲染歌曲行（抽屉与音箱页共用同一紧凑单行结构）
 function renderSongRow(song, index, isCurrent, { action = 'speaker-song-list-song' } = {}) {
     const activeClass = isCurrent ? ' active' : '';
+    const songId = Number(song?.id);
+    const songIdAttr = Number.isFinite(songId) && songId > 0 ? ` data-song-id="${songId}"` : '';
     const marker = isCurrent
         ? '<span class="speaker-song-list-current-marker" aria-hidden="true"></span>'
         : `<span class="speaker-song-list-index">${index + 1}</span>`;
-    return `<button class="speaker-playlist-song-row speaker-song-list-song-row${activeClass}" type="button" data-action="${action}" data-index="${index}">
+    return `<button class="speaker-playlist-song-row speaker-song-list-song-row${activeClass}" type="button" data-action="${action}" data-index="${index}"${songIdAttr}>
         ${marker}
         ${renderArtwork(song, songTitle(song))}
         <span class="speaker-song-list-song-title">${escapeHtml(songTitle(song))}</span>
@@ -141,19 +143,21 @@ export function closeSpeakerSongListDrawer() {
     drawer.classList.remove('open');
 }
 
-async function playDrawerSong(index) {
+async function playDrawerSong(index, songId) {
     const playlist = (state.speakerPlaylists || []).find(p => playlistId(p) === String(state.speakerPlaylistId));
     const id = playlistId(playlist);
     if (!id) throw new Error('请先选择歌单');
     const payload = selectedDevicePayload();
     if (!payload.account_id || !payload.device_id) throw new Error('请先选择账号和设备');
     const mode = $('[data-role="speaker-player-mode"]')?.value || 'loop';
-    return await api.post('/miot/player/play', {
+    const body = {
         ...payload,
         playlist_id: playablePlaylistId(id),
         start_index: Number(index) || 0,
-        play_mode: mode,
-    });
+    };
+    if (Number(songId) > 0) body.song_id = Number(songId);
+    body.play_mode = mode;
+    return await api.post('/miot/player/play', body);
 }
 
 export function bindSpeakerSongListDrawer({ refreshPlayerStatus } = {}) {
@@ -219,7 +223,7 @@ export function bindSpeakerSongListDrawer({ refreshPlayerStatus } = {}) {
         if (!btn) return;
         btn.disabled = true;
         try {
-            await playDrawerSong(btn.dataset.index);
+            await playDrawerSong(btn.dataset.index, btn.dataset.songId);
             await refreshPlayerStatus?.();
             closeSpeakerSongListDrawer();
             toast('已推送歌曲到音箱');
@@ -330,19 +334,21 @@ export async function loadSpeakerPlaylists() {
     return normalPlaylists;
 }
 
-async function playSpeakerPlaylist(startIndex = 0) {
+async function playSpeakerPlaylist(startIndex = 0, songId) {
     const playlist = selectedPlaylist();
     const id = playlistId(playlist);
     if (!id) throw new Error('请先选择歌单');
     const payload = selectedDevicePayload();
     if (!payload.account_id || !payload.device_id) throw new Error('请先选择账号和设备');
     const mode = $('[data-role="speaker-player-mode"]')?.value || 'loop';
-    return await api.post('/miot/player/play', {
+    const body = {
         ...payload,
         playlist_id: playablePlaylistId(id),
         start_index: startIndex,
-        play_mode: mode,
-    });
+    };
+    if (Number(songId) > 0) body.song_id = Number(songId);
+    body.play_mode = mode;
+    return await api.post('/miot/player/play', body);
 }
 
 function selectedPlaylist() {
@@ -406,7 +412,7 @@ export function bindSpeakerPlaylists({ refreshPlayerStatus } = {}) {
         if (!btn) return;
         btn.disabled = true;
         try {
-            await playSpeakerPlaylist(Number(btn.dataset.index) || 0);
+            await playSpeakerPlaylist(Number(btn.dataset.index) || 0, btn.dataset.songId);
             await refreshPlayerStatus?.();
             toast('已推送歌曲到音箱');
         } catch (e) {
