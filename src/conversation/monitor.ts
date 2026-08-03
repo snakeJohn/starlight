@@ -22,6 +22,7 @@ interface DeviceMonitorState {
   deviceName: string;
   hardware: string;
   lastTimestampMs: number;
+  primed: boolean;
   isRunning: boolean;
 }
 
@@ -41,6 +42,7 @@ export interface DeviceMonitorStatusItem {
   device_name: string;
   is_running: boolean;
   last_timestamp_ms: number;
+  primed: boolean;
 }
 
 // ===== ConversationMonitor =====
@@ -110,16 +112,21 @@ export class ConversationMonitor {
       const intervalSec = Math.max(1, Math.min(30, config.conversation_poll_interval ?? 1));
       this.pollInterval = intervalSec * 1000;
 
-      return this.refreshDevices().then(() => {
+      return this.refreshDevices().then(async () => {
         if (!this.enabled) return;
 
-        // 标记所有设备为运行中，并重置时间戳防止重放旧消息。
-        const now = Date.now();
+        // The first successful poll establishes a server-timestamp baseline.
         for (const dm of this.devices.values()) {
           dm.isRunning = true;
-          dm.lastTimestampMs = now;
         }
-        songloft.log.info(`[ConversationMonitor] Started, devices=${this.devices.size} callbacks=${this.callbacks.size} interval=${intervalSec}s timestampReset=${now}`);
+        songloft.log.info(`[ConversationMonitor] Started, devices=${this.devices.size} callbacks=${this.callbacks.size} interval=${intervalSec}s`);
+
+        try {
+          await this.pollAll();
+        } catch (e) {
+          songloft.log.warn('[ConversationMonitor] Initial priming failed: ' + String(e));
+        }
+        if (!this.enabled) return;
 
         if (this.pollTimer !== null) {
           clearInterval(this.pollTimer);
@@ -226,6 +233,7 @@ export class ConversationMonitor {
         device_name: dm.deviceName,
         is_running: dm.isRunning,
         last_timestamp_ms: dm.lastTimestampMs,
+        primed: dm.primed,
       });
     }
     return {
@@ -289,7 +297,8 @@ export class ConversationMonitor {
         deviceId: dev.deviceId,
         deviceName: dev.deviceName,
         hardware: dev.hardware,
-        lastTimestampMs: Date.now(),
+        lastTimestampMs: 0,
+        primed: false,
         isRunning: true,
       });
       songloft.log.info(`[ConversationMonitor] Device added to monitoring: ${dev.deviceName} (${key})`);
@@ -332,7 +341,7 @@ export class ConversationMonitor {
     }
 
     // 获取对话记录（返回 AskMessage[]）
-    let askMessages: AskMessage[];
+    let askMessages: AskMessage[] | null;
     try {
       askMessages = await client.getLatestAskFromXiaoai(dm.deviceId, dm.hardware, 5);
     } catch (e) {
@@ -340,8 +349,12 @@ export class ConversationMonitor {
       return;
     }
 
+    if (askMessages === null) {
+      return;
+    }
+
     // Quiet when empty — default poll is 1s; do not emit info spam for zero results.
-    const msgCount = askMessages ? askMessages.length : 0;
+    const msgCount = askMessages.length;
     if (msgCount > 0) {
       const summary = askMessages.map(m => {
         const q = m.response?.answer?.[0]?.question ?? '?';
@@ -350,7 +363,16 @@ export class ConversationMonitor {
       songloft.log.info(`[ConversationMonitor] pollDevice device=${dm.deviceId} returned ${msgCount} messages: ${summary}`);
     }
 
-    if (!askMessages || askMessages.length === 0) {
+    if (!dm.primed) {
+      dm.lastTimestampMs = askMessages.reduce(
+        (max, message) => Math.max(max, message.timestamp_ms),
+        0,
+      );
+      dm.primed = true;
+      return;
+    }
+
+    if (askMessages.length === 0) {
       return;
     }
 

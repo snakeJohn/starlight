@@ -514,7 +514,7 @@ export class MinaHTTPClient {
    * @param hardware - 设备硬件型号
    * @param limit - 记录数量限制（默认2）
    */
-  async getLatestAskFromXiaoai(deviceId: string, hardware: string, limit = 2): Promise<AskMessage[]> {
+  async getLatestAskFromXiaoai(deviceId: string, hardware: string, limit = 2): Promise<AskMessage[] | null> {
     if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai deviceId=${deviceId} hardware=${hardware} limit=${limit} useMinaForAsk=${shouldUseMinaForAsk(hardware)}`);
     // 部分设备需要通过 ubus 方式获取
     if (shouldUseMinaForAsk(hardware)) {
@@ -538,7 +538,7 @@ export class MinaHTTPClient {
       if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai attempt=${attempt} returned null, retrying...`);
     }
     songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai all ${MAX_RETRIES} attempts failed`);
-    return [];
+    return null;
   }
 
   // ===== 播放状态 =====
@@ -925,13 +925,14 @@ export class MinaHTTPClient {
    * 通过 UBus nlp_result_get 获取对话记录
    * 用于不支持 xiaoai API 的设备（如 M01）
    */
-  private async getLatestAskByUbus(deviceId: string): Promise<AskMessage[]> {
-    const result = await this.ubusRequest(deviceId, 'nlp_result_get', 'mibrain', {});
-    if (!result || !result.data) return [];
-
+  private async getLatestAskByUbus(deviceId: string): Promise<AskMessage[] | null> {
     try {
+      const result = await this.ubusRequest(deviceId, 'nlp_result_get', 'mibrain', {});
+      if (!result || !result.data) return null;
+
       const data = result.data as NlpResultData;
-      if (data.code !== 0 || !data.info) return [];
+      if (data.code !== 0) return null;
+      if (!data.info) return [];
 
       const infoData = JSON.parse(data.info) as NlpInfoData;
       if (!infoData.result) return [];
@@ -943,7 +944,11 @@ export class MinaHTTPClient {
 
         try {
           const nlp = JSON.parse(item.nlp) as NlpDetail;
-          const timestamp = parseInt(nlp.meta.timestamp, 10) || 0;
+          const timestamp = parseInt(nlp.meta?.timestamp ?? '', 10);
+          if (!Number.isFinite(timestamp) || timestamp <= 0) {
+            songloft.log.warn(`[ConversationMonitor] getLatestAskByUbus skip record with invalid timestamp device=${deviceId} raw=${String(nlp.meta?.timestamp)}`);
+            continue;
+          }
 
           // 转换为 AskMessage 格式（与 WASM 版一致）
           messages.push({
@@ -965,7 +970,7 @@ export class MinaHTTPClient {
 
       return messages;
     } catch {
-      return [];
+      return null;
     }
   }
 }
