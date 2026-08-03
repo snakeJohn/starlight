@@ -1135,7 +1135,10 @@ export class VoiceEngine {
     if (!playlistName && pm.hasPlaylist()) {
       songloft.log.info('[VoiceEngine] Play playlist: keep current playback');
       if (!pm.isPlaying()) {
-        await pm.resumePlayback();
+        const resumed = await pm.resumePlayback();
+        if (!resumed) {
+          await pm.replayCurrent();
+        }
       }
       return;
     }
@@ -1253,7 +1256,10 @@ export class VoiceEngine {
       if (pm.hasPlaylist()) {
         songloft.log.info('[VoiceEngine] Play song: keep current playback');
         if (!pm.isPlaying()) {
-          await pm.resumePlayback();
+          const resumed = await pm.resumePlayback();
+          if (!resumed) {
+            await pm.replayCurrent();
+          }
         }
         return;
       }

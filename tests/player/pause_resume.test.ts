@@ -89,6 +89,57 @@ describe('PlaylistManager pause/resume progress', () => {
     expect(minaService.resumePlay).not.toHaveBeenCalled();
   });
 
+  it('blocks direct resume while pause verification has a stop in flight', async () => {
+    const { manager, minaService } = createManager();
+    let finishStop!: (result: 'stopped') => void;
+    const stopInFlight = new Promise<'stopped'>(resolve => {
+      finishStop = resolve;
+    });
+    vi.mocked(minaService.pausePlayVerified).mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 1_400));
+      return stopInFlight;
+    });
+
+    await manager.playStandalone([{ ...song }], 0, 'order');
+    const pendingPause = manager.pause();
+    await vi.advanceTimersByTimeAsync(1_400);
+
+    const resumed = await manager.resumePlayback();
+    finishStop('stopped');
+    await pendingPause;
+
+    expect(resumed).toBe(false);
+    expect(minaService.resumePlay).not.toHaveBeenCalled();
+  });
+
+  it('keeps direct resume blocked until all overlapping pause verifications settle', async () => {
+    const { manager, minaService } = createManager();
+    let finishFirst!: (result: 'paused') => void;
+    let finishSecond!: (result: 'paused') => void;
+    const firstVerification = new Promise<'paused'>(resolve => {
+      finishFirst = resolve;
+    });
+    const secondVerification = new Promise<'paused'>(resolve => {
+      finishSecond = resolve;
+    });
+    vi.mocked(minaService.pausePlayVerified)
+      .mockReturnValueOnce(firstVerification)
+      .mockReturnValueOnce(secondVerification);
+
+    await manager.playStandalone([{ ...song }], 0, 'order');
+    const firstPause = manager.pause();
+    const secondPause = manager.pause();
+
+    finishFirst('paused');
+    await firstPause;
+    await expect(manager.resumePlayback()).resolves.toBe(false);
+
+    finishSecond('paused');
+    await secondPause;
+    await expect(manager.resumePlayback()).resolves.toBe(true);
+    expect(minaService.resumePlay).toHaveBeenCalledTimes(1);
+  });
+
   it('returns false and preserves truthful failure when verified pause fails', async () => {
     const { manager, minaService } = createManager();
     vi.mocked(minaService.pausePlayVerified).mockResolvedValue('failed');

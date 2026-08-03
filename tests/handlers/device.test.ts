@@ -120,7 +120,11 @@ describe('registerDeviceHandlers', () => {
     const minaService = {
       resumePlay: vi.fn(async () => true),
     } as unknown as MinaService;
-    const manager = { resumePlayback: vi.fn(async () => true) };
+    const manager = {
+      hasPlaylist: vi.fn(() => true),
+      resumePlayback: vi.fn(async () => true),
+      replayCurrent: vi.fn(async () => true),
+    };
     const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
 
     (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
@@ -133,7 +137,34 @@ describe('registerDeviceHandlers', () => {
 
     expect(parseResponseBody(response).success).toBe(true);
     expect(manager.resumePlayback).toHaveBeenCalledTimes(1);
+    expect(manager.replayCurrent).not.toHaveBeenCalled();
     // resumePlayback() 内部已调设备，handler 不该再调一次
+    expect(minaService.resumePlay).not.toHaveBeenCalled();
+  });
+
+  it('replays the managed current URL instead of bypassing a failed manager resume', async () => {
+    const router = createRouter();
+    const minaService = {
+      resumePlay: vi.fn(async () => true),
+    } as unknown as MinaService;
+    const manager = {
+      hasPlaylist: vi.fn(() => true),
+      resumePlayback: vi.fn(async () => false),
+      replayCurrent: vi.fn(async () => true),
+    };
+    const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
+
+    (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
+      router, minaService, {} as AccountManager, playlistManagerMap,
+    );
+
+    const response = await router.handle(request('POST', '/mina/resume', {
+      account_id: 'acc-1', device_id: 'dev-1',
+    }));
+
+    expect(parseResponseBody(response).success).toBe(true);
+    expect(manager.resumePlayback).toHaveBeenCalledTimes(1);
+    expect(manager.replayCurrent).toHaveBeenCalledTimes(1);
     expect(minaService.resumePlay).not.toHaveBeenCalled();
   });
 
@@ -143,7 +174,11 @@ describe('registerDeviceHandlers', () => {
     const minaService = {
       resumePlay: vi.fn(async () => true),
     } as unknown as MinaService;
-    const manager = { resumePlayback: vi.fn(async () => false) };
+    const manager = {
+      hasPlaylist: vi.fn(() => false),
+      resumePlayback: vi.fn(async () => false),
+      replayCurrent: vi.fn(async () => false),
+    };
     const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
 
     (registerDeviceHandlers as unknown as (...args: unknown[]) => void)(
@@ -163,7 +198,11 @@ describe('registerDeviceHandlers', () => {
     const minaService = {
       resumePlay: vi.fn(async () => false),
     } as unknown as MinaService;
-    const manager = { resumePlayback: vi.fn(async () => false) };
+    const manager = {
+      hasPlaylist: vi.fn(() => false),
+      resumePlayback: vi.fn(async () => false),
+      replayCurrent: vi.fn(async () => false),
+    };
     const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
 
     updateDeviceStatusCache('acc-r', 'dev-r', { state: 'paused', position: 5 });

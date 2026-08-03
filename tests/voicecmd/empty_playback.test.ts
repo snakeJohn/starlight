@@ -88,6 +88,19 @@ describe('VoiceEngine empty playback commands', () => {
     expect(indexingManager.findSongByName).not.toHaveBeenCalled();
   });
 
+  it('replays the current URL when no-argument play song cannot resume directly', async () => {
+    const { engine, playlistManager } = createEngine([
+      { type: 'play_song', keywords: ['播放歌曲'], enabled: true },
+    ]);
+    playlistManager.isPlaying.mockReturnValue(false);
+    playlistManager.resumePlayback.mockResolvedValue(false);
+
+    await engine.handleMessage(message('播放歌曲'));
+
+    expect(playlistManager.resumePlayback).toHaveBeenCalledTimes(1);
+    expect(playlistManager.replayCurrent).toHaveBeenCalledTimes(1);
+  });
+
   it('does not skip to next song when play playlist has no playlist name and a queue exists', async () => {
     const { engine, playlistManager, minaService, indexingManager } = createEngine([
       { type: 'play_playlist', keywords: ['播放歌单'], enabled: true },
@@ -99,6 +112,19 @@ describe('VoiceEngine empty playback commands', () => {
     expect(playlistManager.prepareForNewPlayback).not.toHaveBeenCalled();
     expect(minaService.stopPlay).not.toHaveBeenCalled();
     expect(indexingManager.searchPlaylist).not.toHaveBeenCalled();
+  });
+
+  it('replays the current URL when no-argument play playlist cannot resume directly', async () => {
+    const { engine, playlistManager } = createEngine([
+      { type: 'play_playlist', keywords: ['播放歌单'], enabled: true },
+    ]);
+    playlistManager.isPlaying.mockReturnValue(false);
+    playlistManager.resumePlayback.mockResolvedValue(false);
+
+    await engine.handleMessage(message('播放歌单'));
+
+    expect(playlistManager.resumePlayback).toHaveBeenCalledTimes(1);
+    expect(playlistManager.replayCurrent).toHaveBeenCalledTimes(1);
   });
 
   it('treats "闭嘴" as a default stop playback command', async () => {

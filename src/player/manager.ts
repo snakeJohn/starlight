@@ -287,6 +287,7 @@ export class PlaylistManager {
   private deviceStopConfirmed = true;
   /** Pause was escalated to stop, so direct resume cannot reuse device media state. */
   private hardStopped = false;
+  private pauseVerificationsInFlight = 0;
   private _lastLoadNotFound: boolean = false; // 上次 loadPlaylistSongs 失败是否因歌单不存在(ID 过期)
 
   constructor(
@@ -499,13 +500,18 @@ export class PlaylistManager {
     // 调用设备暂停
     let pauseResult: 'paused' | 'stopped' | 'failed' = 'paused';
     if (this.accountId && this.deviceId) {
-      pauseResult = await this.minaService.pausePlayVerified(this.accountId, this.deviceId);
-      if (pauseResult === 'stopped') {
-        this.hardStopped = true;
-      } else if (pauseResult === 'failed') {
-        songloft.log.warn(
-          `[PlaylistManager] Device refused to pause account=${this.accountId} device=${this.deviceId}; speaker may still be audible`,
-        );
+      this.pauseVerificationsInFlight += 1;
+      try {
+        pauseResult = await this.minaService.pausePlayVerified(this.accountId, this.deviceId);
+        if (pauseResult === 'stopped') {
+          this.hardStopped = true;
+        } else if (pauseResult === 'failed') {
+          songloft.log.warn(
+            `[PlaylistManager] Device refused to pause account=${this.accountId} device=${this.deviceId}; speaker may still be audible`,
+          );
+        }
+      } finally {
+        this.pauseVerificationsInFlight -= 1;
       }
     }
 
@@ -714,6 +720,11 @@ export class PlaylistManager {
    */
   async resumePlayback(): Promise<boolean> {
     if ((this.state !== 'playing' && this.state !== 'paused') || this.songs.length === 0) {
+      return false;
+    }
+
+    if (this.pauseVerificationsInFlight > 0) {
+      songloft.log.info('[PlaylistManager] Resume deferred while pause verification is in progress');
       return false;
     }
 
