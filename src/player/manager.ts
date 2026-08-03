@@ -288,6 +288,8 @@ export class PlaylistManager {
   /** Pause was escalated to stop, so direct resume cannot reuse device media state. */
   private hardStopped = false;
   private pauseVerificationsInFlight = 0;
+  /** Invalidates post-await commits from older playback control operations. */
+  private controlOperationEpoch = 0;
   private _lastLoadNotFound: boolean = false; // 上次 loadPlaylistSongs 失败是否因歌单不存在(ID 过期)
 
   constructor(
@@ -314,6 +316,7 @@ export class PlaylistManager {
    * @returns 是否成功
    */
   async play(playlistId: number, startIndex?: number, mode?: PlayMode, opts?: { randomStart?: boolean }): Promise<boolean> {
+    const controlEpoch = ++this.controlOperationEpoch;
     // 立即停止定时器和重置状态，防止 loadPlaylistSongs 期间旧定时器触发 onSongFinished
     this.stopCheckTimer();
     this.state = 'idle';
@@ -325,6 +328,7 @@ export class PlaylistManager {
 
     // 加载歌单歌曲
     const loaded = await this.loadPlaylistSongs(playlistId);
+    if (controlEpoch !== this.controlOperationEpoch) return false;
     if (!loaded) {
       songloft.log.error('[PlaylistManager] Failed to load playlist songs: ' + playlistId);
       return false;
@@ -348,7 +352,7 @@ export class PlaylistManager {
     this.randomPlayed = new Set();
 
     // 开始播放当前歌曲
-    const ok = await this.playCurrent();
+    const ok = await this.playCurrent(controlEpoch);
     if (!ok) {
       songloft.log.error('[PlaylistManager] Failed to play current song');
       return false;
@@ -366,6 +370,7 @@ export class PlaylistManager {
    * 歌单在开始播放前会重新加载，故不能信任客户端快照中的下标。
    */
   async playPlaylistFromSong(playlistId: number, songId: number, mode?: PlayMode, fallbackIndex?: number): Promise<boolean> {
+    const controlEpoch = ++this.controlOperationEpoch;
     this.stopCheckTimer();
     this.state = 'idle';
     this.playStartTimeMs = 0;
@@ -374,6 +379,7 @@ export class PlaylistManager {
     this._lastLoadNotFound = false;
 
     const loaded = await this.loadPlaylistSongs(playlistId);
+    if (controlEpoch !== this.controlOperationEpoch) return false;
     if (!loaded) {
       songloft.log.error('[PlaylistManager] Failed to load playlist songs: ' + playlistId);
       return false;
@@ -399,7 +405,7 @@ export class PlaylistManager {
     this.autoAdvance = true;
     this.randomPlayed = new Set();
 
-    const ok = await this.playCurrent();
+    const ok = await this.playCurrent(controlEpoch);
     if (!ok) {
       songloft.log.error('[PlaylistManager] Failed to play current song');
       return false;
@@ -429,6 +435,7 @@ export class PlaylistManager {
     mode: PlayMode = 'single',
     options: PlayStandaloneOptions = {},
   ): Promise<boolean> {
+    const controlEpoch = ++this.controlOperationEpoch;
     this.stopCheckTimer();
     this.clearVoiceSuspend();
     this.state = 'idle';
@@ -448,7 +455,7 @@ export class PlaylistManager {
     this.autoAdvance = options.autoAdvance !== false;
     this.randomPlayed = new Set();
 
-    const ok = await this.playCurrent();
+    const ok = await this.playCurrent(controlEpoch);
     if (!ok) {
       songloft.log.error('[PlaylistManager] Failed to play standalone song');
       return false;
@@ -472,6 +479,7 @@ export class PlaylistManager {
    * 本地还会继续把下一首推给一台我们已经控制不住的音箱，只会更糟。
    */
   async pause(): Promise<boolean> {
+    const controlEpoch = ++this.controlOperationEpoch;
     // 空闲/已停止的管理器不能被翻成 paused，否则 /player/toggle 会误以为有队列
     // 可恢复；但物理音箱仍可能正在播放插件外内容，所以仍要发送设备暂停命令。
     if (this.state !== 'playing' && this.state !== 'paused') {
@@ -503,6 +511,9 @@ export class PlaylistManager {
       this.pauseVerificationsInFlight += 1;
       try {
         pauseResult = await this.minaService.pausePlayVerified(this.accountId, this.deviceId);
+        if (controlEpoch !== this.controlOperationEpoch) {
+          return pauseResult !== 'failed';
+        }
         if (pauseResult === 'stopped') {
           this.hardStopped = true;
         } else if (pauseResult === 'failed') {
@@ -524,6 +535,7 @@ export class PlaylistManager {
    */
   /** @returns 物理设备是否确实停止成功（与 pause() 同理，stopPlay 返回 boolean 而非抛错）。 */
   async stop(): Promise<boolean> {
+    const controlEpoch = ++this.controlOperationEpoch;
     this.stopCheckTimer();
     this.clearVoiceSuspend();
     this.state = 'stopped';
@@ -539,7 +551,9 @@ export class PlaylistManager {
         );
       }
     }
-    this.deviceStopConfirmed = deviceStopped;
+    if (controlEpoch === this.controlOperationEpoch) {
+      this.deviceStopConfirmed = deviceStopped;
+    }
 
     songloft.log.info('[PlaylistManager] Playback stopped');
     return deviceStopped;
@@ -560,6 +574,7 @@ export class PlaylistManager {
    * @returns 是否成功
    */
   async next(): Promise<boolean> {
+    const controlEpoch = ++this.controlOperationEpoch;
     this.stopCheckTimer();
     if (this.songs.length === 0) {
       songloft.log.warn('[PlaylistManager] No playlist loaded for next');
@@ -574,7 +589,7 @@ export class PlaylistManager {
     }
 
     this.currentIndex = nextIdx;
-    const ok = await this.playCurrent();
+    const ok = await this.playCurrent(controlEpoch);
     if (ok) {
       await this.persistState();
     }
@@ -586,6 +601,7 @@ export class PlaylistManager {
    * @returns 是否成功
    */
   async previous(): Promise<boolean> {
+    const controlEpoch = ++this.controlOperationEpoch;
     this.stopCheckTimer();
     if (this.songs.length === 0) {
       songloft.log.warn('[PlaylistManager] No playlist loaded for previous');
@@ -599,7 +615,7 @@ export class PlaylistManager {
     }
 
     this.currentIndex = prevIdx;
-    const ok = await this.playCurrent();
+    const ok = await this.playCurrent(controlEpoch);
     if (ok) {
       await this.persistState();
     }
@@ -733,9 +749,15 @@ export class PlaylistManager {
       return false;
     }
 
+    const controlEpoch = ++this.controlOperationEpoch;
+
     this.stopCheckTimer();
 
     const ok = await this.minaService.resumePlay(this.accountId, this.deviceId);
+    if (controlEpoch !== this.controlOperationEpoch) {
+      songloft.log.info('[PlaylistManager] Resume superseded by a newer control operation');
+      return false;
+    }
     if (!ok) {
       songloft.log.warn('[PlaylistManager] resumePlay failed');
       return false;
@@ -790,6 +812,7 @@ export class PlaylistManager {
    * 清理定时器
    */
   cleanup(): void {
+    this.controlOperationEpoch += 1;
     this.stopCheckTimer();
   }
 
@@ -799,6 +822,7 @@ export class PlaylistManager {
    * 防止搜索/加载期间旧定时器触发 onSongFinished
    */
   prepareForNewPlayback(): void {
+    this.controlOperationEpoch += 1;
     this.stopCheckTimer();
     this.clearVoiceSuspend();
     this.state = 'idle';
@@ -813,6 +837,7 @@ export class PlaylistManager {
    * 同时保持状态为 playing 以便后续 resumePlayback() 恢复。
    */
   suspendForVoiceInteraction(): void {
+    this.controlOperationEpoch += 1;
     this.stopCheckTimer();
     if (this.voiceSuspendedAt === 0) {
       this.voiceSuspendedAt = Date.now();
@@ -896,7 +921,8 @@ export class PlaylistManager {
    * 因为被语音唤醒打断后设备的 URL 播放状态已被清除。
    */
   async replayCurrent(): Promise<boolean> {
-    return this.playCurrent();
+    const controlEpoch = ++this.controlOperationEpoch;
+    return this.playCurrent(controlEpoch);
   }
 
   /**
@@ -912,6 +938,7 @@ export class PlaylistManager {
    * 使用已有歌曲列表初始化播放列表（恢复用）
    */
   initWithSongs(songs: PlayerSong[], startIndex: number, playMode: PlayMode, playlistId: number): void {
+    this.controlOperationEpoch += 1;
     this.songs = songs;
     this.currentIndex = (startIndex >= 0 && startIndex < songs.length) ? startIndex : 0;
     this.playMode = playMode;
@@ -985,10 +1012,13 @@ export class PlaylistManager {
   /**
    * 播放当前索引的歌曲
    */
-  private async playCurrent(): Promise<boolean> {
+  private async playCurrent(controlEpoch?: number): Promise<boolean> {
     let attempts = 0;
     while (attempts < this.songs.length) {
-      const result = await this.playCurrentOnce();
+      const result = await this.playCurrentOnce(controlEpoch);
+      if (controlEpoch !== undefined && controlEpoch !== this.controlOperationEpoch) {
+        return false;
+      }
       if (result === 'played') {
         return true;
       }
@@ -1012,7 +1042,7 @@ export class PlaylistManager {
     return false;
   }
 
-  private async playCurrentOnce(): Promise<'played' | 'unplayable' | 'failed'> {
+  private async playCurrentOnce(controlEpoch?: number): Promise<'played' | 'unplayable' | 'failed'> {
     if (this.currentIndex < 0 || this.currentIndex >= this.songs.length) {
       songloft.log.error('[PlaylistManager] Invalid current index: ' + this.currentIndex);
       return 'failed';
@@ -1023,12 +1053,14 @@ export class PlaylistManager {
     const song = this.songs[this.currentIndex];
     if (!song.url && song.type === 'dynamic' && this.dynamicOptions.dynamicSongResolver) {
       const resolved = await this.dynamicOptions.dynamicSongResolver(song);
+      if (controlEpoch !== undefined && controlEpoch !== this.controlOperationEpoch) return 'failed';
       if (resolved?.url) {
         Object.assign(song, resolved);
       }
     }
 
     const config = await this.configManager.getConfig();
+    if (controlEpoch !== undefined && controlEpoch !== this.controlOperationEpoch) return 'failed';
     const transitionOffsetSec = normalizeTransitionOffset(config.song_transition_offset);
     if (config.server_host) {
       setHostBaseUrl(config.server_host);
@@ -1051,6 +1083,7 @@ export class PlaylistManager {
 
     // 构造播放URL
     const songURL = await URLBuilder.buildSongURL(song, { forceMp3, radioForceMp3 });
+    if (controlEpoch !== undefined && controlEpoch !== this.controlOperationEpoch) return 'failed';
     if (!songURL) {
       songloft.log.error('[PlaylistManager] Failed to build song URL: ' + song.title);
       return 'unplayable';
@@ -1071,6 +1104,7 @@ export class PlaylistManager {
       title: song.title || '',
       artist: song.artist || '',
     });
+    if (controlEpoch !== undefined && controlEpoch !== this.controlOperationEpoch) return 'failed';
     if (!ok) {
       const message = `音箱接口未接受播放 URL：${safePlaybackUrl(songURL)}`;
       songloft.log.error('[PlaylistManager] Failed to play URL on device');
@@ -1106,7 +1140,7 @@ export class PlaylistManager {
     }
 
     if (config.prefetch_next_song !== false) {
-      this.prefetchNextSong(forceMp3);
+      this.prefetchNextSong(forceMp3, radioForceMp3);
     }
 
     // 每次切歌都补一次：只在建队列时补的话，队列靠后的歌永远等不到歌词。
@@ -1167,7 +1201,7 @@ export class PlaylistManager {
    * 严格 best-effort：不 await、不改任何播放状态、失败只记日志。
    * 播放命令此时已被音箱接受，预取绝不能反过来影响它。
    */
-  private prefetchNextSong(forceMp3: boolean): void {
+  private prefetchNextSong(forceMp3: boolean, radioForceMp3: boolean): void {
     if (!this.autoAdvance || this.songs.length < 2) {
       return;
     }
@@ -1187,7 +1221,7 @@ export class PlaylistManager {
 
     void (async () => {
       try {
-        const url = await URLBuilder.buildSongURL(nextSong, { forceMp3 });
+        const url = await URLBuilder.buildSongURL(nextSong, { forceMp3, radioForceMp3 });
         // 外部音源直链由对方 CDN 提供，预热无意义也不该替用户打对方流量。
         // 按 origin 比较而不是字符串前缀：前缀匹配会把 host 的近似域名
         // （如 songloft.test.evil.com）误判成同源。
@@ -1370,6 +1404,7 @@ export class PlaylistManager {
       songloft.log.info('[PlaylistManager] Not playing, skip auto-next');
       return;
     }
+    const controlEpoch = ++this.controlOperationEpoch;
 
     // 通知后端当前歌曲播放完成（触发 JS 插件播放事件广播）
     const finishedSong = this.songs[this.currentIndex];
@@ -1395,7 +1430,8 @@ export class PlaylistManager {
     }
 
     this.currentIndex = nextIdx;
-    const ok = await this.playCurrent();
+    const ok = await this.playCurrent(controlEpoch);
+    if (controlEpoch !== this.controlOperationEpoch) return;
     if (ok) {
       await this.persistState();
       return;
@@ -1405,11 +1441,12 @@ export class PlaylistManager {
     const retryIndex = this.currentIndex;
     songloft.log.warn('[PlaylistManager] Auto-next play failed, retrying in 3s');
     await new Promise(r => setTimeout(r, 3000));
-    if (this.state !== 'playing' || this.currentIndex !== retryIndex) {
+    if (controlEpoch !== this.controlOperationEpoch || this.state !== 'playing' || this.currentIndex !== retryIndex) {
       return;
     }
 
-    const retryOk = await this.playCurrent();
+    const retryOk = await this.playCurrent(controlEpoch);
+    if (controlEpoch !== this.controlOperationEpoch) return;
     if (retryOk) {
       await this.persistState();
       return;
@@ -1420,7 +1457,8 @@ export class PlaylistManager {
     if (skipIdx >= 0 && skipIdx !== this.currentIndex) {
       songloft.log.warn('[PlaylistManager] Retry failed, skipping to next song');
       this.currentIndex = skipIdx;
-      const skipOk = await this.playCurrent();
+      const skipOk = await this.playCurrent(controlEpoch);
+      if (controlEpoch !== this.controlOperationEpoch) return;
       if (skipOk) {
         await this.persistState();
         return;

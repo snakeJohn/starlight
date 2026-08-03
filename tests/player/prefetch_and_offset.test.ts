@@ -284,6 +284,20 @@ describe('next-song prefetch', () => {
     manager.cleanup();
   });
 
+  it('includes radio transcoding when prefetching the next radio track', async () => {
+    const calls = stubFetch();
+    const { manager } = createManager({ radio_force_mp3: true });
+    const radio = { ...hostSong(2, '电台', 100), type: 'radio' };
+
+    await manager.playStandalone([hostSong(1, '第一首', 100), radio], 0, 'order');
+    await flush();
+
+    expect(calls.filter((url) => url.includes('prefetch=1'))).toEqual([
+      `${HOST}/api/v1/songs/2/play?access_token=tok&radio_transcode=mp3&prefetch=1`,
+    ]);
+    manager.cleanup();
+  });
+
   it('does not prefetch in single-song-repeat mode', async () => {
     const calls = stubFetch();
     const { manager } = createManager();

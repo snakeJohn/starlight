@@ -368,4 +368,51 @@ describe('ConversationMonitor polling', () => {
       expect.objectContaining({ device_id: 'new-speaker', primed: true }),
     ]);
   });
+
+  it('does not deliver an in-flight poll after the managed device is removed', async () => {
+    vi.useFakeTimers();
+    let finishPoll!: (messages: AskMessage[]) => void;
+    const inFlightPoll = new Promise<AskMessage[]>(resolve => {
+      finishPoll = resolve;
+    });
+    const minaClient = {
+      getLatestAskFromXiaoai: vi.fn()
+        .mockResolvedValueOnce([])
+        .mockReturnValueOnce(inFlightPoll),
+    };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn()
+        .mockResolvedValueOnce([{ device_id: 'speaker-1', device_name: '客厅音箱', hardware: 'LX06' }])
+        .mockResolvedValueOnce([]),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => [{ id: 'wh-1', url: 'https://example.invalid/hook' }]),
+    } as unknown as ConfigManager;
+    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const monitor = new ConversationMonitor(accountManager, configManager);
+    const callback = vi.fn();
+    monitor.registerCallback('test', callback);
+
+    monitor.start();
+    await flushStart();
+    await flushStart();
+    expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: true });
+    vi.advanceTimersByTime(1_000);
+    await flushStart();
+    expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(2);
+
+    await monitor.refresh();
+    expect((await monitor.getStatus()).device_count).toBe(0);
+
+    finishPoll([ask(1_000, '移除后的口令')]);
+    await flushStart();
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(monitor.getMessages()).toEqual([]);
+  });
 });

@@ -103,16 +103,25 @@ describe('URLBuilder radio MP3 transcoding', () => {
     setHostBaseUrl('http://songloft.test:18191');
   });
 
-  it('adds radio transcoding after the access token only for radio songs', async () => {
+  it('adds radio transcoding after the access token only when enabled for radio songs', async () => {
     const radioSong = { id: 7, type: 'radio', url: '/api/v1/songs/7/play' };
     const localSong = { id: 8, type: 'local', url: '/api/v1/songs/8/play' };
 
     await expect(URLBuilder.buildSongURL(radioSong, { radioForceMp3: true }))
       .resolves.toBe('http://songloft.test:18191/api/v1/songs/7/play?access_token=token&radio_transcode=mp3');
+    await expect(URLBuilder.buildSongURL(radioSong, { radioForceMp3: false }))
+      .resolves.toBe('http://songloft.test:18191/api/v1/songs/7/play?access_token=token');
     await expect(URLBuilder.buildSongURL(localSong, { radioForceMp3: true }))
       .resolves.not.toContain('radio_transcode');
-    await expect(URLBuilder.buildSongURL(radioSong, { forceMp3: true, radioForceMp3: false }))
-      .resolves.toContain('&format=mp3');
+    await expect(URLBuilder.buildSongURL(radioSong, { forceMp3: true, radioForceMp3: true }))
+      .resolves.toBe('http://songloft.test:18191/api/v1/songs/7/play?access_token=token&format=mp3&radio_transcode=mp3');
+  });
+
+  it('leaves absolute external radio URLs unchanged', async () => {
+    const externalRadio = { id: 7, type: 'radio', url: 'https://radio.example.test/live.mp3?station=7' };
+
+    await expect(URLBuilder.buildSongURL(externalRadio, { forceMp3: true, radioForceMp3: true }))
+      .resolves.toBe('https://radio.example.test/live.mp3?station=7');
   });
 });
 

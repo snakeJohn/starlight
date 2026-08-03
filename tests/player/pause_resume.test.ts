@@ -140,6 +140,51 @@ describe('PlaylistManager pause/resume progress', () => {
     expect(minaService.resumePlay).toHaveBeenCalledTimes(1);
   });
 
+  it('does not let an older in-flight resume overwrite a newer pause', async () => {
+    const { manager, minaService } = createManager();
+    let finishResume!: (result: boolean) => void;
+    vi.mocked(minaService.resumePlay).mockReturnValue(new Promise<boolean>(resolve => {
+      finishResume = resolve;
+    }));
+
+    await manager.playStandalone([{ ...song }], 0, 'order');
+    await manager.pause();
+
+    const pendingResume = manager.resumePlayback();
+    await Promise.resolve();
+    expect(minaService.resumePlay).toHaveBeenCalledTimes(1);
+
+    await manager.pause();
+    finishResume(true);
+
+    await expect(pendingResume).resolves.toBe(false);
+    expect(manager.getStatus().state).toBe('paused');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not let an older replay fallback overwrite a newer pause', async () => {
+    const { manager, minaService } = createManager();
+    vi.mocked(minaService.pausePlayVerified).mockResolvedValueOnce('stopped').mockResolvedValue('paused');
+
+    await manager.playStandalone([{ ...song }], 0, 'order');
+    await manager.pause();
+    await expect(manager.resumePlayback()).resolves.toBe(false);
+
+    let finishReplay!: (result: boolean) => void;
+    vi.mocked(minaService.playURL).mockReturnValueOnce(new Promise<boolean>(resolve => {
+      finishReplay = resolve;
+    }));
+    const pendingReplay = manager.replayCurrent();
+    await Promise.resolve();
+
+    await manager.pause();
+    finishReplay(true);
+
+    await expect(pendingReplay).resolves.toBe(false);
+    expect(manager.getStatus().state).toBe('paused');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('returns false and preserves truthful failure when verified pause fails', async () => {
     const { manager, minaService } = createManager();
     vi.mocked(minaService.pausePlayVerified).mockResolvedValue('failed');

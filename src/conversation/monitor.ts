@@ -290,6 +290,10 @@ export class ConversationMonitor {
     // 移除不再 managed 的设备
     for (const key of this.devices.keys()) {
       if (!managedKeys.has(key)) {
+        const detached = this.devices.get(key);
+        if (detached) {
+          detached.isRunning = false;
+        }
         this.devices.delete(key);
         songloft.log.info(`[ConversationMonitor] Device removed from monitoring: ${key}`);
       }

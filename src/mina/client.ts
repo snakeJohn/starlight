@@ -30,6 +30,15 @@ const PAUSE_VERIFY_DELAY_MS = 700;
 
 export type PauseVerificationResult = 'paused' | 'stopped' | 'failed';
 
+function parseSafePositiveTimestamp(value: unknown): number | null {
+  const timestamp = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && /^\d+$/.test(value)
+      ? Number(value)
+      : Number.NaN;
+  return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
 export interface PlayMetadata {
   title: string;
   artist?: string;
@@ -968,20 +977,26 @@ export class MinaHTTPClient {
       }
 
       // 转换为 AskMessage 格式（与 WASM 版一致；Starlight 用更稳健的 answer 提取）
-      const messages = dataObj.records.map(record => {
+      const messages: AskMessage[] = [];
+      for (const record of dataObj.records) {
+        const timestamp = parseSafePositiveTimestamp(record.time);
+        if (timestamp === null) {
+          songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai skip record with invalid timestamp device=${deviceId} raw=${String(record.time)}`);
+          continue;
+        }
         const answerText = extractConversationAnswerText(record);
-        return {
-          timestamp_ms: record.time,
+        messages.push({
+          timestamp_ms: timestamp,
           response: {
             answer: [{
               question: record.query,
               content: answerText,
             }],
           },
-        };
-      });
+        });
+      }
       if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai parsed ${messages.length} messages`);
-      return messages;
+      return messages.length > 0 ? messages : null;
     } catch (e) {
       songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai parse error: ${String(e)}`);
       return null;
@@ -1012,11 +1027,8 @@ export class MinaHTTPClient {
 
         try {
           const nlp = JSON.parse(item.nlp) as NlpDetail;
-          const rawTimestamp = nlp.meta?.timestamp;
-          const timestamp = typeof rawTimestamp === 'string' && /^\d+$/.test(rawTimestamp)
-            ? Number(rawTimestamp)
-            : Number.NaN;
-          if (!Number.isSafeInteger(timestamp) || timestamp <= 0) {
+          const timestamp = parseSafePositiveTimestamp(nlp.meta?.timestamp);
+          if (timestamp === null) {
             songloft.log.warn(`[ConversationMonitor] getLatestAskByUbus skip record with invalid timestamp device=${deviceId} raw=${String(nlp.meta?.timestamp)}`);
             continue;
           }

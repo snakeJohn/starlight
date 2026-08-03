@@ -36,6 +36,13 @@ function conversationClient(): MinaHTTPClient {
   } as never);
 }
 
+function directConversationResponse(records: unknown[]): Response {
+  return new Response(JSON.stringify({
+    code: 0,
+    data: JSON.stringify({ records }),
+  }), { status: 200 });
+}
+
 describe('extractConversationAnswerText', () => {
   it('reads Xiaoai answer text from several response shapes', () => {
     expect(extractConversationAnswerText({
@@ -69,6 +76,43 @@ describe('MinaHTTPClient conversation fetch contract', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 500 })));
     const client = conversationClient();
     await expect(client.getLatestAskFromXiaoai('dev-1', 'LX06', 5)).resolves.toBeNull();
+  });
+
+  it('skips direct Xiaoai records whose server timestamp is invalid', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => directConversationResponse([
+      { time: 'NaN', query: 'bad-string', answers: [] },
+      { time: null, query: 'bad-null', answers: [] },
+      { time: 0, query: 'bad-zero', answers: [] },
+      { time: -1, query: 'bad-negative', answers: [] },
+      { time: Number.MAX_SAFE_INTEGER + 1, query: 'bad-unsafe', answers: [] },
+      { time: 2_000, query: 'good', answers: [] },
+    ])));
+    const client = conversationClient();
+
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'LX06', 5)).resolves.toEqual([
+      expect.objectContaining({
+        timestamp_ms: 2_000,
+        response: { answer: [expect.objectContaining({ question: 'good' })] },
+      }),
+    ]);
+  });
+
+  it('returns null when a non-empty direct Xiaoai batch has only invalid timestamps', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => directConversationResponse([
+      { time: 'Infinity', query: 'bad-string', answers: [] },
+      { time: null, query: 'bad-null', answers: [] },
+      { time: 0, query: 'bad-zero', answers: [] },
+    ])));
+    const client = conversationClient();
+
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'LX06', 5)).resolves.toBeNull();
+  });
+
+  it('returns an empty array for an actual empty direct Xiaoai batch', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => directConversationResponse([])));
+    const client = conversationClient();
+
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'LX06', 5)).resolves.toEqual([]);
   });
 
   it('skips UBus records whose server timestamp is invalid', async () => {
