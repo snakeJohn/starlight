@@ -96,6 +96,7 @@ export class MinaHTTPClient {
   private userAgent: string;
   private onTokenExpired?: () => Promise<boolean>;
   private ubusQueues: Map<string, Promise<void>> = new Map();
+  private mediaOperationGenerations: Map<string, number> = new Map();
 
   constructor(tokenInfo: XiaomiTokenInfo, onTokenExpired?: () => Promise<boolean>) {
     this.tokenInfo = tokenInfo;
@@ -341,6 +342,7 @@ export class MinaHTTPClient {
    * 使用 player_play_url 播放 URL
    */
   async playURL(deviceId: string, url: string, keepLight = false): Promise<boolean> {
+    this.beginMediaOperation(deviceId);
     const message = { url, type: keepLight ? 1 : 2, media: 'app_ios' };
     const result = await this.ubusRequest(deviceId, 'player_play_url', 'mediaplayer', message, 'play-url');
     return this.isDeviceResultOK(result, 'player_play_url');
@@ -350,6 +352,7 @@ export class MinaHTTPClient {
    * 使用 player_play_music 播放 URL（用于部分设备型号）
    */
   async playByMusicURL(deviceId: string, audioUrl: string, keepLight = false, customAudioId?: string, logLabel = 'play-music'): Promise<boolean> {
+    this.beginMediaOperation(deviceId);
     // 默认封面
     const audioId = customAudioId || DEFAULT_MUSIC_AUDIO_ID;
 
@@ -399,10 +402,21 @@ export class MinaHTTPClient {
     return this.isDeviceResultOK(result, 'player_play_operation:' + action);
   }
 
+  private beginMediaOperation(deviceId: string): number {
+    const generation = (this.mediaOperationGenerations.get(deviceId) ?? 0) + 1;
+    this.mediaOperationGenerations.set(deviceId, generation);
+    return generation;
+  }
+
+  private isMediaOperationCurrent(deviceId: string, generation: number): boolean {
+    return this.mediaOperationGenerations.get(deviceId) === generation;
+  }
+
   /**
    * 播放操作（play）
    */
   async playerPlay(deviceId: string): Promise<boolean> {
+    this.beginMediaOperation(deviceId);
     return this.playerOperation(deviceId, 'play');
   }
 
@@ -410,19 +424,27 @@ export class MinaHTTPClient {
    * 暂停播放
    */
   async playerPause(deviceId: string): Promise<boolean> {
+    this.beginMediaOperation(deviceId);
     return this.playerOperation(deviceId, 'pause');
   }
 
   async playerPauseVerified(deviceId: string): Promise<PauseVerificationResult> {
-    const pauseOK = await this.playerPause(deviceId);
+    const generation = this.beginMediaOperation(deviceId);
+    const pauseOK = await this.playerOperation(deviceId, 'pause');
+    if (!this.isMediaOperationCurrent(deviceId, generation)) return 'failed';
 
     for (let attempt = 0; attempt < PAUSE_VERIFY_ATTEMPTS; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, PAUSE_VERIFY_DELAY_MS));
-      if (await this.readPlayStatus(deviceId) !== PLAY_STATUS_PLAYING) {
+      if (!this.isMediaOperationCurrent(deviceId, generation)) return 'failed';
+
+      const status = await this.readPlayStatus(deviceId);
+      if (!this.isMediaOperationCurrent(deviceId, generation)) return 'failed';
+      if (status !== PLAY_STATUS_PLAYING) {
         return 'paused';
       }
     }
 
+    if (!this.isMediaOperationCurrent(deviceId, generation)) return 'failed';
     songloft.log.warn(`[MinaClient] pause ignored by device=${deviceId} (still playing), escalating to stop`);
     if (await this.playerOperation(deviceId, 'stop')) {
       return 'stopped';
@@ -434,15 +456,18 @@ export class MinaHTTPClient {
    * 恢复播放
    */
   async playerResume(deviceId: string): Promise<boolean> {
-    return this.playerPlay(deviceId);
+    this.beginMediaOperation(deviceId);
+    return this.playerOperation(deviceId, 'play');
   }
 
   /**
    * 停止播放
    */
   async playerStop(deviceId: string): Promise<boolean> {
+    const generation = this.beginMediaOperation(deviceId);
     // 部分小爱音箱型号单独调用 stop 不会真正停止播放，先暂停再停止
-    await this.playerPause(deviceId);
+    await this.playerOperation(deviceId, 'pause');
+    if (!this.isMediaOperationCurrent(deviceId, generation)) return false;
     return this.playerOperation(deviceId, 'stop');
   }
 

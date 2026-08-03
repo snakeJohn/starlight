@@ -211,6 +211,31 @@ describe('MIoT playback API model detection', () => {
     ]);
   });
 
+  it('does not let a stale pause verifier stop newly accepted playback', async () => {
+    vi.useFakeTimers();
+    const client = createClient();
+    const ubusSpy = vi.spyOn(client, 'ubusRequest').mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: { code: 0 },
+    });
+    const readSpy = vi.spyOn(client, 'readPlayStatus').mockResolvedValue(1);
+
+    const stalePause = client.playerPauseVerified('dev-1');
+    await vi.advanceTimersByTimeAsync(700);
+    expect(readSpy).toHaveBeenCalledTimes(1);
+
+    await expect(client.playURL('dev-1', 'https://audio.test/new.mp3')).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(700);
+
+    await expect(stalePause).resolves.toBe('failed');
+    expect(readSpy).toHaveBeenCalledTimes(1);
+    const callsAfterNewPlay = ubusSpy.mock.calls.slice(2);
+    expect(callsAfterNewPlay.some(([, method, , message]) => (
+      method === 'player_play_operation' && message.action === 'stop'
+    ))).toBe(false);
+  });
+
   it.each([
     ['play', (client: MinaHTTPClient) => client.playerPlay('dev-1')],
     ['pause', (client: MinaHTTPClient) => client.playerPause('dev-1')],
