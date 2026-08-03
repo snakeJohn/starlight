@@ -8,7 +8,7 @@ import { AccountManager } from '../account/manager';
 import { ConfigManager } from '../config/manager';
 import { MinaAuth } from '../mina/auth';
 import { MinaHTTPClient } from '../mina/client';
-import type { PlayMetadata } from '../mina/client';
+import type { PauseVerificationResult, PlayMetadata } from '../mina/client';
 import { getTTSCommand, XIAOMI_IO_SID, LoginState } from '../mina/constants';
 import type { DeviceConfig, MinaDevice } from '../types';
 import { isValidVolume } from '../utils/volume';
@@ -178,6 +178,21 @@ export class MinaService {
     } catch (e) {
       songloft.log.error('[MinaService] pausePlay failed: ' + String(e));
       return false;
+    }
+  }
+
+  async pausePlayVerified(accountId: string, deviceId: string): Promise<PauseVerificationResult> {
+    const client = this.getClient(accountId);
+    if (!client) {
+      songloft.log.warn('[MinaService] pausePlayVerified: no client for account: ' + accountId);
+      return 'failed';
+    }
+
+    try {
+      return await client.playerPauseVerified(deviceId);
+    } catch (e) {
+      songloft.log.error('[MinaService] pausePlayVerified failed: ' + String(e));
+      return 'failed';
     }
   }
 

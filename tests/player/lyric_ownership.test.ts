@@ -28,6 +28,7 @@ function fakeMina(): MinaService {
   return {
     playURL: vi.fn(async () => true),
     pausePlay: vi.fn(async () => true),
+    pausePlayVerified: vi.fn(async () => 'paused' as const),
     stopPlay: vi.fn(async () => true),
     resumePlay: vi.fn(async () => true),
   } as unknown as MinaService;
@@ -164,7 +165,7 @@ describe('pausing the speaker stops the auto-advance timer', () => {
     vi.useFakeTimers();
     try {
       const minaService = fakeMina();
-      (minaService.pausePlay as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+      (minaService.pausePlayVerified as unknown as ReturnType<typeof vi.fn>).mockResolvedValue('failed');
       const manager = new PlaylistManager('acc', 'dev', minaService, fakeConfig());
       await manager.playStandalone([song(1, 'A'), song(2, 'B')], 0, 'order');
 

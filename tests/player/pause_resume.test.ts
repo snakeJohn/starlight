@@ -28,6 +28,7 @@ function createManager() {
   const minaService = {
     playURL: vi.fn(async () => true),
     pausePlay: vi.fn(async () => true),
+    pausePlayVerified: vi.fn(async () => 'paused' as const),
     stopPlay: vi.fn(async () => true),
     resumePlay: vi.fn(async () => true),
   } as unknown as MinaService;
@@ -74,5 +75,48 @@ describe('PlaylistManager pause/resume progress', () => {
     // Still 90s left — advance 80s should still be playing, not stuck without timer.
     vi.advanceTimersByTime(80_000);
     expect(manager.getPosition()).toBeCloseTo(110, 0);
+  });
+
+  it('marks a stop-escalated pause as quiet but not directly resumable', async () => {
+    const { manager, minaService } = createManager();
+    vi.mocked(minaService.pausePlayVerified).mockResolvedValue('stopped');
+
+    await manager.playStandalone([{ ...song }], 0, 'order');
+    await expect(manager.pause()).resolves.toBe(true);
+
+    expect(manager.getStatus().state).toBe('paused');
+    await expect(manager.resumePlayback()).resolves.toBe(false);
+    expect(minaService.resumePlay).not.toHaveBeenCalled();
+  });
+
+  it('returns false and preserves truthful failure when verified pause fails', async () => {
+    const { manager, minaService } = createManager();
+    vi.mocked(minaService.pausePlayVerified).mockResolvedValue('failed');
+
+    await manager.playStandalone([{ ...song }], 0, 'order');
+    vi.advanceTimersByTime(30_000);
+    await expect(manager.pause()).resolves.toBe(false);
+
+    expect(manager.getStatus().state).toBe('paused');
+    expect(manager.getPosition()).toBeCloseTo(30, 0);
+  });
+
+  it('clears the hard-stop marker only after replay accepts a new URL', async () => {
+    const { manager, minaService } = createManager();
+    vi.mocked(minaService.pausePlayVerified).mockResolvedValue('stopped');
+
+    await manager.playStandalone([{ ...song }], 0, 'order');
+    await manager.pause();
+    await expect(manager.resumePlayback()).resolves.toBe(false);
+
+    vi.mocked(minaService.playURL).mockResolvedValueOnce(false);
+    await expect(manager.replayCurrent()).resolves.toBe(false);
+    await expect(manager.resumePlayback()).resolves.toBe(false);
+    expect(minaService.resumePlay).not.toHaveBeenCalled();
+
+    vi.mocked(minaService.playURL).mockResolvedValueOnce(true);
+    await expect(manager.replayCurrent()).resolves.toBe(true);
+    await expect(manager.resumePlayback()).resolves.toBe(true);
+    expect(minaService.resumePlay).toHaveBeenCalledTimes(1);
   });
 });

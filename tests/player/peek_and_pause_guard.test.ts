@@ -10,6 +10,7 @@ function fakeMina(): MinaService {
   return {
     playURL: vi.fn(async () => true),
     pausePlay: vi.fn(async () => true),
+    pausePlayVerified: vi.fn(async () => 'paused' as const),
     stopPlay: vi.fn(async () => true),
     resumePlay: vi.fn(async () => true),
   } as unknown as MinaService;
@@ -119,7 +120,7 @@ describe('pause() must not fabricate a resumable state', () => {
 
     expect(manager.getStatus().state).not.toBe('paused');
     // 本地没有队列不代表物理音箱没有在播放插件外内容。
-    expect(minaService.pausePlay).toHaveBeenCalledWith('acc', 'dev');
+    expect(minaService.pausePlayVerified).toHaveBeenCalledWith('acc', 'dev');
   });
 
   it('does not resurrect a stopped manager as paused', async () => {
@@ -142,7 +143,7 @@ describe('pause() must not fabricate a resumable state', () => {
     await expect(manager.pause()).resolves.toBe(true);
 
     expect(manager.getStatus().state).toBe('paused');
-    expect(minaService.pausePlay).toHaveBeenCalledTimes(1);
+    expect(minaService.pausePlayVerified).toHaveBeenCalledTimes(1);
     manager.cleanup();
   });
 });

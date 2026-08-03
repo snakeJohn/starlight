@@ -24,6 +24,11 @@ import type { DeviceInfoRaw, DeviceListResponse, UbusResponse, NlpResultData, Nl
 
 const DEFAULT_MUSIC_AUDIO_ID = '1732418460076477549';
 const MUSIC_CP_ID = '355454500';
+const PLAY_STATUS_PLAYING = 1;
+const PAUSE_VERIFY_ATTEMPTS = 2;
+const PAUSE_VERIFY_DELAY_MS = 700;
+
+export type PauseVerificationResult = 'paused' | 'stopped' | 'failed';
 
 export interface PlayMetadata {
   title: string;
@@ -382,23 +387,47 @@ export class MinaHTTPClient {
     return this.isDeviceResultOK(result, 'player_play_music');
   }
 
+  private async playerOperation(deviceId: string, action: 'play' | 'pause' | 'stop'): Promise<boolean> {
+    const message = { action, media: 'app_ios' };
+    const result = await this.ubusRequest(
+      deviceId,
+      'player_play_operation',
+      'mediaplayer',
+      message,
+      'play-op:' + action,
+    );
+    return this.isDeviceResultOK(result, 'player_play_operation:' + action);
+  }
+
   /**
    * 播放操作（play）
    */
   async playerPlay(deviceId: string): Promise<boolean> {
-    const message = { action: 'play', media: 'app_ios' };
-    return (await this.ubusRequest(deviceId, 'player_play_operation', 'mediaplayer', message)) !== null;
+    return this.playerOperation(deviceId, 'play');
   }
 
   /**
    * 暂停播放
    */
   async playerPause(deviceId: string): Promise<boolean> {
-    const message = { action: 'pause', media: 'app_ios' };
-    // 与 playURL 用同一个判据：`!== null` 只说明 HTTP 层收到了回复，
-    // 设备在 data.code 里明确拒绝时仍会被当成成功，上层据此谎报「已暂停」。
-    const result = await this.ubusRequest(deviceId, 'player_play_operation', 'mediaplayer', message);
-    return this.isDeviceResultOK(result, 'player_play_operation(pause)');
+    return this.playerOperation(deviceId, 'pause');
+  }
+
+  async playerPauseVerified(deviceId: string): Promise<PauseVerificationResult> {
+    const pauseOK = await this.playerPause(deviceId);
+
+    for (let attempt = 0; attempt < PAUSE_VERIFY_ATTEMPTS; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, PAUSE_VERIFY_DELAY_MS));
+      if (await this.readPlayStatus(deviceId) !== PLAY_STATUS_PLAYING) {
+        return 'paused';
+      }
+    }
+
+    songloft.log.warn(`[MinaClient] pause ignored by device=${deviceId} (still playing), escalating to stop`);
+    if (await this.playerOperation(deviceId, 'stop')) {
+      return 'stopped';
+    }
+    return pauseOK ? 'paused' : 'failed';
   }
 
   /**
@@ -414,9 +443,22 @@ export class MinaHTTPClient {
   async playerStop(deviceId: string): Promise<boolean> {
     // 部分小爱音箱型号单独调用 stop 不会真正停止播放，先暂停再停止
     await this.playerPause(deviceId);
-    const message = { action: 'stop', media: 'app_ios' };
-    const result = await this.ubusRequest(deviceId, 'player_play_operation', 'mediaplayer', message);
-    return this.isDeviceResultOK(result, 'player_play_operation(stop)');
+    return this.playerOperation(deviceId, 'stop');
+  }
+
+  async readPlayStatus(deviceId: string): Promise<number> {
+    const result = await this.getPlayerStatus(deviceId);
+    const info = result && typeof result.data === 'object' && result.data !== null
+      ? (result.data as Record<string, unknown>).info
+      : undefined;
+    if (typeof info !== 'string') return -1;
+
+    try {
+      const parsed = JSON.parse(info) as Record<string, unknown>;
+      return typeof parsed.status === 'number' ? parsed.status : -1;
+    } catch {
+      return -1;
+    }
   }
 
   // ===== 音量 =====

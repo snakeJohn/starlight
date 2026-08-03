@@ -20,6 +20,7 @@ function createClient(): MinaHTTPClient {
 
 describe('MIoT playback API model detection', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -163,6 +164,78 @@ describe('MIoT playback API model detection', () => {
       { method: 'player_play_operation', path: 'mediaplayer', action: 'pause' },
       { method: 'player_play_operation', path: 'mediaplayer', action: 'stop' },
     ]);
+  });
+
+  it('returns paused when either delayed status read is no longer playing', async () => {
+    vi.useFakeTimers();
+    const client = createClient();
+    const ubusSpy = vi.spyOn(client, 'ubusRequest').mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: { code: 0 },
+    });
+    vi.spyOn(client, 'readPlayStatus').mockResolvedValueOnce(1).mockResolvedValueOnce(2);
+
+    const pending = client.playerPauseVerified('dev-1');
+    await vi.advanceTimersByTimeAsync(1_400);
+
+    await expect(pending).resolves.toBe('paused');
+    expect(ubusSpy.mock.calls.map(([, method, , message]) => ({
+      method,
+      action: message.action,
+    }))).toEqual([
+      { method: 'player_play_operation', action: 'pause' },
+    ]);
+  });
+
+  it('stops when two delayed reads still report playing', async () => {
+    vi.useFakeTimers();
+    const client = createClient();
+    const ubusSpy = vi.spyOn(client, 'ubusRequest').mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: { code: 0 },
+    });
+    vi.spyOn(client, 'readPlayStatus').mockResolvedValue(1);
+
+    const pending = client.playerPauseVerified('dev-1');
+    await vi.advanceTimersByTimeAsync(1_400);
+
+    await expect(pending).resolves.toBe('stopped');
+    expect(ubusSpy.mock.calls.map(([, method, , message]) => ({
+      method,
+      action: message.action,
+    }))).toEqual([
+      { method: 'player_play_operation', action: 'pause' },
+      { method: 'player_play_operation', action: 'stop' },
+    ]);
+  });
+
+  it.each([
+    ['play', (client: MinaHTTPClient) => client.playerPlay('dev-1')],
+    ['pause', (client: MinaHTTPClient) => client.playerPause('dev-1')],
+    ['stop', (client: MinaHTTPClient) => client.playerStop('dev-1')],
+  ])('rejects device-level non-zero data.code for %s', async (_action, invoke) => {
+    const client = createClient();
+    vi.spyOn(client, 'ubusRequest').mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: { code: 3012 },
+    });
+
+    await expect(invoke(client)).resolves.toBe(false);
+  });
+
+  it.each([
+    [{ code: 0, message: 'ok', data: { code: 0, info: JSON.stringify({ status: 1 }) } }, 1],
+    [{ code: 0, message: 'ok', data: { code: 0 } }, -1],
+    [{ code: 0, message: 'ok', data: { code: 0, info: '{invalid' } }, -1],
+    [{ code: 0, message: 'ok', data: { code: 0, info: JSON.stringify({ status: 'playing' }) } }, -1],
+  ])('reads playback status from the complete UBus response shape', async (response, expected) => {
+    const client = createClient();
+    vi.spyOn(client, 'getPlayerStatus').mockResolvedValue(response);
+
+    await expect(client.readPlayStatus('dev-1')).resolves.toBe(expected);
   });
 
   it('sends a millisecond timestamp to the Xiaomi music search API', async () => {

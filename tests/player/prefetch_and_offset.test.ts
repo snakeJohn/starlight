@@ -32,6 +32,7 @@ function createManager(config: Record<string, unknown> = {}, dynamicOptions: Rec
   const minaService = {
     playURL: vi.fn(async () => true),
     pausePlay: vi.fn(async () => true),
+    pausePlayVerified: vi.fn(async () => 'paused' as const),
     stopPlay: vi.fn(async () => true),
     resumePlay: vi.fn(async () => true),
   } as unknown as MinaService;

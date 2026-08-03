@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MinaService } from '../../src/service/service';
+import type { PauseVerificationResult } from '../../src/mina/client';
 import type { AccountManager } from '../../src/account/manager';
 import type { ConfigManager } from '../../src/config/manager';
 
 function createService() {
   const client = {
     setVolume: vi.fn(async () => true),
+    playerPauseVerified: vi.fn(async (): Promise<PauseVerificationResult> => 'paused'),
   };
   const accountManager = {
     getMinaClient: vi.fn(() => client),
@@ -21,6 +23,30 @@ function createService() {
 }
 
 describe('MinaService', () => {
+  it('delegates verified pause results to the Mina client', async () => {
+    const { service, client } = createService();
+    client.playerPauseVerified.mockResolvedValue('stopped');
+
+    await expect(service.pausePlayVerified('acc-1', 'dev-1')).resolves.toBe('stopped');
+    expect(client.playerPauseVerified).toHaveBeenCalledWith('dev-1');
+  });
+
+  it('returns failed when verified pause has no client', async () => {
+    const accountManager = {
+      getMinaClient: vi.fn(() => null),
+    } as unknown as AccountManager;
+    const service = new MinaService(accountManager, {} as ConfigManager);
+
+    await expect(service.pausePlayVerified('missing', 'dev-1')).resolves.toBe('failed');
+  });
+
+  it('returns failed when verified pause throws', async () => {
+    const { service, client } = createService();
+    client.playerPauseVerified.mockRejectedValue(new Error('network failed'));
+
+    await expect(service.pausePlayVerified('acc-1', 'dev-1')).resolves.toBe('failed');
+  });
+
   it('rejects invalid volume values before calling the device client', async () => {
     const { service, client, accountManager } = createService();
 

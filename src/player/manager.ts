@@ -285,6 +285,8 @@ export class PlaylistManager {
    * 一次失败的 stop 会让接口永久谎报 stopped，连设备探针明确回 playing 都盖掉。
    */
   private deviceStopConfirmed = true;
+  /** Pause was escalated to stop, so direct resume cannot reuse device media state. */
+  private hardStopped = false;
   private _lastLoadNotFound: boolean = false; // 上次 loadPlaylistSongs 失败是否因歌单不存在(ID 过期)
 
   constructor(
@@ -317,6 +319,7 @@ export class PlaylistManager {
     this.playStartTimeMs = 0;
     // Drop any frozen pause progress; it belongs to the previous song.
     this.pausedElapsedSec = 0;
+    this.hardStopped = false;
     this._lastLoadNotFound = false;
 
     // 加载歌单歌曲
@@ -366,6 +369,7 @@ export class PlaylistManager {
     this.state = 'idle';
     this.playStartTimeMs = 0;
     this.pausedElapsedSec = 0;
+    this.hardStopped = false;
     this._lastLoadNotFound = false;
 
     const loaded = await this.loadPlaylistSongs(playlistId);
@@ -429,6 +433,7 @@ export class PlaylistManager {
     this.state = 'idle';
     this.playStartTimeMs = 0;
     this.pausedElapsedSec = 0;
+    this.hardStopped = false;
 
     if (!songs.length) {
       songloft.log.warn('[PlaylistManager] Empty standalone song queue');
@@ -459,9 +464,8 @@ export class PlaylistManager {
   /**
    * @returns 物理设备是否确实暂停成功。
    *
-   * `minaService.pausePlay()` 契约上返回 boolean 且**不抛异常**：账号无客户端、
-   * 请求失败、设备拒绝都只是返回 false。以前这里丢掉了返回值，于是设备还在响、
-   * 上层却一路上报 paused —— 切到浏览器后两端同时出声，且状态缓存也在说谎。
+   * `minaService.pausePlayVerified()` 区分普通暂停、升级停止和失败；升级停止仍表示
+   * 音箱已静音，但设备媒体上下文已丢失，后续不能直接 resume。
    *
    * 无论设备暂停成败，定时器和内部状态都要落到 paused：定时器不清的话，
    * 本地还会继续把下一首推给一台我们已经控制不住的音箱，只会更糟。
@@ -470,9 +474,9 @@ export class PlaylistManager {
     // 空闲/已停止的管理器不能被翻成 paused，否则 /player/toggle 会误以为有队列
     // 可恢复；但物理音箱仍可能正在播放插件外内容，所以仍要发送设备暂停命令。
     if (this.state !== 'playing' && this.state !== 'paused') {
-      return this.accountId && this.deviceId
-        ? this.minaService.pausePlay(this.accountId, this.deviceId)
-        : true;
+      if (!this.accountId || !this.deviceId) return true;
+      const result = await this.minaService.pausePlayVerified(this.accountId, this.deviceId);
+      return result !== 'failed';
     }
 
     this.stopCheckTimer();
@@ -493,10 +497,12 @@ export class PlaylistManager {
     // playStartTimeMs 在暂停期间不参与进度计算；恢复时按 pausedElapsedSec 重置
 
     // 调用设备暂停
-    let devicePaused = true;
+    let pauseResult: 'paused' | 'stopped' | 'failed' = 'paused';
     if (this.accountId && this.deviceId) {
-      devicePaused = await this.minaService.pausePlay(this.accountId, this.deviceId);
-      if (!devicePaused) {
+      pauseResult = await this.minaService.pausePlayVerified(this.accountId, this.deviceId);
+      if (pauseResult === 'stopped') {
+        this.hardStopped = true;
+      } else if (pauseResult === 'failed') {
         songloft.log.warn(
           `[PlaylistManager] Device refused to pause account=${this.accountId} device=${this.deviceId}; speaker may still be audible`,
         );
@@ -504,7 +510,7 @@ export class PlaylistManager {
     }
 
     songloft.log.info(`[PlaylistManager] Playback paused at ${this.pausedElapsedSec.toFixed(1)}s`);
-    return devicePaused;
+    return pauseResult !== 'failed';
   }
 
   /**
@@ -711,6 +717,11 @@ export class PlaylistManager {
       return false;
     }
 
+    if (this.hardStopped) {
+      songloft.log.info('[PlaylistManager] Resume after hard stop requires replaying the current URL');
+      return false;
+    }
+
     this.stopCheckTimer();
 
     const ok = await this.minaService.resumePlay(this.accountId, this.deviceId);
@@ -782,6 +793,7 @@ export class PlaylistManager {
     this.state = 'idle';
     this.playStartTimeMs = 0;
     this.pausedElapsedSec = 0;
+    this.hardStopped = false;
   }
 
   /**
@@ -896,6 +908,7 @@ export class PlaylistManager {
     this.state = 'idle';
     this.playStartTimeMs = 0;
     this.pausedElapsedSec = 0;
+    this.hardStopped = false;
     this.autoAdvance = true;
     this.randomPlayed = new Set();
   }
@@ -1063,6 +1076,7 @@ export class PlaylistManager {
     this.state = 'playing';
     this.playStartTimeMs = Date.now();
     this.pausedElapsedSec = 0;
+    this.hardStopped = false;
     this.currentTransitionOffsetSec = transitionOffsetSec;
     // 重新播起来了，上一次 stop 失败的标记不该再影响后续状态上报。
     // 放在这里是因为所有播放入口最终都会走到 playCurrentOnce。
