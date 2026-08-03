@@ -72,8 +72,11 @@ export class ConversationMonitor {
   /** 是否启用 */
   private enabled: boolean = false;
 
-  /** Prevent overlapping poll cycles when a previous tick is still running. */
-  private pollInFlight = false;
+  /** Prevent overlapping poll cycles within the same monitor run. */
+  private pollInFlightGenerations: Set<number> = new Set();
+
+  /** Increments at every start/stop so stale async work cannot affect a new run. */
+  private runGeneration = 0;
 
   /** Bound webhook delivery so a hung recipient cannot stall the monitor. */
   private static readonly WEBHOOK_TIMEOUT_MS = 5000;
@@ -104,35 +107,38 @@ export class ConversationMonitor {
     }
 
     this.enabled = true;
+    const runGeneration = ++this.runGeneration;
 
     // 从配置读取轮询间隔，然后刷新设备列表并启动定时器。
     this.configManager.getConfig().then(config => {
-      if (!this.enabled) return;
+      if (!this.isRunCurrent(runGeneration)) return;
 
       const intervalSec = Math.max(1, Math.min(30, config.conversation_poll_interval ?? 1));
       this.pollInterval = intervalSec * 1000;
 
       return this.refreshDevices().then(async () => {
-        if (!this.enabled) return;
+        if (!this.isRunCurrent(runGeneration)) return;
 
-        // The first successful poll establishes a server-timestamp baseline.
+        // Every start establishes a fresh server-timestamp baseline.
         for (const dm of this.devices.values()) {
           dm.isRunning = true;
+          dm.lastTimestampMs = 0;
+          dm.primed = false;
         }
         songloft.log.info(`[ConversationMonitor] Started, devices=${this.devices.size} callbacks=${this.callbacks.size} interval=${intervalSec}s`);
 
         try {
-          await this.pollAll();
+          await this.pollAll(runGeneration);
         } catch (e) {
           songloft.log.warn('[ConversationMonitor] Initial priming failed: ' + String(e));
         }
-        if (!this.enabled) return;
+        if (!this.isRunCurrent(runGeneration)) return;
 
         if (this.pollTimer !== null) {
           clearInterval(this.pollTimer);
         }
         this.pollTimer = setInterval(() => {
-          this.pollAll().catch(e => {
+          this.pollAll(runGeneration).catch(e => {
             songloft.log.error('[ConversationMonitor] pollAll error: ' + String(e));
           });
         }, this.pollInterval);
@@ -151,6 +157,7 @@ export class ConversationMonitor {
     }
 
     this.enabled = false;
+    this.runGeneration += 1;
 
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);
@@ -308,24 +315,24 @@ export class ConversationMonitor {
   /**
    * 轮询所有设备的对话记录
    * Devices are polled sequentially so per-device message order is preserved.
-   * Concurrent timer ticks are coalesced via pollInFlight.
+   * Concurrent timer ticks are coalesced within the current monitor run.
    */
-  private async pollAll(): Promise<void> {
-    if (!this.enabled) {
+  private async pollAll(runGeneration: number): Promise<void> {
+    if (!this.isRunCurrent(runGeneration)) {
       return;
     }
-    if (this.pollInFlight) {
+    if (this.pollInFlightGenerations.has(runGeneration)) {
       return;
     }
-    this.pollInFlight = true;
+    this.pollInFlightGenerations.add(runGeneration);
     try {
       for (const dm of this.devices.values()) {
-        if (!this.enabled) break;
+        if (!this.isRunCurrent(runGeneration)) break;
         if (!dm.isRunning) continue;
-        await this.pollDevice(dm);
+        await this.pollDevice(dm, runGeneration);
       }
     } finally {
-      this.pollInFlight = false;
+      this.pollInFlightGenerations.delete(runGeneration);
     }
   }
 
@@ -333,7 +340,11 @@ export class ConversationMonitor {
    * 轮询单个设备
    * 获取对话记录 → 时间戳去重 → 触发回调 → 推送 Webhook
    */
-  private async pollDevice(dm: DeviceMonitorState): Promise<void> {
+  private async pollDevice(dm: DeviceMonitorState, runGeneration: number): Promise<void> {
+    if (!this.isRunCurrent(runGeneration) || !dm.isRunning) {
+      return;
+    }
+
     // 获取 MinaHTTPClient
     const client = this.accountManager.getMinaClient(dm.accountId) as MinaHTTPClient | null;
     if (!client) {
@@ -345,7 +356,13 @@ export class ConversationMonitor {
     try {
       askMessages = await client.getLatestAskFromXiaoai(dm.deviceId, dm.hardware, 5);
     } catch (e) {
-      songloft.log.warn(`[ConversationMonitor] Failed to get conversations: ${dm.deviceId} ${String(e)}`);
+      if (this.isRunCurrent(runGeneration)) {
+        songloft.log.warn(`[ConversationMonitor] Failed to get conversations: ${dm.deviceId} ${String(e)}`);
+      }
+      return;
+    }
+
+    if (!this.isRunCurrent(runGeneration) || !dm.isRunning) {
       return;
     }
 
@@ -400,6 +417,9 @@ export class ConversationMonitor {
     if (newMessages.length === 0) {
       return;
     }
+    if (!this.isRunCurrent(runGeneration) || !dm.isRunning) {
+      return;
+    }
     songloft.log.info(
       `[ConversationMonitor] pollDevice device=${dm.deviceId} after filter: ${newMessages.length} new (lastTimestampMs=${dm.lastTimestampMs})`,
     );
@@ -421,7 +441,9 @@ export class ConversationMonitor {
     await this.notifyCallbacks(newMessages);
 
     // 向所有 Webhook 推送
-    await this.triggerWebhooks(dm.accountId, dm.deviceId, dm.deviceName, newMessages);
+    if (this.isRunCurrent(runGeneration) && dm.isRunning) {
+      await this.triggerWebhooks(dm.accountId, dm.deviceId, dm.deviceName, newMessages);
+    }
   }
 
   /**
@@ -536,5 +558,9 @@ export class ConversationMonitor {
    */
   private makeKey(accountId: string, deviceId: string): string {
     return accountId + ':' + deviceId;
+  }
+
+  private isRunCurrent(runGeneration: number): boolean {
+    return this.enabled && this.runGeneration === runGeneration;
   }
 }

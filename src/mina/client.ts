@@ -938,9 +938,11 @@ export class MinaHTTPClient {
       if (!infoData.result) return [];
 
       const messages: AskMessage[] = [];
+      let candidateCount = 0;
 
       for (const item of infoData.result) {
         if (!item.nlp) continue;
+        candidateCount += 1;
 
         try {
           const nlp = JSON.parse(item.nlp) as NlpDetail;
@@ -968,7 +970,7 @@ export class MinaHTTPClient {
         }
       }
 
-      return messages;
+      return candidateCount > 0 && messages.length === 0 ? null : messages;
     } catch {
       return null;
     }

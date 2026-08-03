@@ -80,4 +80,13 @@ describe('MinaHTTPClient conversation fetch contract', () => {
     await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5))
       .resolves.toEqual([expect.objectContaining({ timestamp_ms: 2_000 })]);
   });
+
+  it('returns null when UBus candidates contain no valid server timestamp', async () => {
+    const client = conversationClient();
+    vi.spyOn(client, 'ubusRequest').mockResolvedValue(ubusConversationResponse([
+      nlpRecord('not-a-timestamp', 'bad'),
+      { nlp: '{ malformed json' },
+    ]));
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5)).resolves.toBeNull();
+  });
 });
