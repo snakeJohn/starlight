@@ -75,6 +75,7 @@ describe('MinaHTTPClient conversation fetch contract', () => {
     const client = conversationClient();
     vi.spyOn(client, 'ubusRequest').mockResolvedValue(ubusConversationResponse([
       nlpRecord('not-a-timestamp', 'bad'),
+      nlpRecord('2000garbage', 'partial'),
       nlpRecord('2000', 'good'),
     ]));
     await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5))
@@ -88,5 +89,31 @@ describe('MinaHTTPClient conversation fetch contract', () => {
       { nlp: '{ malformed json' },
     ]));
     await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5)).resolves.toBeNull();
+  });
+
+  it('returns null when non-empty UBus results have no candidate message', async () => {
+    const client = conversationClient();
+    vi.spyOn(client, 'ubusRequest').mockResolvedValue(ubusConversationResponse([{}, { nlp: '' }]));
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5)).resolves.toBeNull();
+  });
+
+  it('returns null for missing or malformed UBus result shapes', async () => {
+    const client = conversationClient();
+    vi.spyOn(client, 'ubusRequest')
+      .mockResolvedValueOnce({ code: 0, data: { code: 0 } })
+      .mockResolvedValueOnce({ code: 0, data: { code: 0, info: JSON.stringify({}) } })
+      .mockResolvedValueOnce({ code: 0, data: { code: 0, info: JSON.stringify({ result: null }) } })
+      .mockResolvedValueOnce({ code: 0, data: { code: 0, info: JSON.stringify({ result: 'not-an-array' }) } });
+
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5)).resolves.toBeNull();
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5)).resolves.toBeNull();
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5)).resolves.toBeNull();
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5)).resolves.toBeNull();
+  });
+
+  it('returns an empty array only for an actual empty UBus result array', async () => {
+    const client = conversationClient();
+    vi.spyOn(client, 'ubusRequest').mockResolvedValue(ubusConversationResponse([]));
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'M01', 5)).resolves.toEqual([]);
   });
 });

@@ -932,22 +932,24 @@ export class MinaHTTPClient {
 
       const data = result.data as NlpResultData;
       if (data.code !== 0) return null;
-      if (!data.info) return [];
+      if (!data.info) return null;
 
       const infoData = JSON.parse(data.info) as NlpInfoData;
-      if (!infoData.result) return [];
+      if (!Array.isArray(infoData.result)) return null;
+      if (infoData.result.length === 0) return [];
 
       const messages: AskMessage[] = [];
-      let candidateCount = 0;
 
       for (const item of infoData.result) {
         if (!item.nlp) continue;
-        candidateCount += 1;
 
         try {
           const nlp = JSON.parse(item.nlp) as NlpDetail;
-          const timestamp = parseInt(nlp.meta?.timestamp ?? '', 10);
-          if (!Number.isFinite(timestamp) || timestamp <= 0) {
+          const rawTimestamp = nlp.meta?.timestamp;
+          const timestamp = typeof rawTimestamp === 'string' && /^\d+$/.test(rawTimestamp)
+            ? Number(rawTimestamp)
+            : Number.NaN;
+          if (!Number.isSafeInteger(timestamp) || timestamp <= 0) {
             songloft.log.warn(`[ConversationMonitor] getLatestAskByUbus skip record with invalid timestamp device=${deviceId} raw=${String(nlp.meta?.timestamp)}`);
             continue;
           }
@@ -970,7 +972,7 @@ export class MinaHTTPClient {
         }
       }
 
-      return candidateCount > 0 && messages.length === 0 ? null : messages;
+      return messages.length > 0 ? messages : null;
     } catch {
       return null;
     }

@@ -332,4 +332,40 @@ describe('ConversationMonitor polling', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(callback).toHaveBeenCalledWith(expect.objectContaining({ message: current }));
   });
+
+  it('does not apply an obsolete managed-device refresh after restart', async () => {
+    vi.useFakeTimers();
+    let releaseOldRefresh!: () => void;
+    const oldRefresh = new Promise<Array<{ device_id: string; device_name: string; hardware: string }>>((resolve) => {
+      releaseOldRefresh = () => resolve([{ device_id: 'old-speaker', device_name: '旧音箱', hardware: 'LX06' }]);
+    });
+    const minaClient = { getLatestAskFromXiaoai: vi.fn(async () => []) };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn()
+        .mockImplementationOnce(() => oldRefresh)
+        .mockResolvedValueOnce([{ device_id: 'new-speaker', device_name: '新音箱', hardware: 'LX06' }]),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    monitor.start();
+    await flushStart();
+    monitor.stop();
+    monitor.start();
+    await flushStart();
+    expect((await monitor.getStatus()).devices).toEqual([
+      expect.objectContaining({ device_id: 'new-speaker', primed: true }),
+    ]);
+
+    releaseOldRefresh();
+    await flushStart();
+    expect((await monitor.getStatus()).devices).toEqual([
+      expect.objectContaining({ device_id: 'new-speaker', primed: true }),
+    ]);
+  });
 });

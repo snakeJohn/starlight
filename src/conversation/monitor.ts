@@ -116,7 +116,7 @@ export class ConversationMonitor {
       const intervalSec = Math.max(1, Math.min(30, config.conversation_poll_interval ?? 1));
       this.pollInterval = intervalSec * 1000;
 
-      return this.refreshDevices().then(async () => {
+      return this.refreshDevices(runGeneration).then(async () => {
         if (!this.isRunCurrent(runGeneration)) return;
 
         // Every start establishes a fresh server-timestamp baseline.
@@ -179,7 +179,7 @@ export class ConversationMonitor {
     if (!this.enabled) {
       return;
     }
-    await this.refreshDevices();
+    await this.refreshDevices(this.runGeneration);
   }
 
   /**
@@ -265,29 +265,28 @@ export class ConversationMonitor {
    * 刷新设备监听列表
    * 合并所有账号的 managed 设备
    */
-  private async refreshDevices(): Promise<void> {
+  private async refreshDevices(runGeneration: number): Promise<void> {
     const accounts = await this.accountManager.getAccounts();
 
-    // 构建当前 managed 设备的 key 集合
-    const managedKeys = new Set<string>();
-    const newDevices: Array<{ accountId: string; deviceId: string; deviceName: string; hardware: string }> = [];
+    // Build the whole snapshot before touching the shared device map.
+    const managedDevices: Array<{ accountId: string; deviceId: string; deviceName: string; hardware: string }> = [];
 
     for (const acc of accounts) {
       const managed = await this.accountManager.getManagedDevices(acc.id);
       for (const dev of managed) {
-        const key = this.makeKey(acc.id, dev.device_id);
-        managedKeys.add(key);
-        if (!this.devices.has(key)) {
-          newDevices.push({
-            accountId: acc.id,
-            deviceId: dev.device_id,
-            deviceName: dev.device_name,
-            hardware: dev.hardware,
-          });
-        }
+        managedDevices.push({
+          accountId: acc.id,
+          deviceId: dev.device_id,
+          deviceName: dev.device_name,
+          hardware: dev.hardware,
+        });
       }
     }
 
+    // An obsolete refresh must not delete or add devices for a newer run.
+    if (!this.isRunCurrent(runGeneration)) return;
+
+    const managedKeys = new Set(managedDevices.map((dev) => this.makeKey(dev.accountId, dev.deviceId)));
     // 移除不再 managed 的设备
     for (const key of this.devices.keys()) {
       if (!managedKeys.has(key)) {
@@ -297,8 +296,9 @@ export class ConversationMonitor {
     }
 
     // 添加新的 managed 设备
-    for (const dev of newDevices) {
+    for (const dev of managedDevices) {
       const key = this.makeKey(dev.accountId, dev.deviceId);
+      if (this.devices.has(key)) continue;
       this.devices.set(key, {
         accountId: dev.accountId,
         deviceId: dev.deviceId,
