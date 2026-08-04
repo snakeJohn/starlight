@@ -52,6 +52,7 @@ export interface DeviceMonitorStatusItem {
  * 定时轮询所有 managed 设备的对话记录，检测新消息并触发回调/Webhook
  */
 export class ConversationMonitor {
+  private static readonly DEVICE_POLL_TIMEOUT_MS = 10_000;
   private accountManager: AccountManager;
   private configManager: ConfigManager;
 
@@ -357,13 +358,39 @@ export class ConversationMonitor {
 
     // 获取对话记录（返回 AskMessage[]）
     let askMessages: AskMessage[] | null;
+    let timeoutId: any = null;
     try {
-      askMessages = await client.getLatestAskFromXiaoai(dm.deviceId, dm.hardware, 5);
+      const controller = new AbortController();
+      const pollRequest = client.getLatestAskFromXiaoai(dm.deviceId, dm.hardware, 5, controller.signal);
+      const pollResult = await Promise.race([
+        pollRequest.then(
+          messages => ({ kind: 'result' as const, messages }),
+          error => ({ kind: 'error' as const, error }),
+        ),
+        new Promise<{ kind: 'timeout' }>(resolve => {
+          timeoutId = setTimeout(() => {
+            controller.abort();
+            resolve({ kind: 'timeout' });
+          }, ConversationMonitor.DEVICE_POLL_TIMEOUT_MS);
+        }),
+      ]);
+      if (pollResult.kind === 'timeout') {
+        if (this.isRunCurrent(runGeneration)) {
+          songloft.log.warn(`[ConversationMonitor] Conversation poll timed out: ${dm.deviceId}`);
+        }
+        return;
+      }
+      if (pollResult.kind === 'error') {
+        throw pollResult.error;
+      }
+      askMessages = pollResult.messages;
     } catch (e) {
       if (this.isRunCurrent(runGeneration)) {
         songloft.log.warn(`[ConversationMonitor] Failed to get conversations: ${dm.deviceId} ${String(e)}`);
       }
       return;
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
     }
 
     if (!this.isRunCurrent(runGeneration) || !dm.isRunning) {

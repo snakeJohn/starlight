@@ -327,12 +327,13 @@ export class PlaylistManager {
     this._lastLoadNotFound = false;
 
     // 加载歌单歌曲
-    const loaded = await this.loadPlaylistSongs(playlistId);
+    const songs = await this.loadPlaylistSongs(playlistId, controlEpoch);
     if (controlEpoch !== this.controlOperationEpoch) return false;
-    if (!loaded) {
+    if (!songs) {
       songloft.log.error('[PlaylistManager] Failed to load playlist songs: ' + playlistId);
       return false;
     }
+    this.songs = songs;
 
     if (this.songs.length === 0) {
       songloft.log.warn('[PlaylistManager] Playlist is empty: ' + playlistId);
@@ -378,12 +379,13 @@ export class PlaylistManager {
     this.hardStopped = false;
     this._lastLoadNotFound = false;
 
-    const loaded = await this.loadPlaylistSongs(playlistId);
+    const songs = await this.loadPlaylistSongs(playlistId, controlEpoch);
     if (controlEpoch !== this.controlOperationEpoch) return false;
-    if (!loaded) {
+    if (!songs) {
       songloft.log.error('[PlaylistManager] Failed to load playlist songs: ' + playlistId);
       return false;
     }
+    this.songs = songs;
 
     if (this.songs.length === 0) {
       songloft.log.warn('[PlaylistManager] Playlist is empty: ' + playlistId);
@@ -790,6 +792,30 @@ export class PlaylistManager {
   }
 
   /**
+   * 恢复托管播放，必要时重推当前 URL。
+   *
+   * 只有当本次恢复仍是最后一个控制操作时才允许 fallback。否则 stop/play
+   * 等新操作刚刚生效，旧请求不能再把音箱重新拉回播放状态。
+   */
+  async resumePlaybackWithFallback(): Promise<boolean> {
+    const initialEpoch = this.controlOperationEpoch;
+    const resumeWouldStart = (
+      (this.state === 'playing' || this.state === 'paused')
+      && this.songs.length > 0
+      && this.pauseVerificationsInFlight === 0
+      && !this.hardStopped
+    );
+    const expectedEpoch = initialEpoch + (resumeWouldStart ? 1 : 0);
+
+    const resumed = await this.resumePlayback();
+    if (resumed) return true;
+    if (this.controlOperationEpoch !== expectedEpoch || this.pauseVerificationsInFlight > 0) {
+      return false;
+    }
+    return this.replayCurrent();
+  }
+
+  /**
    * 获取当前播放位置（秒）
    */
   getPosition(): number {
@@ -957,17 +983,19 @@ export class PlaylistManager {
    * 加载歌单歌曲（通过宿主API桥接）
    * 首次失败会短暂重试一次，缓解宿主桥接瞬时抖动导致的「口令已识别但歌单打不开」。
    */
-  private async loadPlaylistSongs(playlistId: number): Promise<boolean> {
-    const attempt = async (retry: boolean): Promise<boolean> => {
+  private async loadPlaylistSongs(playlistId: number, controlEpoch?: number): Promise<PlayerSong[] | null> {
+    const isCurrentOperation = (): boolean => (
+      controlEpoch === undefined || controlEpoch === this.controlOperationEpoch
+    );
+    const attempt = async (retry: boolean): Promise<PlayerSong[] | null> => {
       try {
         if (playlistId < 0 && this.dynamicOptions.dynamicPlaylistLoader) {
           const songs = await this.dynamicOptions.dynamicPlaylistLoader(playlistId);
           if (!songs || !Array.isArray(songs)) {
             songloft.log.error(`[PlaylistManager] Dynamic playlist loader returned invalid songs: ${playlistId}${retry ? ' (retry)' : ''}`);
-            return false;
+            return null;
           }
-          this.songs = songs;
-          return songs.length > 0;
+          return songs.length > 0 ? songs : null;
         }
 
         // 使用 songloft.playlists.getSongs 桥接调用（与 Go WASM 版本的 hostFunctions.CallRouter 等价）
@@ -975,30 +1003,31 @@ export class PlaylistManager {
         const songs = normalizePlayerSongs(await songloft.playlists.getSongs(playlistId, { limit: 100000 }));
         songloft.log.info(`[PlaylistManager] loadPlaylistSongs playlistId=${playlistId} returned=${songs.length}${retry ? ' (retry)' : ''}`);
         if (songs.length === 0) {
-          return false;
+          return null;
         }
-        this.songs = songs;
-        return true;
+        return songs;
       } catch (e) {
         songloft.log.error(`[PlaylistManager] Failed to load playlist songs playlistId=${playlistId}${retry ? ' (retry)' : ''}: ${String(e)}`);
-        return false;
+        return null;
       }
     };
 
-    if (await attempt(false)) {
-      return true;
+    const firstAttempt = await attempt(false);
+    if (firstAttempt) {
+      return firstAttempt;
     }
 
     songloft.log.warn(`[PlaylistManager] loadPlaylistSongs empty or failed, retrying in 500ms playlistId=${playlistId}`);
     await new Promise(r => setTimeout(r, 500));
-    if (await attempt(true)) {
-      return true;
+    const retryAttempt = await attempt(true);
+    if (retryAttempt) {
+      return retryAttempt;
     }
 
     // retry 后仍为空/失败：区分「歌单不存在(ID 过期)」与「歌单存在但为空」
     try {
       const pl = await songloft.playlists.getById(playlistId);
-      if (!pl) {
+      if (!pl && isCurrentOperation()) {
         this._lastLoadNotFound = true;
         songloft.log.warn(`[PlaylistManager] playlist ${playlistId} not found (stale ID), signaling caller to refresh index`);
       }
@@ -1006,7 +1035,7 @@ export class PlaylistManager {
       songloft.log.warn(`[PlaylistManager] getById check failed playlistId=${playlistId}: ${String(e)}`);
     }
     songloft.log.error('[PlaylistManager] Bridge returned invalid songs data for playlist: ' + playlistId);
-    return false;
+    return null;
   }
 
   /**

@@ -94,6 +94,27 @@ describe('PlaylistManager song-id playlist targeting', () => {
       expect.any(Object),
     );
   });
+
+  it('does not let an older playlist load overwrite a newer playback queue', async () => {
+    const { manager } = createManager();
+    let resolveFirst!: (songs: PlayerSong[]) => void;
+    let resolveSecond!: (songs: PlayerSong[]) => void;
+    songloft.playlists.getSongs = vi.fn()
+      .mockImplementationOnce(() => new Promise<PlayerSong[]>(resolve => { resolveFirst = resolve; }))
+      .mockImplementationOnce(() => new Promise<PlayerSong[]>(resolve => { resolveSecond = resolve; })) as typeof songloft.playlists.getSongs;
+
+    const firstPlay = manager.play(9, 0, 'order');
+    const secondPlay = manager.play(10, 0, 'order');
+
+    resolveSecond([song(20)]);
+    await expect(secondPlay).resolves.toBe(true);
+
+    resolveFirst([song(10)]);
+    await expect(firstPlay).resolves.toBe(false);
+
+    expect(manager.getStatus()).toMatchObject({ playlist_id: 10, current_index: 0 });
+    expect(manager.getCurrentSong()?.id).toBe(20);
+  });
 });
 
 describe('URLBuilder radio MP3 transcoding', () => {

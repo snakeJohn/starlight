@@ -115,6 +115,17 @@ describe('MinaHTTPClient conversation fetch contract', () => {
     await expect(client.getLatestAskFromXiaoai('dev-1', 'LX06', 5)).resolves.toEqual([]);
   });
 
+  it('returns null for an HTTP-200 Xiaoai error envelope instead of an empty batch', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 500,
+      message: 'conversation service unavailable',
+      data: '',
+    }), { status: 200 })));
+    const client = conversationClient();
+
+    await expect(client.getLatestAskFromXiaoai('dev-1', 'LX06', 5)).resolves.toBeNull();
+  });
+
   it('skips UBus records whose server timestamp is invalid', async () => {
     const client = conversationClient();
     vi.spyOn(client, 'ubusRequest').mockResolvedValue(ubusConversationResponse([

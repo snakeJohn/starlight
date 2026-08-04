@@ -211,6 +211,43 @@ describe('MIoT playback API model detection', () => {
     ]);
   });
 
+  it('fails when pause verification cannot read a device status', async () => {
+    vi.useFakeTimers();
+    const client = createClient();
+    const ubusSpy = vi.spyOn(client, 'ubusRequest').mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: { code: 0 },
+    });
+    vi.spyOn(client, 'readPlayStatus').mockResolvedValue(-1);
+
+    const pending = client.playerPauseVerified('dev-1');
+    await vi.advanceTimersByTimeAsync(700);
+
+    await expect(pending).resolves.toBe('failed');
+    expect(ubusSpy.mock.calls.map(([, method, , message]) => ({
+      method,
+      action: message.action,
+    }))).toEqual([
+      { method: 'player_play_operation', action: 'pause' },
+    ]);
+  });
+
+  it('fails when the speaker is still playing and stop escalation is rejected', async () => {
+    vi.useFakeTimers();
+    const client = createClient();
+    const ubusSpy = vi.spyOn(client, 'ubusRequest')
+      .mockResolvedValueOnce({ code: 0, message: 'ok', data: { code: 0 } })
+      .mockResolvedValueOnce({ code: 0, message: 'ok', data: { code: 3012 } });
+    vi.spyOn(client, 'readPlayStatus').mockResolvedValue(1);
+
+    const pending = client.playerPauseVerified('dev-1');
+    await vi.advanceTimersByTimeAsync(1_400);
+
+    await expect(pending).resolves.toBe('failed');
+    expect(ubusSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('does not let a stale pause verifier stop newly accepted playback', async () => {
     vi.useFakeTimers();
     const client = createClient();

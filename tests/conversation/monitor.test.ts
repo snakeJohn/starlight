@@ -9,6 +9,10 @@ async function flushStart(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function ask(timestamp_ms: number, question: string): AskMessage {
@@ -57,7 +61,12 @@ describe('ConversationMonitor polling', () => {
 
     await vi.advanceTimersByTimeAsync(1000);
 
-    expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledWith('speaker-1', 'LX06', 5);
+    expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledWith(
+      'speaker-1',
+      'LX06',
+      5,
+      expect.any(AbortSignal),
+    );
     expect(callback).toHaveBeenCalledWith(expect.objectContaining({
       account_id: 'acc-1',
       device_id: 'speaker-1',
@@ -248,6 +257,36 @@ describe('ConversationMonitor polling', () => {
     monitor.start();
     await flushStart();
     expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: true, last_timestamp_ms: 0 });
+  });
+
+  it('installs the polling timer after a hung initial device request times out', async () => {
+    vi.useFakeTimers();
+    const minaClient = {
+      getLatestAskFromXiaoai: vi.fn()
+        .mockImplementationOnce(() => new Promise<AskMessage[]>(() => {}))
+        .mockResolvedValueOnce([]),
+    };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn(async () => [{ device_id: 'speaker-1', device_name: '客厅音箱', hardware: 'LX06' }]),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    monitor.start();
+    await flushStart();
+    expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flushStart();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(2);
+    monitor.stop();
   });
 
   it('re-primes retained devices after restart without delivering stopped-period history', async () => {

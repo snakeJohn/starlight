@@ -189,10 +189,7 @@ export function registerDeviceHandlers(
         : null;
       let ok: boolean;
       if (resumeManager?.hasPlaylist()) {
-        ok = await resumeManager.resumePlayback();
-        if (!ok) {
-          ok = await resumeManager.replayCurrent();
-        }
+        ok = await resumeManager.resumePlaybackWithFallback();
       } else {
         ok = await minaService.resumePlay(account_id, device_id);
       }

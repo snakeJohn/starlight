@@ -439,7 +439,7 @@ export class MinaHTTPClient {
 
   async playerPauseVerified(deviceId: string): Promise<PauseVerificationResult> {
     const generation = this.beginMediaOperation(deviceId);
-    const pauseOK = await this.playerOperation(deviceId, 'pause');
+    await this.playerOperation(deviceId, 'pause');
     if (!this.isMediaOperationCurrent(deviceId, generation)) return 'failed';
 
     for (let attempt = 0; attempt < PAUSE_VERIFY_ATTEMPTS; attempt += 1) {
@@ -448,6 +448,10 @@ export class MinaHTTPClient {
 
       const status = await this.readPlayStatus(deviceId);
       if (!this.isMediaOperationCurrent(deviceId, generation)) return 'failed';
+      if (status < 0) {
+        songloft.log.warn(`[MinaClient] pause verification returned unknown status device=${deviceId}`);
+        return 'failed';
+      }
       if (status !== PLAY_STATUS_PLAYING) {
         return 'paused';
       }
@@ -458,7 +462,7 @@ export class MinaHTTPClient {
     if (await this.playerOperation(deviceId, 'stop')) {
       return 'stopped';
     }
-    return pauseOK ? 'paused' : 'failed';
+    return 'failed';
   }
 
   /**
@@ -489,7 +493,7 @@ export class MinaHTTPClient {
 
     try {
       const parsed = JSON.parse(info) as Record<string, unknown>;
-      return typeof parsed.status === 'number' ? parsed.status : -1;
+      return typeof parsed.status === 'number' && Number.isFinite(parsed.status) ? parsed.status : -1;
     } catch {
       return -1;
     }
@@ -590,7 +594,7 @@ export class MinaHTTPClient {
    * @param hardware - 设备硬件型号
    * @param limit - 记录数量限制（默认2）
    */
-  async getLatestAskFromXiaoai(deviceId: string, hardware: string, limit = 2): Promise<AskMessage[] | null> {
+  async getLatestAskFromXiaoai(deviceId: string, hardware: string, limit = 2, signal?: AbortSignal): Promise<AskMessage[] | null> {
     if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai deviceId=${deviceId} hardware=${hardware} limit=${limit} useMinaForAsk=${shouldUseMinaForAsk(hardware)}`);
     // 部分设备需要通过 ubus 方式获取
     if (shouldUseMinaForAsk(hardware)) {
@@ -606,7 +610,7 @@ export class MinaHTTPClient {
 
     // 大多数设备通过 xiaoai API 获取，带3次重试
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const messages = await this.doGetLatestAskFromXiaoai(deviceId, apiUrl);
+      const messages = await this.doGetLatestAskFromXiaoai(deviceId, apiUrl, signal);
       if (messages !== null) {
         if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai attempt=${attempt} success, ${messages.length} messages`);
         return messages;
@@ -925,7 +929,7 @@ export class MinaHTTPClient {
   /**
    * 通过 xiaoai API 获取对话记录
    */
-  private async doGetLatestAskFromXiaoai(deviceId: string, apiUrl: string): Promise<AskMessage[] | null> {
+  private async doGetLatestAskFromXiaoai(deviceId: string, apiUrl: string, signal?: AbortSignal): Promise<AskMessage[] | null> {
 
     const headers: Record<string, string> = {
       'User-Agent': this.userAgent,
@@ -934,7 +938,7 @@ export class MinaHTTPClient {
 
     let response: any;
     try {
-      const fetchResult = await fetchWithRedirects(apiUrl, { method: 'GET', headers }, new CookieJar(), 0);
+      const fetchResult = await fetchWithRedirects(apiUrl, { method: 'GET', headers, signal }, new CookieJar(), 0);
       response = fetchResult.response;
     } catch (e) {
       songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai fetch error: ${String(e)}`);
@@ -962,16 +966,24 @@ export class MinaHTTPClient {
       if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai raw response (${text.length} chars): ${text.substring(0, 1000)}`);
 
       const result = JSON.parse(text) as Record<string, unknown>;
+      if (Number(result.code) !== 0) {
+        songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai response code=${String(result.code)}`);
+        return null;
+      }
 
       // data 字段是一个 JSON 字符串
-      const dataStr = result['data'] as string;
-      if (!dataStr) {
-        if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai data field is empty/null`);
-        return [];
+      const dataStr = result['data'];
+      if (typeof dataStr !== 'string' || !dataStr) {
+        songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai data field is missing or empty`);
+        return null;
       }
 
       const dataObj = JSON.parse(dataStr) as ConversationData;
-      if (!dataObj.records || dataObj.records.length === 0) {
+      if (!Array.isArray(dataObj.records)) {
+        songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai records field is missing or malformed`);
+        return null;
+      }
+      if (dataObj.records.length === 0) {
         if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai records empty or missing`);
         return [];
       }

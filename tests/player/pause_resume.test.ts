@@ -162,6 +162,26 @@ describe('PlaylistManager pause/resume progress', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('does not replay after an in-flight resume is superseded by stop', async () => {
+    const { manager, minaService } = createManager();
+    let finishResume!: (result: boolean) => void;
+    vi.mocked(minaService.resumePlay).mockReturnValue(new Promise<boolean>(resolve => {
+      finishResume = resolve;
+    }));
+
+    await manager.playStandalone([{ ...song }], 0, 'order');
+    await manager.pause();
+
+    const pendingResume = manager.resumePlaybackWithFallback();
+    await Promise.resolve();
+    await manager.stop();
+    finishResume(true);
+
+    await expect(pendingResume).resolves.toBe(false);
+    expect(manager.getStatus().state).toBe('stopped');
+    expect(minaService.playURL).toHaveBeenCalledTimes(1);
+  });
+
   it('does not let an older replay fallback overwrite a newer pause', async () => {
     const { manager, minaService } = createManager();
     vi.mocked(minaService.pausePlayVerified).mockResolvedValueOnce('stopped').mockResolvedValue('paused');

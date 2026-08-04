@@ -122,8 +122,7 @@ describe('registerDeviceHandlers', () => {
     } as unknown as MinaService;
     const manager = {
       hasPlaylist: vi.fn(() => true),
-      resumePlayback: vi.fn(async () => true),
-      replayCurrent: vi.fn(async () => true),
+      resumePlaybackWithFallback: vi.fn(async () => true),
     };
     const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
 
@@ -136,8 +135,7 @@ describe('registerDeviceHandlers', () => {
     }));
 
     expect(parseResponseBody(response).success).toBe(true);
-    expect(manager.resumePlayback).toHaveBeenCalledTimes(1);
-    expect(manager.replayCurrent).not.toHaveBeenCalled();
+    expect(manager.resumePlaybackWithFallback).toHaveBeenCalledTimes(1);
     // resumePlayback() 内部已调设备，handler 不该再调一次
     expect(minaService.resumePlay).not.toHaveBeenCalled();
   });
@@ -149,8 +147,7 @@ describe('registerDeviceHandlers', () => {
     } as unknown as MinaService;
     const manager = {
       hasPlaylist: vi.fn(() => true),
-      resumePlayback: vi.fn(async () => false),
-      replayCurrent: vi.fn(async () => true),
+      resumePlaybackWithFallback: vi.fn(async () => true),
     };
     const playlistManagerMap = { getOrCreate: vi.fn(async () => manager) };
 
@@ -163,8 +160,7 @@ describe('registerDeviceHandlers', () => {
     }));
 
     expect(parseResponseBody(response).success).toBe(true);
-    expect(manager.resumePlayback).toHaveBeenCalledTimes(1);
-    expect(manager.replayCurrent).toHaveBeenCalledTimes(1);
+    expect(manager.resumePlaybackWithFallback).toHaveBeenCalledTimes(1);
     expect(minaService.resumePlay).not.toHaveBeenCalled();
   });
 

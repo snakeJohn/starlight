@@ -17,6 +17,7 @@ export interface FetchOptions {
   headers?: Record<string, string>;
   body?: string;
   redirect?: 'follow' | 'manual';
+  signal?: AbortSignal;
 }
 
 /** 响应头包装器（支持 case-insensitive get + getSetCookie） */
@@ -106,13 +107,13 @@ export interface RedirectResult {
  */
 export async function httpFetch(
   url: string,
-  options: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  options: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal } = {},
 ): Promise<HttpResponse> {
   const method = (options.method || 'GET').toUpperCase();
   const headers = options.headers || {};
   const body = options.body;
 
-  const resp = await fetch(url, { method, headers, body });
+  const resp = await fetch(url, { method, headers, body, signal: options.signal });
   const { headerObj, setCookies } = readResponseHeaders(resp.headers);
   const text = await resp.text();
 
@@ -160,7 +161,7 @@ export async function fetchWithRedirects(
     const method = redirectCount === 0 ? (options.method || 'GET') : 'GET';
     const body = (redirectCount === 0 && options.body) ? options.body : undefined;
 
-    const response = await httpFetch(currentUrl, { method, headers, body });
+    const response = await httpFetch(currentUrl, { method, headers, body, signal: options.signal });
 
     collectCookies(response, currentUrl, cookieJar);
 
