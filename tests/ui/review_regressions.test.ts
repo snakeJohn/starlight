@@ -319,6 +319,55 @@ describe('speaker playlist loading', () => {
     expect(playlistList.innerHTML).toContain('收藏');
   });
 
+  it('refreshes the playlist list when a playlist songs response is marked expired', async () => {
+    const playlistSelect = new FakeElement();
+    const playlistList = new FakeElement();
+    const playlistSongs = new FakeElement();
+    installDom(new Map<string, unknown>([
+      ['[data-role="speaker-playlist-select"]', playlistSelect],
+      ['[data-role="speaker-playlist-list"]', playlistList],
+      ['[data-role="speaker-playlist-songs"]', playlistSongs],
+    ]));
+    let songsRequestCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'api/songloft/playlists') {
+        return okResponse([{ id: 12, name: '刷新后的歌单', type: 'normal', song_count: 1 }]);
+      }
+      if (url === 'api/songloft/playlists/12/songs') {
+        songsRequestCount += 1;
+        if (songsRequestCount === 1) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              success: true,
+              data: { list: [], total: 0, expired: true },
+            }),
+          } as Response;
+        }
+        return okResponse([{ title: '新歌' }]);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: { speakerPlaylistId: string; speakerPlaylists: unknown[] };
+    };
+    state.speakerPlaylistId = '12';
+    state.speakerPlaylists = [{ id: 12, name: '过期快照', type: 'normal' }];
+    const { loadSpeakerPlaylistSongs } = await import('../../static/js/speaker_modules/playlists.js') as {
+      loadSpeakerPlaylistSongs(id?: string): Promise<unknown[]>;
+    };
+
+    await loadSpeakerPlaylistSongs('12');
+
+    expect(songsRequestCount).toBe(2);
+    expect(playlistList.innerHTML).toContain('刷新后的歌单');
+    expect(playlistSongs.innerHTML).toContain('新歌');
+  });
+
   it('replaces the loading placeholder when playlist songs fail to load', async () => {
     const playlistSongs = new FakeElement();
     installDom(new Map<string, unknown>([
@@ -381,6 +430,122 @@ describe('speaker playlist loading', () => {
     expect(state.speakerPlaylistSongs).toEqual([{ title: '新歌单歌曲' }]);
     expect(drawerSongs.innerHTML).toContain('新歌单歌曲');
     expect(drawerSongs.innerHTML).not.toContain('旧歌单歌曲');
+  });
+
+  it('ignores a stale expired drawer response after switching playlists', async () => {
+    const drawerPlaylists = new FakeElement();
+    const drawerSongs = new FakeElement();
+    installDom(new Map<string, unknown>([
+      ['[data-role="speaker-song-list-playlists"]', drawerPlaylists],
+      ['[data-role="speaker-song-list-songs"]', drawerSongs],
+    ]));
+
+    let releaseStale: () => void = () => {};
+    const stale = new Promise<void>(resolve => { releaseStale = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'api/songloft/playlists/12/songs') {
+        await stale;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, data: [], expired: true }),
+        } as Response;
+      }
+      if (url === 'api/songloft/playlists/15/songs') return okResponse([{ title: '新歌单歌曲' }]);
+      if (url === 'api/songloft/playlists') return okResponse([]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: {
+        speakerPlaylistId: string;
+        speakerPlaylistSongs: Array<{ title: string }>;
+        speakerPlaylists: unknown[];
+      };
+    };
+    state.speakerPlaylistId = '';
+    state.speakerPlaylists = [];
+    state.speakerPlaylistSongs = [];
+    const { bindSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
+      bindSpeakerPlaylists(options?: Record<string, unknown>): void;
+    };
+    bindSpeakerPlaylists({});
+
+    const rowFor = (id: string) => {
+      const row = new FakeElement();
+      row.dataset.id = id;
+      row.closest = () => row;
+      return row;
+    };
+
+    const slowClick = drawerPlaylists.dispatch('click', rowFor('12'));
+    const fastClick = drawerPlaylists.dispatch('click', rowFor('15'));
+    await fastClick;
+    releaseStale();
+    await slowClick;
+
+    expect(state.speakerPlaylistId).toBe('15');
+    expect(state.speakerPlaylistSongs).toEqual([{ title: '新歌单歌曲' }]);
+    expect(drawerSongs.innerHTML).toContain('新歌单歌曲');
+    expect(fetchMock).not.toHaveBeenCalledWith('api/songloft/playlists', expect.anything());
+  });
+
+  it('does not clear a newer drawer selection while an expired-list refresh is pending', async () => {
+    const drawerPlaylists = new FakeElement();
+    const drawerSongs = new FakeElement();
+    installDom(new Map<string, unknown>([
+      ['[data-role="speaker-song-list-playlists"]', drawerPlaylists],
+      ['[data-role="speaker-song-list-songs"]', drawerSongs],
+    ]));
+
+    let releaseRefresh!: (response: Response) => void;
+    const refreshResponse = new Promise<Response>(resolve => { releaseRefresh = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'api/songloft/playlists/12/songs') return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: [], expired: true }),
+      } as Response;
+      if (url === 'api/songloft/playlists') return refreshResponse;
+      if (url === 'api/songloft/playlists/15/songs') return okResponse([{ title: '新歌单歌曲' }]);
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { state } = await import('../../static/js/state.js') as {
+      state: {
+        speakerPlaylistId: string;
+        speakerPlaylistSongs: Array<{ title: string }>;
+        speakerPlaylists: unknown[];
+      };
+    };
+    state.speakerPlaylistId = '';
+    state.speakerPlaylists = [];
+    state.speakerPlaylistSongs = [];
+    const { bindSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
+      bindSpeakerPlaylists(options?: Record<string, unknown>): void;
+    };
+    bindSpeakerPlaylists({});
+
+    const rowFor = (id: string) => {
+      const row = new FakeElement();
+      row.dataset.id = id;
+      row.closest = () => row;
+      return row;
+    };
+
+    const staleClick = drawerPlaylists.dispatch('click', rowFor('12'));
+    for (let index = 0; index < 6; index += 1) await Promise.resolve();
+    const currentClick = drawerPlaylists.dispatch('click', rowFor('15'));
+    await currentClick;
+    releaseRefresh(okResponse([{ id: 15, name: '新歌单', type: 'normal' }]));
+    await staleClick;
+
+    expect(state.speakerPlaylistId).toBe('15');
+    expect(state.speakerPlaylistSongs).toEqual([{ title: '新歌单歌曲' }]);
   });
 });
 

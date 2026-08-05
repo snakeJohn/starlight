@@ -146,8 +146,10 @@ export async function prepareConversationMonitorFromCheckbox(input) {
     setConfigState('正在检测并托管音箱设备...', form);
     try {
         const count = await manageAllConversationDevices();
-        updateVoiceCommandAccess(form, savedConversationMonitorEnabled);
-        setConfigState(`已自动托管 ${count} 台音箱，保存设置后可启用语音口令`, form);
+        // Enable voice checkbox based on current UI state (monitor checked + devices managed),
+        // not the previously saved config — so users can toggle voice before the first save.
+        updateVoiceCommandAccess(form, true);
+        setConfigState(`已自动托管 ${count} 台音箱，可勾选语音口令后一并保存`, form);
         toast(`已自动托管 ${count} 台音箱`);
     } catch (error) {
         input.checked = false;

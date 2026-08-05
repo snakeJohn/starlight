@@ -142,17 +142,23 @@ export async function fetchWithRedirects(
 ): Promise<RedirectResult> {
   let currentUrl = url;
   let redirectCount = 0;
+  const initialOrigin = getUrlOrigin(url);
 
   while (redirectCount <= maxRedirects) {
     const headers: Record<string, string> = { ...(options.headers || {}) };
     const cookieHeader = cookieJar.getCookieHeader(currentUrl);
-    if (cookieHeader) {
+    const cookieKeys = Object.keys(headers).filter(key => key.toLowerCase() === 'cookie');
+    const explicitCookie = cookieKeys.map(key => headers[key]).filter(Boolean).join('; ');
+    const sameOrigin = getUrlOrigin(currentUrl) === initialOrigin;
+    const mergedCookies = [explicitCookie, cookieHeader].filter(Boolean).join('; ');
+    const safeCookies = sameOrigin ? mergedCookies : stripSensitiveCookies(mergedCookies);
+    for (const key of cookieKeys) {
+      delete headers[key];
+    }
+    if (safeCookies) {
       // 合并 cookieJar 与调用者显式 Cookie（而非覆盖）
-      if (headers['Cookie']) {
-        headers['Cookie'] = headers['Cookie'] + '; ' + cookieHeader;
-      } else {
-        headers['Cookie'] = cookieHeader;
-      }
+      const targetKey = cookieKeys[0] || 'Cookie';
+      headers[targetKey] = safeCookies;
     }
 
     // 让 Go 侧 fetch 不自动跟随重定向，由 JS 侧手动处理以收集中间 Cookie
@@ -180,6 +186,47 @@ export async function fetchWithRedirects(
   }
 
   throw new Error(`Too many redirects (max: ${maxRedirects})`);
+}
+
+/** Return the URL origin used to scope explicit redirect cookies. */
+function getUrlOrigin(value: string): string {
+  try {
+    const parsed = new URL(value);
+    return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+  } catch {
+    // Songloft QuickJS builds may not provide the URL constructor. Keep the
+    // origin comparison conservative with a small absolute-URL parser rather
+    // than treating every redirect as same-origin.
+    const match = /^([a-z][a-z\d+.-]*):\/\/([^/?#]+)/i.exec(value.trim());
+    if (!match) return '';
+    const authority = match[2].replace(/^.*@/, '').toLowerCase();
+    return `${match[1].toLowerCase()}://${authority}`;
+  }
+}
+
+/**
+ * Remove credentials that must never follow an untrusted cross-origin hop.
+ * Non-sensitive cookies are retained for compatibility with login flows that
+ * use a redirecting endpoint for a public session cookie.
+ */
+function stripSensitiveCookies(header: string): string {
+  const sensitiveNames = new Set([
+    'servicetoken',
+    'devicetoken',
+    'deviceid',
+    'userid',
+    'passtoken',
+    'ssecurity',
+  ]);
+  return header
+    .split(';')
+    .map(part => part.trim())
+    .filter(part => {
+      const separator = part.indexOf('=');
+      const name = (separator === -1 ? part : part.slice(0, separator)).trim().toLowerCase();
+      return name !== '' && !sensitiveNames.has(name);
+    })
+    .join('; ');
 }
 
 /** 从 Response 收集 Set-Cookie 头并加到 CookieJar */

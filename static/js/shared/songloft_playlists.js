@@ -32,9 +32,25 @@ export async function fetchSongloftPlaylists({ normalOnly = false } = {}) {
     return normalOnly ? playlists.filter(isNormalSongloftPlaylist) : playlists;
 }
 
-/** Fetch songs for a Songloft playlist id. */
-export async function fetchSongloftPlaylistSongs(playlistId) {
+/**
+ * Fetch songs for a Songloft playlist id.
+ *
+ * `withMeta` keeps host/plugin envelope fields such as `expired`, which is
+ * needed when an in-memory temporary playlist has disappeared between list
+ * and detail requests. The default remains the historical array-only shape.
+ */
+export async function fetchSongloftPlaylistSongs(playlistId, { withMeta = false } = {}) {
     const id = playableSongloftPlaylistId(playlistId);
-    const data = await api.get(`/songloft/playlists/${encodeURIComponent(id)}/songs`);
-    return asArray(data);
+    const path = `/songloft/playlists/${encodeURIComponent(id)}/songs`;
+    if (!withMeta) {
+        return asArray(await api.get(path));
+    }
+    const envelope = await api.getEnvelope(path);
+    const payload = envelope?.data;
+    const nestedExpired = payload && typeof payload === 'object' && payload.expired === true;
+    return {
+        ...envelope,
+        ...(envelope?.expired === true || nestedExpired ? { expired: true } : {}),
+        data: asArray(payload),
+    };
 }

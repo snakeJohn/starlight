@@ -53,6 +53,27 @@ function asArray(value) {
     return sharedAsArray(value, ['data', 'accounts']);
 }
 
+function formatConversationStatus(status) {
+    if (!status || typeof status !== 'object') {
+        return '';
+    }
+    if (!status.is_enabled) {
+        return '监听未开启（请在设置里打开「对话监听」并保存）';
+    }
+    const deviceCount = Number(status.device_count) || 0;
+    if (deviceCount === 0) {
+        return '监听已开，但 0 台托管设备（请先登录音箱并托管设备）';
+    }
+    const devices = asArray(status.devices);
+    const primed = devices.filter(d => d?.primed).length;
+    if (primed === 0) {
+        const err = devices.map(d => String(d?.last_error || '').trim()).find(Boolean)
+            || '登录/拉对话可能失败';
+        return `监听中 ${deviceCount} 台，基线未建立：${err}`;
+    }
+    return `监听中 ${deviceCount} 台 · 已就绪 ${primed} 台`;
+}
+
 async function loadVoiceRecords() {
     const list = $('[data-role="voice-record-list"]');
     const summary = $('[data-role="voice-record-summary"]');
@@ -60,14 +81,21 @@ async function loadVoiceRecords() {
 
     const now = Date.now();
     const since = now - VOICE_RECORD_WINDOW_MS;
-    const records = asArray(await api.get(`/miot/conversation/messages?since=${since}&limit=200`));
-    const recent = recentVoiceRecords(records, now);
+    const [records, status] = await Promise.all([
+        // A failed records request is materially different from an empty history:
+        // let the caller render the error instead of reporting a misleading "0".
+        api.get(`/miot/conversation/messages?since=${since}&limit=200`),
+        api.get('/miot/conversation/status').catch(() => null),
+    ]);
+    const recent = recentVoiceRecords(asArray(records), now);
+    const statusText = formatConversationStatus(status);
 
     if (list) {
         list.innerHTML = renderVoiceRecordList(recent, now);
     }
     if (summary) {
-        summary.textContent = `12 小时内 ${recent.length} 条`;
+        const countText = `12 小时内 ${recent.length} 条`;
+        summary.textContent = statusText ? `${countText} · ${statusText}` : countText;
     }
     return recent;
 }

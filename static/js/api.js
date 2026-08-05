@@ -26,7 +26,7 @@ function messageFrom(error) {
     return error.message || error.code || '请求失败';
 }
 
-async function request(path, options = {}) {
+async function request(path, options = {}, { includeMeta = false } = {}) {
     const response = await fetch(`${BASE}${path}`, {
         ...options,
         headers: requestHeaders(options.headers || {}),
@@ -46,6 +46,11 @@ async function request(path, options = {}) {
         throw error;
     }
 
+    if (includeMeta) {
+        const { success, error, ...envelope } = payload;
+        return envelope;
+    }
+
     if (Object.prototype.hasOwnProperty.call(payload, 'data')) {
         return payload.data;
     }
@@ -56,6 +61,7 @@ async function request(path, options = {}) {
 
 export const api = {
     get: path => request(path),
+    getEnvelope: path => request(path, {}, { includeMeta: true }),
     post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body || {}) }),
     put: (path, body) => request(path, { method: 'PUT', body: JSON.stringify(body || {}) }),
     delete: path => request(path, { method: 'DELETE' }),

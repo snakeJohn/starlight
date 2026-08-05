@@ -106,8 +106,16 @@ async function loadDrawerSongs(plId) {
     }
     try {
         container.innerHTML = '<div class="empty-state">加载歌曲中...</div>';
-        const songs = await fetchSongloftPlaylistSongs(plId);
-        if (requestId !== drawerSongsRequestId) return songs;
+        const result = await fetchSongloftPlaylistSongs(plId, { withMeta: true });
+        if (requestId !== drawerSongsRequestId) return asArray(result?.data);
+        if (result?.expired) {
+            container.innerHTML = '<div class="empty-state">该临时歌单已过期，正在刷新歌单列表...</div>';
+            await loadDrawerPlaylists();
+            if (requestId !== drawerSongsRequestId) return [];
+            setState({ speakerPlaylistSongs: [], speakerPlaylistId: '' });
+            return [];
+        }
+        const songs = asArray(result?.data);
         setState({ speakerPlaylistSongs: songs, speakerPlaylistId: String(plId) });
         const currentIndex = String(state.speakerPlayerPlaylistId || '') === String(plId)
             ? Number(state.speakerPlayerCurrentIndex)
@@ -294,7 +302,17 @@ export async function loadSpeakerPlaylistSongs(id = state.speakerPlaylistId) {
     list.innerHTML = '<div class="empty-state">正在加载歌单歌曲...</div>';
     let songs;
     try {
-        songs = await fetchSongloftPlaylistSongs(id);
+        const result = await fetchSongloftPlaylistSongs(id, { withMeta: true });
+        if (result?.expired) {
+            // A temporary playlist can disappear after the cached list was
+            // rendered. Rebuild the list so the stale item cannot be selected again.
+            list.innerHTML = '<div class="empty-state">该临时歌单已过期，正在刷新歌单列表...</div>';
+            setSummary('歌单已过期');
+            setState({ speakerPlaylistSongs: [], speakerPlaylistId: '' });
+            await loadSpeakerPlaylists();
+            return [];
+        }
+        songs = asArray(result?.data);
     } catch (error) {
         // 失败时必须替换掉“加载中”占位，否则列表会永远停在加载态。
         list.innerHTML = `<div class="empty-state">歌单歌曲加载失败：${escapeHtml(error?.message || error)}</div>`;

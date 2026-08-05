@@ -128,7 +128,7 @@ describe('settings config helpers', () => {
     expect(payload).not.toHaveProperty('force_mp3');
   });
 
-  it('keeps voice command access disabled until conversation monitoring is saved', async () => {
+  it('gates voice command checkbox on conversation monitor access state', async () => {
     installDom();
     const { updateVoiceCommandAccess } = await loadAutomationModule();
     const form = {
@@ -145,6 +145,9 @@ describe('settings config helpers', () => {
     updateVoiceCommandAccess(form, true);
 
     expect(form.elements.voice_command_enabled.disabled).toBe(false);
+    // Checking voice remains allowed before save once access is granted
+    form.elements.voice_command_enabled.checked = true;
+    expect(form.elements.voice_command_enabled.checked).toBe(true);
   });
 
   it('updates the scoped config status node inside the provided form', async () => {

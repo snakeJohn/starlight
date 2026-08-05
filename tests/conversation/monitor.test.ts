@@ -4,15 +4,11 @@ import type { AccountManager } from '../../src/account/manager';
 import type { ConfigManager } from '../../src/config/manager';
 import type { AskMessage } from '../../src/types';
 
-async function flushStart(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+/** Drain a few microtasks so an in-flight start reaches an await gate. */
+async function flushMicrotasks(times = 8): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await Promise.resolve();
+  }
 }
 
 function ask(timestamp_ms: number, question: string): AskMessage {
@@ -56,8 +52,7 @@ describe('ConversationMonitor polling', () => {
     const callback = vi.fn();
     monitor.registerCallback('voice_engine', callback);
 
-    monitor.start();
-    await flushStart();
+    await monitor.start();
 
     await vi.advanceTimersByTimeAsync(1000);
 
@@ -66,6 +61,7 @@ describe('ConversationMonitor polling', () => {
       'LX06',
       5,
       expect.any(AbortSignal),
+      expect.any(String),
     );
     expect(callback).toHaveBeenCalledWith(expect.objectContaining({
       account_id: 'acc-1',
@@ -118,8 +114,7 @@ describe('ConversationMonitor polling', () => {
     } as unknown as ConfigManager;
 
     const monitor = new ConversationMonitor(accountManager, configManager);
-    monitor.start();
-    await flushStart();
+    await monitor.start();
 
     const tick = vi.advanceTimersByTimeAsync(1000);
     // Allow webhook timeout (5s) to fire.
@@ -167,8 +162,7 @@ describe('ConversationMonitor polling', () => {
     } as unknown as ConfigManager;
 
     const monitor = new ConversationMonitor(accountManager, configManager);
-    monitor.start();
-    await flushStart();
+    await monitor.start();
 
     await vi.advanceTimersByTimeAsync(1000);
     await vi.advanceTimersByTimeAsync(1000);
@@ -200,8 +194,7 @@ describe('ConversationMonitor polling', () => {
     const callback = vi.fn();
     monitor.registerCallback('test', callback);
 
-    monitor.start();
-    await flushStart();
+    await monitor.start();
     expect(callback).not.toHaveBeenCalled();
     expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: true, last_timestamp_ms: 1_000 });
 
@@ -231,8 +224,7 @@ describe('ConversationMonitor polling', () => {
     const callback = vi.fn();
     monitor.registerCallback('test', callback);
 
-    monitor.start();
-    await flushStart();
+    await monitor.start();
     expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: false, last_timestamp_ms: 0 });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(callback).not.toHaveBeenCalled();
@@ -254,8 +246,7 @@ describe('ConversationMonitor polling', () => {
     } as unknown as ConfigManager;
     const monitor = new ConversationMonitor(accountManager, configManager);
 
-    monitor.start();
-    await flushStart();
+    await monitor.start();
     expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: true, last_timestamp_ms: 0 });
   });
 
@@ -278,14 +269,121 @@ describe('ConversationMonitor polling', () => {
     const monitor = new ConversationMonitor(accountManager, configManager);
 
     monitor.start();
-    await flushStart();
+    await flushMicrotasks();
     expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(10_000);
-    await flushStart();
+    await flushMicrotasks();
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(2);
+    monitor.stop();
+  });
+
+  it('primes multiple devices concurrently so one hung speaker does not delay the others', async () => {
+    vi.useFakeTimers();
+    const minaClient = {
+      getLatestAskFromXiaoai: vi.fn(() => new Promise<AskMessage[]>(() => {})),
+    };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn(async () => [
+        { device_id: 'speaker-1', device_name: '客厅音箱', hardware: 'M01' },
+        { device_id: 'speaker-2', device_name: '卧室音箱', hardware: 'M01' },
+      ]),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    const start = monitor.start();
+    await flushMicrotasks();
+    expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(2);
+
+    monitor.stop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await start;
+  });
+
+  it('asks Mina to release a timed-out conversation slot on hosts without AbortController', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('AbortController', undefined);
+    const minaClient = {
+      getLatestAskFromXiaoai: vi.fn()
+        .mockImplementationOnce(() => new Promise<AskMessage[]>(() => {}))
+        .mockResolvedValueOnce([]),
+      cancelConversationPoll: vi.fn(),
+    };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn(async () => [{ device_id: 'speaker-1', device_name: '客厅音箱', hardware: 'M01' }]),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    monitor.start();
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flushMicrotasks();
+
+    expect(minaClient.cancelConversationPoll).toHaveBeenCalledWith('speaker-1', expect.any(String));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(2);
+    monitor.stop();
+  });
+
+  it('keeps conversation polling working when the host lacks AbortController', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('AbortController', undefined);
+    const minaClient = {
+      getLatestAskFromXiaoai: vi.fn().mockResolvedValue([]),
+    };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn(async () => [{ device_id: 'speaker-1', device_name: '客厅音箱', hardware: 'LX06' }]),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    await monitor.start();
+
+    expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledWith('speaker-1', 'LX06', 5, undefined, expect.any(String));
+    expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: true, last_error: '' });
+    monitor.stop();
+  });
+
+  it('surfaces last_error on status when conversation fetch keeps failing', async () => {
+    const minaClient = {
+      getLatestAskFromXiaoai: vi.fn().mockResolvedValue(null),
+    };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn(async () => [{ device_id: 'speaker-1', device_name: '客厅音箱', hardware: 'LX06' }]),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    await monitor.start();
+    const status = await monitor.getStatus();
+    expect(status.devices[0]).toMatchObject({
+      primed: false,
+      last_error: expect.stringContaining('拉对话失败'),
+    });
     monitor.stop();
   });
 
@@ -313,11 +411,9 @@ describe('ConversationMonitor polling', () => {
     const callback = vi.fn();
     monitor.registerCallback('test', callback);
 
-    monitor.start();
-    await flushStart();
+    await monitor.start();
     monitor.stop();
-    monitor.start();
-    await flushStart();
+    await monitor.start();
 
     expect(callback).not.toHaveBeenCalled();
     expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: true, last_timestamp_ms: 1_001 });
@@ -353,12 +449,11 @@ describe('ConversationMonitor polling', () => {
     const callback = vi.fn();
     monitor.registerCallback('test', callback);
 
-    monitor.start();
-    await flushStart();
+    const firstStart = monitor.start();
+    await flushMicrotasks();
     expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(1);
     monitor.stop();
-    monitor.start();
-    await flushStart();
+    await monitor.start();
 
     try {
       expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(2);
@@ -366,7 +461,8 @@ describe('ConversationMonitor polling', () => {
     } finally {
       releaseFirstPoll();
     }
-    await flushStart();
+    await firstStart;
+    await flushMicrotasks();
     expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: true, last_timestamp_ms: 1_001 });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(callback).toHaveBeenCalledWith(expect.objectContaining({ message: current }));
@@ -392,20 +488,83 @@ describe('ConversationMonitor polling', () => {
     } as unknown as ConfigManager;
     const monitor = new ConversationMonitor(accountManager, configManager);
 
-    monitor.start();
-    await flushStart();
+    const firstStart = monitor.start();
+    await flushMicrotasks();
     monitor.stop();
-    monitor.start();
-    await flushStart();
+    await monitor.start();
     expect((await monitor.getStatus()).devices).toEqual([
       expect.objectContaining({ device_id: 'new-speaker', primed: true }),
     ]);
 
     releaseOldRefresh();
-    await flushStart();
+    await firstStart;
+    await flushMicrotasks();
     expect((await monitor.getStatus()).devices).toEqual([
       expect.objectContaining({ device_id: 'new-speaker', primed: true }),
     ]);
+  });
+
+  it('does not let an older concurrent refresh overwrite a newer snapshot', async () => {
+    vi.useFakeTimers();
+    let releaseOldRefresh!: () => void;
+    let releaseNewRefresh!: () => void;
+    const oldRefresh = new Promise<Array<{ device_id: string; device_name: string; hardware: string }>>(resolve => {
+      releaseOldRefresh = () => resolve([{ device_id: 'old-speaker', device_name: '旧音箱', hardware: 'LX06' }]);
+    });
+    const newRefresh = new Promise<Array<{ device_id: string; device_name: string; hardware: string }>>(resolve => {
+      releaseNewRefresh = () => resolve([{ device_id: 'new-speaker', device_name: '新音箱', hardware: 'LX06' }]);
+    });
+    const minaClient = { getLatestAskFromXiaoai: vi.fn(async () => []) };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn()
+        .mockResolvedValueOnce([{ device_id: 'initial-speaker', device_name: '初始音箱', hardware: 'LX06' }])
+        .mockImplementationOnce(() => oldRefresh)
+        .mockImplementationOnce(() => newRefresh),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    await monitor.start();
+    const firstRefresh = monitor.refresh();
+    await flushMicrotasks();
+    const secondRefresh = monitor.refresh();
+    await flushMicrotasks();
+
+    releaseNewRefresh();
+    await secondRefresh;
+    expect((await monitor.getStatus()).devices).toEqual([
+      expect.objectContaining({ device_id: 'new-speaker' }),
+    ]);
+
+    releaseOldRefresh();
+    await firstRefresh;
+    expect((await monitor.getStatus()).devices).toEqual([
+      expect.objectContaining({ device_id: 'new-speaker' }),
+    ]);
+    monitor.stop();
+  });
+
+  it('disables and rejects when listener initialization fails', async () => {
+    const initError = new Error('config unavailable');
+    const accountManager = {
+      getAccounts: vi.fn(async () => []),
+      getManagedDevices: vi.fn(async () => []),
+      getMinaClient: vi.fn(() => null),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => { throw initError; }),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    await expect(monitor.start()).rejects.toBe(initError);
+    expect(monitor.isEnabled()).toBe(false);
+    expect((await monitor.getStatus()).device_count).toBe(0);
   });
 
   it('does not deliver an in-flight poll after the managed device is removed', async () => {
@@ -436,22 +595,44 @@ describe('ConversationMonitor polling', () => {
     const callback = vi.fn();
     monitor.registerCallback('test', callback);
 
-    monitor.start();
-    await flushStart();
-    await flushStart();
+    await monitor.start();
     expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: true });
     vi.advanceTimersByTime(1_000);
-    await flushStart();
+    await flushMicrotasks();
     expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledTimes(2);
 
     await monitor.refresh();
     expect((await monitor.getStatus()).device_count).toBe(0);
 
     finishPoll([ask(1_000, '移除后的口令')]);
-    await flushStart();
+    await flushMicrotasks();
 
     expect(callback).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(monitor.getMessages()).toEqual([]);
+  });
+
+  it('warns when getMinaClient returns null', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(songloft.log, 'warn');
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn(async () => [{ device_id: 'speaker-1', device_name: '客厅音箱', hardware: 'LX06' }]),
+      getMinaClient: vi.fn(() => null),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    try {
+      await monitor.start();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('No Mina client for account=acc-1 device=speaker-1'),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

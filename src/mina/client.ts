@@ -28,6 +28,17 @@ const PLAY_STATUS_PLAYING = 1;
 const PAUSE_VERIFY_ATTEMPTS = 2;
 const PAUSE_VERIFY_DELAY_MS = 700;
 
+type UbusQueueKind = 'default' | 'conversation';
+
+interface UbusQueueEntry {
+  kind: UbusQueueKind;
+  canceled: boolean;
+  done: Promise<void>;
+  cancelPromise: Promise<void>;
+  release(): void;
+  cancel(): void;
+}
+
 export type PauseVerificationResult = 'paused' | 'stopped' | 'failed';
 
 function parseSafePositiveTimestamp(value: unknown): number | null {
@@ -36,7 +47,18 @@ function parseSafePositiveTimestamp(value: unknown): number | null {
     : typeof value === 'string' && /^\d+$/.test(value)
       ? Number(value)
       : Number.NaN;
-  return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return null;
+  }
+  // Xiaomi conversation APIs have returned both second- and millisecond-epoch
+  // values. Normalize short second-based stamps to ms so UI "recent" filters
+  // and since= query params (local Date.now() ms) do not drop every record.
+  const asInt = Math.trunc(timestamp);
+  if (!Number.isSafeInteger(asInt)) {
+    return null;
+  }
+  // < 1e12 ≈ before 2001-09 in ms, but is a valid ~2001+ second timestamp.
+  return asInt < 1_000_000_000_000 ? asInt * 1000 : asInt;
 }
 
 export interface PlayMetadata {
@@ -104,7 +126,15 @@ export class MinaHTTPClient {
   private tokenInfo: XiaomiTokenInfo;
   private userAgent: string;
   private onTokenExpired?: () => Promise<boolean>;
-  private ubusQueues: Map<string, Promise<void>> = new Map();
+  private ubusQueues: Map<string, UbusQueueEntry> = new Map();
+  /** Conversation requests need an explicit release path on hosts without AbortController. */
+  private ubusConversationQueues: Map<string, UbusQueueEntry> = new Map();
+  private latestConversationQueueKeys: Map<string, string> = new Map();
+  /** Latest poll generation per device; cancellation invalidates every stale continuation. */
+  private conversationPollGenerations: Map<string, number> = new Map();
+  private latestConversationPollIds: Map<string, string> = new Map();
+  private conversationPollSequence = 0;
+  private conversationQueueSequence = 0;
   private mediaOperationGenerations: Map<string, number> = new Map();
 
   constructor(tokenInfo: XiaomiTokenInfo, onTokenExpired?: () => Promise<boolean>) {
@@ -594,31 +624,75 @@ export class MinaHTTPClient {
    * @param hardware - 设备硬件型号
    * @param limit - 记录数量限制（默认2）
    */
-  async getLatestAskFromXiaoai(deviceId: string, hardware: string, limit = 2, signal?: AbortSignal): Promise<AskMessage[] | null> {
-    if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai deviceId=${deviceId} hardware=${hardware} limit=${limit} useMinaForAsk=${shouldUseMinaForAsk(hardware)}`);
-    // 部分设备需要通过 ubus 方式获取
-    if (shouldUseMinaForAsk(hardware)) {
-      const ubusResult = await this.getLatestAskByUbus(deviceId);
-      if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskByUbus result: ${ubusResult ? ubusResult.length : 0} messages`);
-      return ubusResult;
+  async getLatestAskFromXiaoai(
+    deviceId: string,
+    hardware: string,
+    limit = 2,
+    signal?: AbortSignal,
+    requestId?: string,
+  ): Promise<AskMessage[] | null> {
+    const pollGeneration = (this.conversationPollGenerations.get(deviceId) ?? 0) + 1;
+    this.conversationPollGenerations.set(deviceId, pollGeneration);
+    const pollRequestId = requestId || `conversation-${++this.conversationPollSequence}`;
+    this.latestConversationPollIds.set(deviceId, pollRequestId);
+    const useUbusFirst = shouldUseMinaForAsk(hardware);
+    if (isPollDebug()) {
+      songloft.log.info(
+        `[ConversationMonitor] getLatestAskFromXiaoai deviceId=${deviceId} hardware=${hardware || '(empty)'} limit=${limit} path=${useUbusFirst ? 'ubus' : 'xiaoai'}`,
+      );
     }
 
-    // 与 Go 版一致：在循环外部生成时间戳，重试时复用相同 URL
-    const timestamp = Date.now();
-    const apiUrl = formatLatestAskUrl(hardware, timestamp, limit);
-    if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai apiUrl=${apiUrl}`);
-
-    // 大多数设备通过 xiaoai API 获取，带3次重试
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const messages = await this.doGetLatestAskFromXiaoai(deviceId, apiUrl, signal);
-      if (messages !== null) {
-        if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai attempt=${attempt} success, ${messages.length} messages`);
-        return messages;
+    try {
+      // 部分设备（如 M01）优先 ubus
+      if (useUbusFirst) {
+        const ubusResult = await this.getLatestAskByUbus(deviceId, signal, pollRequestId);
+        if (!this.isConversationPollCurrent(deviceId, pollGeneration, signal)) {
+          return null;
+        }
+        if (ubusResult !== null) {
+          return ubusResult;
+        }
+        songloft.log.warn(`[ConversationMonitor] getLatestAskByUbus failed for ${deviceId}, trying xiaoai API fallback`);
       }
-      if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai attempt=${attempt} returned null, retrying...`);
+
+      // 与 Go 版一致：在循环外部生成时间戳，重试时复用相同 URL
+      const timestamp = Date.now();
+      const apiUrl = formatLatestAskUrl(hardware || '', timestamp, limit);
+      if (isPollDebug()) songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai apiUrl=${apiUrl}`);
+
+      // 大多数设备通过 xiaoai API 获取
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        const messages = await this.doGetLatestAskFromXiaoai(deviceId, apiUrl, signal);
+        if (!this.isConversationPollCurrent(deviceId, pollGeneration, signal)) {
+          return null;
+        }
+        if (messages !== null) {
+          return messages;
+        }
+        if (attempt + 1 < MAX_RETRIES) {
+          songloft.log.warn(`[ConversationMonitor] getLatestAskFromXiaoai attempt=${attempt} failed, retrying...`);
+        }
+      }
+
+      // xiaoai 失败时对非 ubus 优先设备再试 ubus（部分触屏/新固件 API 异常）
+      if (!useUbusFirst) {
+        const ubusFallback = await this.getLatestAskByUbus(deviceId, signal, pollRequestId);
+        if (!this.isConversationPollCurrent(deviceId, pollGeneration, signal)) {
+          return null;
+        }
+        if (ubusFallback !== null) {
+          songloft.log.info(`[ConversationMonitor] xiaoai failed, ubus fallback ok count=${ubusFallback.length}`);
+          return ubusFallback;
+        }
+      }
+
+      songloft.log.warn(`[ConversationMonitor] getLatestAskFromXiaoai all paths failed device=${deviceId} hardware=${hardware || '(empty)'}`);
+      return null;
+    } finally {
+      if (this.latestConversationPollIds.get(deviceId) === pollRequestId) {
+        this.latestConversationPollIds.delete(deviceId);
+      }
     }
-    songloft.log.info(`[ConversationMonitor] getLatestAskFromXiaoai all ${MAX_RETRIES} attempts failed`);
-    return null;
   }
 
   // ===== 播放状态 =====
@@ -682,31 +756,164 @@ export class MinaHTTPClient {
   /**
    * 执行 UBus 请求
    */
-  async ubusRequest(deviceId: string, method: string, path: string, message: Record<string, unknown>, logLabel = ''): Promise<UbusResponse | null> {
+  async ubusRequest(
+    deviceId: string,
+    method: string,
+    path: string,
+    message: Record<string, unknown>,
+    logLabel = '',
+    signal?: AbortSignal,
+    queueKind: UbusQueueKind = 'default',
+    queueOwnerId = '',
+  ): Promise<UbusResponse | null> {
     const previous = this.ubusQueues.get(deviceId);
-    let release: () => void = () => {};
-    const current = new Promise<void>(resolve => { release = resolve; });
-    const queued = (previous || Promise.resolve()).catch(() => {}).then(() => current);
-    this.ubusQueues.set(deviceId, queued);
+    const entry = this.createUbusQueueEntry(queueKind);
+    const conversationQueueKey = queueKind === 'conversation'
+      ? this.makeConversationQueueKey(deviceId, queueOwnerId || `entry-${++this.conversationQueueSequence}`)
+      : '';
+    this.ubusQueues.set(deviceId, entry);
+    if (queueKind === 'conversation') {
+      this.ubusConversationQueues.set(conversationQueueKey, entry);
+      this.latestConversationQueueKeys.set(deviceId, conversationQueueKey);
+    }
+
+    let abortListener: (() => void) | undefined;
+    if (signal) {
+      abortListener = () => entry.cancel();
+      if (signal.aborted) {
+        entry.cancel();
+      } else if (typeof signal.addEventListener === 'function') {
+        signal.addEventListener('abort', abortListener);
+      }
+    }
 
     if (previous) {
       if (logLabel) {
         songloft.log.info(`[MinaClient] ${logLabel} waiting for previous ubus request device=${deviceId}`);
       }
-      await previous.catch(() => {});
+      const canceledWhileWaiting = await Promise.race([
+        previous.done.then(() => false),
+        entry.cancelPromise.then(() => true),
+      ]);
+      if (canceledWhileWaiting) {
+        if (abortListener && typeof signal?.removeEventListener === 'function') {
+          signal.removeEventListener('abort', abortListener);
+        }
+        if (this.ubusQueues.get(deviceId) === entry) {
+          this.ubusQueues.delete(deviceId);
+        }
+        if (conversationQueueKey && this.ubusConversationQueues.get(conversationQueueKey) === entry) {
+          this.ubusConversationQueues.delete(conversationQueueKey);
+        }
+        if (conversationQueueKey && this.latestConversationQueueKeys.get(deviceId) === conversationQueueKey) {
+          this.latestConversationQueueKeys.delete(deviceId);
+        }
+        return null;
+      }
+    }
+
+    if (entry.canceled) {
+      if (abortListener && typeof signal?.removeEventListener === 'function') {
+        signal.removeEventListener('abort', abortListener);
+      }
+      if (this.ubusQueues.get(deviceId) === entry) {
+        this.ubusQueues.delete(deviceId);
+      }
+      if (conversationQueueKey && this.ubusConversationQueues.get(conversationQueueKey) === entry) {
+        this.ubusConversationQueues.delete(conversationQueueKey);
+      }
+      if (conversationQueueKey && this.latestConversationQueueKeys.get(deviceId) === conversationQueueKey) {
+        this.latestConversationQueueKeys.delete(deviceId);
+      }
+      return null;
     }
 
     try {
-      return await this.doUbusRequest(deviceId, method, path, message, logLabel);
+      // The cancellation branch makes the caller return promptly even when the
+      // host fetch implementation ignores AbortSignal. The underlying request
+      // may still settle later, but its result is intentionally discarded.
+      const request = this.doUbusRequest(deviceId, method, path, message, logLabel, signal);
+      return await Promise.race([
+        request,
+        entry.cancelPromise.then(() => null),
+      ]);
     } finally {
-      release();
-      if (this.ubusQueues.get(deviceId) === queued) {
+      if (abortListener && typeof signal?.removeEventListener === 'function') {
+        signal.removeEventListener('abort', abortListener);
+      }
+      entry.release();
+      if (this.ubusQueues.get(deviceId) === entry) {
         this.ubusQueues.delete(deviceId);
+      }
+      if (conversationQueueKey && this.ubusConversationQueues.get(conversationQueueKey) === entry) {
+        this.ubusConversationQueues.delete(conversationQueueKey);
+      }
+      if (conversationQueueKey && this.latestConversationQueueKeys.get(deviceId) === conversationQueueKey) {
+        this.latestConversationQueueKeys.delete(deviceId);
       }
     }
   }
 
-  private async doUbusRequest(deviceId: string, method: string, path: string, message: Record<string, unknown>, logLabel = ''): Promise<UbusResponse | null> {
+  /**
+   * Release the current conversation UBus slot. This is used by the monitor's
+   * timeout path when AbortController is unavailable in the host runtime.
+   */
+  cancelConversationPoll(deviceId: string, pollRequestId?: string): void {
+    const latestPollId = this.latestConversationPollIds.get(deviceId);
+    const targetPollId = pollRequestId || latestPollId;
+    if (!pollRequestId || pollRequestId === latestPollId) {
+      this.conversationPollGenerations.set(
+        deviceId,
+        (this.conversationPollGenerations.get(deviceId) ?? 0) + 1,
+      );
+    }
+    const queueKey = targetPollId
+      ? this.makeConversationQueueKey(deviceId, targetPollId)
+      : this.latestConversationQueueKeys.get(deviceId);
+    const entry = queueKey ? this.ubusConversationQueues.get(queueKey) : undefined;
+    if (!entry) return;
+    entry.cancel();
+  }
+
+  private makeConversationQueueKey(deviceId: string, pollRequestId: string): string {
+    return `${deviceId}\u0000${pollRequestId}`;
+  }
+
+  private isConversationPollCurrent(deviceId: string, generation: number, signal?: AbortSignal): boolean {
+    return !signal?.aborted && this.conversationPollGenerations.get(deviceId) === generation;
+  }
+
+  private createUbusQueueEntry(kind: UbusQueueKind): UbusQueueEntry {
+    let resolveDone!: () => void;
+    let resolveCancel!: () => void;
+    let released = false;
+    let canceled = false;
+    const entry: UbusQueueEntry = {
+      kind,
+      get canceled() {
+        return canceled;
+      },
+      set canceled(value: boolean) {
+        canceled = value;
+      },
+      done: new Promise<void>(resolve => { resolveDone = resolve; }),
+      cancelPromise: new Promise<void>(resolve => { resolveCancel = resolve; }),
+      release: () => {
+        if (released) return;
+        released = true;
+        resolveDone();
+      },
+      cancel: () => {
+        if (canceled) return;
+        canceled = true;
+        resolveCancel();
+        entry.release();
+      },
+    };
+    return entry;
+  }
+
+  private async doUbusRequest(deviceId: string, method: string, path: string, message: Record<string, unknown>, logLabel = '', signal?: AbortSignal): Promise<UbusResponse | null> {
     const apiUrl = `${MINA_API_BASE_URL}/remote/ubus`;
     const requestId = this.generateRequestId();
 
@@ -726,7 +933,7 @@ export class MinaHTTPClient {
       songloft.log.info(`[MinaClient] ${logLabel} ubus request device=${deviceId} path=${path} method=${method} request_id=${requestId} message=${this.summarizeUbusMessageForLog(message)}`);
     }
 
-    const result = await this.doPostRequest<UbusResponse>(apiUrl, body, logLabel);
+    const result = await this.doPostRequest<UbusResponse>(apiUrl, body, logLabel, undefined, signal);
 
     // 如果401并且有回调，尝试刷新
     if (result === null) {
@@ -845,7 +1052,7 @@ export class MinaHTTPClient {
   /**
    * 执行 POST 请求（带401重试）
    */
-  private async doPostRequest<T>(url: string, body: string, logLabel = '', transformResponseText?: (text: string) => string): Promise<T | null> {
+  private async doPostRequest<T>(url: string, body: string, logLabel = '', transformResponseText?: (text: string) => string, signal?: AbortSignal): Promise<T | null> {
     const headers: Record<string, string> = {
       'User-Agent': this.userAgent,
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -854,7 +1061,7 @@ export class MinaHTTPClient {
 
     let response: any;
     try {
-      const fetchResult = await fetchWithRedirects(url, { method: 'POST', headers, body }, new CookieJar(), 0);
+      const fetchResult = await fetchWithRedirects(url, { method: 'POST', headers, body, signal }, new CookieJar(), 0);
       response = fetchResult.response;
       if (logLabel) {
         songloft.log.info(`[MinaClient] ${logLabel} HTTP POST status=${response.status}`);
@@ -877,7 +1084,7 @@ export class MinaHTTPClient {
           // 重试
           headers['Cookie'] = this.buildApiCookies();
           try {
-            const retryResult = await fetchWithRedirects(url, { method: 'POST', headers, body }, new CookieJar(), 0);
+            const retryResult = await fetchWithRedirects(url, { method: 'POST', headers, body, signal }, new CookieJar(), 0);
             response = retryResult.response;
             if (logLabel) {
               songloft.log.info(`[MinaClient] ${logLabel} HTTP POST retry status=${response.status}`);
@@ -928,27 +1135,40 @@ export class MinaHTTPClient {
 
   /**
    * 通过 xiaoai API 获取对话记录
+   *
+   * Songloft v2.11.0：`X-Fetch-No-Redirect` 会被严格遵守。对话 API 偶发 302 时，
+   * maxRedirects=0 会直接抛 "Too many redirects" 导致永远基线未建立。
+   * 这里允许少量重定向，同时保留监听器传入的 AbortSignal。
    */
   private async doGetLatestAskFromXiaoai(deviceId: string, apiUrl: string, signal?: AbortSignal): Promise<AskMessage[] | null> {
+    const cookie = this.buildApiCookies();
+    if (!cookie) {
+      songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai missing micoapi cookie device=${deviceId}`);
+      return null;
+    }
 
     const headers: Record<string, string> = {
       'User-Agent': this.userAgent,
-      'Cookie': this.buildApiCookies() + `; deviceId=${deviceId}`,
+      'Cookie': cookie + `; deviceId=${deviceId}`,
     };
 
     let response: any;
     try {
-      const fetchResult = await fetchWithRedirects(apiUrl, { method: 'GET', headers, signal }, new CookieJar(), 0);
+      // Allow a few redirects (v2.11 honors X-Fetch-No-Redirect). Miot used 0 but
+      // older hosts often auto-followed; v2.11 does not.
+      const fetchResult = await fetchWithRedirects(apiUrl, { method: 'GET', headers, signal }, new CookieJar(), 5);
       response = fetchResult.response;
     } catch (e) {
       songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai fetch error: ${String(e)}`);
       return null;
     }
 
-    if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai status=${response.status}`);
+    if (isPollDebug()) {
+      songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai status=${response.status} device=${deviceId}`);
+    }
 
     if (response.status === 401) {
-      if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai 401 token expired`);
+      songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai 401 token expired device=${deviceId}`);
       if (this.onTokenExpired) {
         await this.onTokenExpired();
       }
@@ -956,35 +1176,54 @@ export class MinaHTTPClient {
     }
 
     if (response.status !== 200) {
-      songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai unexpected status=${response.status}`);
+      const bodyPreview = String(response.text?.() ?? '').substring(0, 200);
+      songloft.log.warn(
+        `[ConversationMonitor] doGetLatestAskFromXiaoai unexpected status=${response.status} device=${deviceId} body=${bodyPreview}`,
+      );
       return null;
     }
 
     try {
       const text = response.text() as string;
-      // 打印原始响应体（最多 1000 字符）
-      if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai raw response (${text.length} chars): ${text.substring(0, 1000)}`);
+      if (isPollDebug()) {
+        songloft.log.info(
+          `[ConversationMonitor] doGetLatestAskFromXiaoai raw response (${text.length} chars): ${text.substring(0, 500)}`,
+        );
+      }
 
       const result = JSON.parse(text) as Record<string, unknown>;
-      if (Number(result.code) !== 0) {
-        songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai response code=${String(result.code)}`);
+      // Real error envelope: code present and non-zero → failure (null).
+      // Missing/undefined code is treated as success path (miot is looser); still try data.
+      if (result.code !== undefined && result.code !== null && Number(result.code) !== 0) {
+        songloft.log.warn(
+          `[ConversationMonitor] doGetLatestAskFromXiaoai response code=${String(result.code)} message=${String(result.message ?? result.msg ?? '')}`,
+        );
         return null;
       }
 
-      // data 字段是一个 JSON 字符串
-      const dataStr = result['data'];
-      if (typeof dataStr !== 'string' || !dataStr) {
-        songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai data field is missing or empty`);
+      // data 通常是 JSON 字符串；也可能已是对象；空/缺失视为成功空对话 []
+      const rawData = result['data'];
+      if (rawData === undefined || rawData === null || rawData === '') {
+        if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai data field is empty/null → []`);
+        return [];
+      }
+
+      let dataObj: ConversationData;
+      if (typeof rawData === 'string') {
+        dataObj = JSON.parse(rawData) as ConversationData;
+      } else if (typeof rawData === 'object') {
+        dataObj = rawData as ConversationData;
+      } else {
+        songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai data field has unexpected type=${typeof rawData}`);
         return null;
       }
 
-      const dataObj = JSON.parse(dataStr) as ConversationData;
       if (!Array.isArray(dataObj.records)) {
-        songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai records field is missing or malformed`);
+        songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai records field is missing or malformed keys=${Object.keys(dataObj || {}).join(',')}`);
         return null;
       }
       if (dataObj.records.length === 0) {
-        if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai records empty or missing`);
+        if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai records empty → []`);
         return [];
       }
 
@@ -1007,7 +1246,11 @@ export class MinaHTTPClient {
           },
         });
       }
-      if (isPollDebug()) songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai parsed ${messages.length} messages`);
+      if (isPollDebug()) {
+        songloft.log.info(`[ConversationMonitor] doGetLatestAskFromXiaoai parsed ${messages.length}/${dataObj.records.length} messages`);
+      }
+      // Non-empty records but all timestamps invalid → null (cannot safely prime).
+      // Empty records already returned [] above.
       return messages.length > 0 ? messages : null;
     } catch (e) {
       songloft.log.warn(`[ConversationMonitor] doGetLatestAskFromXiaoai parse error: ${String(e)}`);
@@ -1019,9 +1262,18 @@ export class MinaHTTPClient {
    * 通过 UBus nlp_result_get 获取对话记录
    * 用于不支持 xiaoai API 的设备（如 M01）
    */
-  private async getLatestAskByUbus(deviceId: string): Promise<AskMessage[] | null> {
+  private async getLatestAskByUbus(deviceId: string, signal?: AbortSignal, pollRequestId = ''): Promise<AskMessage[] | null> {
     try {
-      const result = await this.ubusRequest(deviceId, 'nlp_result_get', 'mibrain', {});
+      const result = await this.ubusRequest(
+        deviceId,
+        'nlp_result_get',
+        'mibrain',
+        {},
+        '',
+        signal,
+        'conversation',
+        pollRequestId,
+      );
       if (!result || !result.data) return null;
 
       const data = result.data as NlpResultData;

@@ -127,12 +127,19 @@ async function loadSongloftPlaylists() {
     return playlists;
 }
 
-async function loadSongloftPlaylistSongs(playlist, index) {
+export async function loadSongloftPlaylistSongs(playlist, index) {
     const id = songloftPlaylistId(playlist);
     if (!id) throw new Error('Songloft 歌单缺少 ID');
     const node = $('[data-role="songloft-playlist-songs"]');
     if (node) node.innerHTML = renderEmptyState('正在加载歌单歌曲...', 'loading');
-    const songs = await fetchSongloftPlaylistSongs(id);
+    const result = await fetchSongloftPlaylistSongs(id, { withMeta: true });
+    if (result?.expired) {
+        if (node) node.innerHTML = renderEmptyState('该临时歌单已过期，正在刷新歌单列表...', 'info');
+        setState({ songloftPlaylistSongs: [], songloftPlaylistIndex: -1 });
+        await loadSongloftPlaylists();
+        return [];
+    }
+    const songs = asArray(result?.data);
     setState({
         songloftPlaylistSongs: songs,
         songloftPlaylistTitle: songloftPlaylistTitle(playlist),

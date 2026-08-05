@@ -262,6 +262,40 @@ describe('speaker QR login UI', () => {
     expect(voiceRecordSummary.textContent).toBe('12 小时内 0 条');
   });
 
+  it('shows an error instead of zero records when the records endpoint fails', async () => {
+    const { refreshVoiceRecords, voiceRecordSummary } = installSpeakerDom();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/miot/accounts') || url.endsWith('/miot/auth/status') || url.endsWith('/miot/mina/devices')) {
+        return jsonResponse({ success: true, data: [] });
+      }
+      if (url.includes('/miot/conversation/messages')) {
+        return {
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          json: async () => ({ success: false, error: { message: '记录服务不可用' } }),
+        } as Response;
+      }
+      if (url.endsWith('/miot/conversation/status')) {
+        return jsonResponse({ success: true, data: { is_enabled: true, device_count: 1, devices: [] } });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { initSpeakerUI } = await import('../../static/js/speaker.js') as SpeakerModule;
+    await initSpeakerUI();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    expect(voiceRecordSummary.textContent).toBe('加载失败');
+    expect(voiceRecordSummary.textContent).not.toContain('0 条');
+
+    await refreshVoiceRecords.dispatch('click');
+    expect(refreshVoiceRecords.disabled).toBe(false);
+    expect(voiceRecordSummary.textContent).toBe('加载失败');
+  });
+
   it('does not register duplicate QR listeners when speaker UI initializes twice', async () => {
     const { qrStart } = installSpeakerDom();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

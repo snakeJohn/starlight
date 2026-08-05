@@ -324,7 +324,7 @@ describe('registerConfigHandlers', () => {
     vi.mocked(monitor.stop).mockImplementation(() => {
       events.push('stop');
     });
-    vi.mocked(monitor.start).mockImplementation(() => {
+    vi.mocked(monitor.start).mockImplementation(async () => {
       events.push('start');
     });
 

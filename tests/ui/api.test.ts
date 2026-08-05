@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 interface StaticApiModule {
   api: {
     get(path: string): Promise<unknown>;
+    getEnvelope(path: string): Promise<Record<string, unknown>>;
   };
 }
 
@@ -36,6 +37,21 @@ describe('static api helper', () => {
         'Content-Type': 'application/json',
         Authorization: 'Bearer ui-token',
       },
+    });
+  });
+
+  it('preserves response metadata such as expired for callers that need the envelope', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: [], expired: true }),
+    }) as Response));
+    vi.stubGlobal('window', { SongloftPlugin: { getAuthToken: () => '' } });
+
+    const { api } = await import('../../static/js/api.js') as StaticApiModule;
+    await expect(api.getEnvelope('/songloft/playlists/-100001/songs')).resolves.toEqual({
+      data: [],
+      expired: true,
     });
   });
 });

@@ -74,7 +74,17 @@ let customPlaylistService: CustomPlaylistService;
 let lxSyncService: LxSyncService;
 let songloftPlaylistService: SongloftPlaylistService;
 
+/** Guards asynchronous initialization continuations during hot reload/deinit. */
+let lifecycleGeneration = 0;
+let lifecycleDisposed = true;
+
+function isLifecycleCurrent(generation: number): boolean {
+  return !lifecycleDisposed && lifecycleGeneration === generation;
+}
+
 async function onInit(): Promise<void> {
+  const initGeneration = ++lifecycleGeneration;
+  lifecycleDisposed = false;
   songloft.log.info('Starlight 插件初始化...');
 
   // 初始化管理器
@@ -188,17 +198,6 @@ async function onInit(): Promise<void> {
     songloft.log.warn('Failed to load enabled download sources: ' + String(e));
   });
 
-  // 自动登录 + 启动后台服务（异步，不阻塞插件初始化）
-  authService.autoLoginAll().catch(e => {
-    songloft.log.error('autoLoginAll failed: ' + String(e));
-  });
-  // 异步刷新索引，不阻塞插件初始化
-  setTimeout(() => {
-    indexingManager.refresh().catch(e => {
-      songloft.log.error('indexingManager.refresh failed: ' + String(e));
-    });
-  }, 100);
-
   // 注册 VoiceEngine 回调（独立于启停生命周期）
   conversationMonitor.registerCallback('voice_engine', (msg) => {
     return voiceEngine.handleMessage(msg);
@@ -208,17 +207,53 @@ async function onInit(): Promise<void> {
   if (pluginConfig.scheduled_tasks_enabled) {
     scheduler.start();
   }
-  if (pluginConfig.conversation_monitor_enabled) {
-    conversationMonitor.start();
-  }
   if (pluginConfig.voice_command_enabled) {
     voiceEngine.setEnabled(true);
   }
+
+  // 先 autoLogin 再启动对话监听：否则首轮 poll 因无 Mina client 空转，
+  // 用户说话时基线未建立 → 语音记录为空 + 口令无反应。
+  // 登录失败也仍然启动监听，便于用户稍后手动登录后由轮询恢复。
+  const wantConversationMonitor = !!pluginConfig.conversation_monitor_enabled;
+  void authService.autoLoginAll()
+    .catch(e => {
+      songloft.log.error('autoLoginAll failed: ' + String(e));
+    })
+    .then(async () => {
+      if (!isLifecycleCurrent(initGeneration) || !wantConversationMonitor) return;
+
+      // Re-read the setting after login. A user can disable the monitor while
+      // autoLoginAll is still in flight; the stale continuation must not start it.
+      let currentConfig;
+      try {
+        currentConfig = await configManager.getConfig();
+      } catch (e) {
+        songloft.log.warn('conversation monitor config read failed after autoLoginAll: ' + String(e));
+        return;
+      }
+      if (!isLifecycleCurrent(initGeneration) || !currentConfig.conversation_monitor_enabled) return;
+
+      await conversationMonitor.start().catch(e => {
+        songloft.log.error('conversationMonitor.start failed: ' + String(e));
+      });
+    })
+    .catch(e => {
+      songloft.log.error('conversation monitor startup continuation failed: ' + String(e));
+    });
+
+  // 异步刷新索引，不阻塞插件初始化
+  setTimeout(() => {
+    indexingManager.refresh().catch(e => {
+      songloft.log.error('indexingManager.refresh failed: ' + String(e));
+    });
+  }, 100);
 
   songloft.log.info('Starlight 插件初始化完成');
 }
 
 async function onDeinit(): Promise<void> {
+  lifecycleDisposed = true;
+  lifecycleGeneration += 1;
   songloft.log.info('Starlight 插件停止...');
   scheduler?.stop();
   conversationMonitor?.stop();
@@ -259,4 +294,4 @@ async function onWebSocket(req: WebSocketRequest, socket: InboundWebSocket): Pro
 globalThis.onInit = onInit;
 globalThis.onDeinit = onDeinit;
 globalThis.onHTTPRequest = onHTTPRequest;
-(globalThis as { onWebSocket?: typeof onWebSocket }).onWebSocket = onWebSocket;
+(globalThis as unknown as { onWebSocket?: typeof onWebSocket }).onWebSocket = onWebSocket;

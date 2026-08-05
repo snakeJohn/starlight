@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  fetchWithRedirects,
   getHostBaseUrl,
   httpFetch,
   isUsableHostBaseUrl,
@@ -8,6 +9,7 @@ import {
   resolveHostBaseUrl,
   setHostBaseUrl,
 } from '../../src/utils/http';
+import { CookieJar } from '../../src/utils/cookie';
 
 function songloftPlugin() {
   return (globalThis as unknown as { songloft: { plugin: { getHostUrl: () => Promise<string> } } }).songloft.plugin;
@@ -99,5 +101,56 @@ describe('httpFetch response headers', () => {
 
     const response = await httpFetch('https://api.example.com/thing');
     expect(response.headers.get('content-type')).toBe('application/json');
+  });
+
+  it('strips sensitive cookies when a redirect crosses origins', async () => {
+    const requests: Array<{ url: string; headers: Record<string, string> }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, options: { headers?: Record<string, string> }) => {
+      requests.push({ url, headers: options.headers || {} });
+      if (requests.length === 1) {
+        return new Response('', {
+          status: 302,
+          headers: { Location: 'https://redirect.example.com/next' },
+        });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+
+    await fetchWithRedirects(
+      'https://api.example.com/conversation',
+      { method: 'GET', headers: { Cookie: 'serviceToken=secret; deviceId=device-1; lang=zh' } },
+      new CookieJar(),
+      2,
+    );
+
+    expect(requests[0].headers.Cookie).toContain('serviceToken=secret');
+    expect(requests[0].headers.Cookie).toContain('deviceId=device-1');
+    expect(requests[1].headers.Cookie).not.toContain('serviceToken=secret');
+    expect(requests[1].headers.Cookie).not.toContain('deviceId=device-1');
+    expect(requests[1].headers.Cookie).toContain('lang=zh');
+  });
+
+  it('keeps explicit cookies for same-origin redirects', async () => {
+    const requests: Array<{ url: string; headers: Record<string, string> }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, options: { headers?: Record<string, string> }) => {
+      requests.push({ url, headers: options.headers || {} });
+      if (requests.length === 1) {
+        return new Response('', {
+          status: 302,
+          headers: { Location: '/next' },
+        });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+
+    await fetchWithRedirects(
+      'https://api.example.com/conversation',
+      { method: 'GET', headers: { Cookie: 'serviceToken=secret; deviceId=device-1' } },
+      new CookieJar(),
+      2,
+    );
+
+    expect(requests[1].headers.Cookie).toContain('serviceToken=secret');
+    expect(requests[1].headers.Cookie).toContain('deviceId=device-1');
   });
 });

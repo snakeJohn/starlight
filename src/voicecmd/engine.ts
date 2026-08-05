@@ -473,6 +473,12 @@ export class VoiceEngine {
    */
   async handleMessage(msg: ConversationMessage): Promise<void> {
     if (!this.enabled) {
+      // Diagnostic: ConversationMonitor may still deliver messages while voice is off
+      const droppedQuery = this.extractQuery(msg);
+      songloft.log.info(
+        `[VoiceEngine] Ignoring message because voice commands disabled device=${msg.device_id}`
+        + (droppedQuery ? ` query=${droppedQuery}` : ''),
+      );
       return;
     }
 

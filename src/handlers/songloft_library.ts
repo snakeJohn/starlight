@@ -11,6 +11,7 @@ import type { PlaylistImportSong } from '../songloft/playlist_service';
 interface NormalizedList {
   list: unknown[];
   total: number;
+  expired?: true;
 }
 
 export interface SongloftImportJobProgress {
@@ -223,6 +224,7 @@ function normalizeList(value: unknown): NormalizedList {
   return {
     list,
     total: readTotal(record, list.length),
+    ...(record.expired === true ? { expired: true as const } : {}),
   };
 }
 

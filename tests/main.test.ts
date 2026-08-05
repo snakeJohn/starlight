@@ -81,4 +81,38 @@ describe('plugin main lifecycle', () => {
     await mainGlobals().onInit();
     await expect(mainGlobals().onDeinit()).resolves.toBeUndefined();
   });
+
+  test('does not start the conversation monitor after deinit while autoLoginAll is pending', async () => {
+    vi.resetModules();
+    await songloft.storage.set('starlight:miot:config', JSON.stringify({
+      conversation_monitor_enabled: true,
+    }));
+
+    const { AuthService } = await import('../src/auth/service');
+    let releaseLogin!: () => void;
+    const loginGate = new Promise<void>(resolve => {
+      releaseLogin = resolve;
+    });
+    const loginSpy = vi.spyOn(AuthService.prototype, 'autoLoginAll')
+      .mockImplementation(() => loginGate);
+
+    const { ConversationMonitor } = await import('../src/conversation/monitor');
+    const startSpy = vi.spyOn(ConversationMonitor.prototype, 'start').mockResolvedValue(undefined);
+
+    try {
+      await import('../src/main');
+      await mainGlobals().onInit();
+      await mainGlobals().onDeinit();
+
+      releaseLogin();
+      for (let index = 0; index < 8; index += 1) {
+        await Promise.resolve();
+      }
+      expect(loginSpy).toHaveBeenCalledTimes(1);
+      expect(startSpy).not.toHaveBeenCalled();
+    } finally {
+      loginSpy.mockRestore();
+      startSpy.mockRestore();
+    }
+  });
 });
