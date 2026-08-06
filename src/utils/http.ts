@@ -150,8 +150,11 @@ export async function fetchWithRedirects(
     const cookieKeys = Object.keys(headers).filter(key => key.toLowerCase() === 'cookie');
     const explicitCookie = cookieKeys.map(key => headers[key]).filter(Boolean).join('; ');
     const sameOrigin = getUrlOrigin(currentUrl) === initialOrigin;
-    const mergedCookies = [explicitCookie, cookieHeader].filter(Boolean).join('; ');
-    const safeCookies = sameOrigin ? mergedCookies : stripSensitiveCookies(mergedCookies);
+    // Only the caller-provided Cookie header belongs to the initial origin.
+    // CookieJar already scopes response cookies to currentUrl, so filtering the
+    // merged value would incorrectly delete credentials set by a redirect target.
+    const safeExplicitCookie = sameOrigin ? explicitCookie : stripSensitiveCookies(explicitCookie);
+    const safeCookies = [safeExplicitCookie, cookieHeader].filter(Boolean).join('; ');
     for (const key of cookieKeys) {
       delete headers[key];
     }

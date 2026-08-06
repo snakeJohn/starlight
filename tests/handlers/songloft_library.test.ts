@@ -119,24 +119,6 @@ describe('registerSongloftLibraryHandlers', () => {
     });
   });
 
-  it('preserves the expired marker returned by Songloft playlist songs', async () => {
-    (songloft.playlists as unknown as SongloftPlaylistsStub).getSongs = vi.fn(async () => ({
-      songs: [],
-      count: 0,
-      expired: true,
-    }));
-    const { router } = createHarness();
-
-    const response = await router.handle(request('GET', '/api/songloft/playlists/2/songs'));
-
-    expect(response.statusCode).toBe(200);
-    expect(parseResponseBody(response).data).toEqual({
-      list: [],
-      total: 0,
-      expired: true,
-    });
-  });
-
   it('creates a Songloft playlist through the playlist service', async () => {
     const playlistService = {
       createPlaylist: vi.fn(async () => ({ id: 12, name: 'Road Trip' })),

@@ -115,4 +115,36 @@ describe('plugin main lifecycle', () => {
       startSpy.mockRestore();
     }
   });
+
+  test('starts the conversation monitor after a bounded wait when autoLoginAll never settles', async () => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    await songloft.storage.set('starlight:miot:config', JSON.stringify({
+      conversation_monitor_enabled: true,
+    }));
+
+    const { AuthService } = await import('../src/auth/service');
+    const loginSpy = vi.spyOn(AuthService.prototype, 'autoLoginAll')
+      .mockImplementation(() => new Promise<never>(() => {}));
+
+    const { ConversationMonitor } = await import('../src/conversation/monitor');
+    const startSpy = vi.spyOn(ConversationMonitor.prototype, 'start').mockResolvedValue(undefined);
+
+    try {
+      await import('../src/main');
+      await mainGlobals().onInit();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => startSpy.mock.calls.length > 0);
+
+      expect(loginSpy).toHaveBeenCalledTimes(1);
+      expect(startSpy).toHaveBeenCalledTimes(1);
+      await mainGlobals().onDeinit();
+    } finally {
+      loginSpy.mockRestore();
+      startSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });

@@ -153,4 +153,40 @@ describe('httpFetch response headers', () => {
     expect(requests[1].headers.Cookie).toContain('serviceToken=secret');
     expect(requests[1].headers.Cookie).toContain('deviceId=device-1');
   });
+
+  it('keeps target-origin jar cookies across later redirects on that origin', async () => {
+    const requests: Array<{ url: string; headers: Record<string, string> }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, options: { headers?: Record<string, string> }) => {
+      requests.push({ url, headers: options.headers || {} });
+      if (requests.length === 1) {
+        return new Response('', {
+          status: 302,
+          headers: { Location: 'https://redirect.example.com/login' },
+        });
+      }
+      if (requests.length === 2) {
+        return new Response('', {
+          status: 302,
+          headers: {
+            Location: '/final',
+            'Set-Cookie': 'serviceToken=target-secret; Path=/; Secure',
+          },
+        });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+
+    await fetchWithRedirects(
+      'https://api.example.com/conversation',
+      { method: 'GET', headers: { Cookie: 'serviceToken=origin-secret; deviceId=device-1; lang=zh' } },
+      new CookieJar(),
+      3,
+    );
+
+    expect(requests[1].headers.Cookie).not.toContain('origin-secret');
+    expect(requests[1].headers.Cookie).not.toContain('deviceId=device-1');
+    expect(requests[2].headers.Cookie).toContain('serviceToken=target-secret');
+    expect(requests[2].headers.Cookie).not.toContain('origin-secret');
+    expect(requests[2].headers.Cookie).not.toContain('deviceId=device-1');
+  });
 });

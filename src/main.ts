@@ -77,9 +77,25 @@ let songloftPlaylistService: SongloftPlaylistService;
 /** Guards asynchronous initialization continuations during hot reload/deinit. */
 let lifecycleGeneration = 0;
 let lifecycleDisposed = true;
+const CONVERSATION_MONITOR_LOGIN_WAIT_MS = 10_000;
 
 function isLifecycleCurrent(generation: number): boolean {
   return !lifecycleDisposed && lifecycleGeneration === generation;
+}
+
+function waitForAutoLoginBeforeMonitor(loginPromise: Promise<void>): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<void>(resolve => {
+    timeoutId = setTimeout(() => {
+      songloft.log.warn(
+        `autoLoginAll still pending after ${CONVERSATION_MONITOR_LOGIN_WAIT_MS}ms; starting conversation monitor`,
+      );
+      resolve();
+    }, CONVERSATION_MONITOR_LOGIN_WAIT_MS);
+  });
+
+  void loginPromise.then(() => clearTimeout(timeoutId));
+  return Promise.race([loginPromise, timeoutPromise]);
 }
 
 async function onInit(): Promise<void> {
@@ -213,14 +229,15 @@ async function onInit(): Promise<void> {
 
   // 先 autoLogin 再启动对话监听：否则首轮 poll 因无 Mina client 空转，
   // 用户说话时基线未建立 → 语音记录为空 + 口令无反应。
-  // 登录失败也仍然启动监听，便于用户稍后手动登录后由轮询恢复。
+  // 登录失败或请求挂起也仍然启动监听，便于用户稍后手动登录后由轮询恢复。
   const wantConversationMonitor = !!pluginConfig.conversation_monitor_enabled;
-  void authService.autoLoginAll()
-    .catch(e => {
-      songloft.log.error('autoLoginAll failed: ' + String(e));
-    })
+  const autoLoginPromise = authService.autoLoginAll().catch(e => {
+    songloft.log.error('autoLoginAll failed: ' + String(e));
+  });
+  if (wantConversationMonitor) {
+    void waitForAutoLoginBeforeMonitor(autoLoginPromise)
     .then(async () => {
-      if (!isLifecycleCurrent(initGeneration) || !wantConversationMonitor) return;
+      if (!isLifecycleCurrent(initGeneration)) return;
 
       // Re-read the setting after login. A user can disable the monitor while
       // autoLoginAll is still in flight; the stale continuation must not start it.
@@ -240,6 +257,7 @@ async function onInit(): Promise<void> {
     .catch(e => {
       songloft.log.error('conversation monitor startup continuation failed: ' + String(e));
     });
+  }
 
   // 异步刷新索引，不阻塞插件初始化
   setTimeout(() => {
