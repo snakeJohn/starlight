@@ -360,8 +360,11 @@ export class ConversationMonitor {
     let askMessages: AskMessage[] | null;
     let timeoutId: any = null;
     try {
-      const controller = new AbortController();
-      const pollRequest = client.getLatestAskFromXiaoai(dm.deviceId, dm.hardware, 5, controller.signal);
+      // Older Songloft QuickJS hosts do not expose AbortController. The
+      // timeout race still bounds the monitor when active cancellation is
+      // unavailable.
+      const controller = typeof AbortController === 'undefined' ? null : new AbortController();
+      const pollRequest = client.getLatestAskFromXiaoai(dm.deviceId, dm.hardware, 5, controller?.signal);
       const pollResult = await Promise.race([
         pollRequest.then(
           messages => ({ kind: 'result' as const, messages }),
@@ -369,7 +372,7 @@ export class ConversationMonitor {
         ),
         new Promise<{ kind: 'timeout' }>(resolve => {
           timeoutId = setTimeout(() => {
-            controller.abort();
+            controller?.abort();
             resolve({ kind: 'timeout' });
           }, ConversationMonitor.DEVICE_POLL_TIMEOUT_MS);
         }),

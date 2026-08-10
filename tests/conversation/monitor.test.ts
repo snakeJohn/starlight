@@ -289,6 +289,36 @@ describe('ConversationMonitor polling', () => {
     monitor.stop();
   });
 
+  it('keeps polling when the Songloft host lacks AbortController', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('AbortController', undefined);
+    const minaClient = {
+      getLatestAskFromXiaoai: vi.fn().mockResolvedValue([]),
+    };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn(async () => [{ device_id: 'speaker-1', device_name: '客厅音箱', hardware: 'LX06' }]),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+
+    monitor.start();
+    await flushStart();
+
+    expect(minaClient.getLatestAskFromXiaoai).toHaveBeenCalledWith(
+      'speaker-1',
+      'LX06',
+      5,
+      undefined,
+    );
+    expect((await monitor.getStatus()).devices[0]).toMatchObject({ primed: true });
+    monitor.stop();
+  });
+
   it('re-primes retained devices after restart without delivering stopped-period history', async () => {
     vi.useFakeTimers();
     const history = ask(1_000, '启动前历史');
