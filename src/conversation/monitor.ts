@@ -433,9 +433,9 @@ export class ConversationMonitor {
     let timeoutId: any = null;
     const pollRequestId = `${runGeneration}:${++this.pollRequestSequence}`;
     try {
-      // Older Songloft QuickJS hosts do not expose AbortController. The race
-      // below still bounds the monitor even when the underlying request cannot
-      // be actively cancelled.
+      // Older Songloft QuickJS hosts do not expose AbortController. The
+      // timeout race still bounds the monitor when active cancellation is
+      // unavailable.
       const controller = typeof AbortController === 'undefined' ? null : new AbortController();
       const pollResult = await Promise.race([
         client.getLatestAskFromXiaoai(dm.deviceId, dm.hardware, 5, controller?.signal, pollRequestId).then(
