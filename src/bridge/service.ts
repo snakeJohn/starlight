@@ -429,8 +429,13 @@ export class BridgeService {
     };
   }
 
-  async playOnSpeaker(accountId: string, deviceId: string, song: SearchResultSong): Promise<{ url: string }> {
-    if (this.downloads) {
+  async playOnSpeaker(
+    accountId: string,
+    deviceId: string,
+    song: SearchResultSong,
+    options?: { download?: boolean },
+  ): Promise<{ url: string }> {
+    if (options?.download !== false && this.downloads) {
       const downloaded = await this.downloads.downloadSong(song);
       const playerSong = toImportedPlayerSong(song, { id: downloaded.song_id, type: 'local' });
       if (!playerSong) {
@@ -451,6 +456,34 @@ export class BridgeService {
     }
     const attemptedSources = new Set<string>();
     const failures: string[] = [];
+    if (options?.download === false) {
+      let streamUrl: string | undefined;
+      try {
+        streamUrl = (await this.resolvePlayback(song)).url;
+      } catch (error) {
+        failures.push(sanitizeProviderError(error));
+      }
+      if (streamUrl) {
+        const directUrl = await this.tryPlaySearchSongOnSpeaker(
+          accountId,
+          deviceId,
+          song,
+          attemptedSources,
+          failures,
+          streamUrl,
+        );
+        if (directUrl) {
+          return { url: directUrl };
+        }
+      } else {
+        attemptedSources.add(song.source_data.platform);
+      }
+      const fallbackUrl = await this.tryPlayResolvedCandidatesOnSpeaker(accountId, deviceId, song.title, song.artist, attemptedSources, failures);
+      if (!fallbackUrl) {
+        throw playbackFallbackError(attemptedSources.size, failures);
+      }
+      return { url: fallbackUrl };
+    }
     const songloftUrl = await this.tryPlayImportedSongOnSpeaker(accountId, deviceId, song, failures);
     if (songloftUrl) {
       return { url: songloftUrl };

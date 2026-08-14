@@ -12,9 +12,10 @@ import { IndexingManager } from '../indexing/manager';
 import { URLBuilder } from '../player/url_builder';
 import { AIAnalyzer } from './ai_analyzer';
 import { OnlineSearcher } from './online_searcher';
+import { SleepTimer, detectSleepTimerMode, formatRemaining, parseSongsCount, parseTimeDuration, type SleepTimerState } from '../sleep_timer';
 import { updateDeviceStatusCache } from '../handlers/playlist';
 import { syntheticPlaylistId } from '../custom_playlists/synthetic';
-import type { ConversationMessage, VoiceCommand, PlayMode, AIAnalysisResult } from '../types';
+import type { ConversationMessage, VoiceCommand, PlayMode, AIAnalysisResult, PluginConfig } from '../types';
 import type { BridgeService } from '../bridge/service';
 import type { CustomPlaylistService } from '../custom_playlists/service';
 import type { CustomPlaylist } from '../custom_playlists/types';
@@ -44,6 +45,10 @@ type SongloftRecord = Record<string, unknown>;
 type SongQueryHint = { title: string; artist: string };
 
 const LIST_KEYS = ['list', 'items', 'songs', 'playlists'] as const;
+const DEFAULT_PLAY_ANNOUNCEMENT_TEMPLATE = '即将播放{artist}的{song}';
+const MAX_FIXED_ANNOUNCEMENT_WAIT_MS = 10_000;
+const MAX_ANNOUNCEMENT_WAIT_MS = 15_000;
+const ANNOUNCEMENT_POLL_INTERVAL_MS = 500;
 
 /** 口令类型优先级（数字越小优先级越高） */
 const COMMAND_PRIORITY: Record<string, number> = {
@@ -55,8 +60,15 @@ const COMMAND_PRIORITY: Record<string, number> = {
   'set_volume': 4,
   'next': 5,
   'previous': 6,
+  'sleep_timer': 6,
+  'cancel_sleep_timer': 6,
+  'query_sleep_timer': 6,
   'stop': 7,
 };
+
+const FIXED_CONTROL_COMMAND_TYPES = new Set([
+  'sleep_timer', 'cancel_sleep_timer', 'query_sleep_timer',
+]);
 
 const SOURCE_NAME_TO_PLATFORM: Record<string, MusicPlatform> = {
   '酷我': 'kw',
@@ -195,11 +207,21 @@ function getSongArtist(song: SongloftRecord): string {
 function scoreSongloftSong(query: string, song: SongloftRecord): number {
   const title = getSongTitle(song);
   const artist = getSongArtist(song);
-  return Math.max(
-    matchScore(query, title),
-    matchScore(query, artist),
-    matchScore(query, [title, artist].filter(Boolean).join(' ')),
-  );
+  const titleScore = matchScore(query, title);
+  const artistScore = matchScore(query, artist);
+  const combinedScore = matchScore(query, [title, artist].filter(Boolean).join(' '));
+
+  if (titleScore > 0) {
+    return Math.max(titleScore, combinedScore);
+  }
+
+  // "周杰伦的青花瓷" must not match every local 周杰伦 song just because the
+  // query contains the artist. Same rule as IndexingManager.scoreSongMatch.
+  if (artistScore > 0 && Array.from(query).length > Array.from(artist).length + 1) {
+    return 0;
+  }
+
+  return Math.max(titleScore, artistScore, combinedScore);
 }
 
 function findBestPlaylistMatch(query: string, playlists: SongloftRecord[]): MatchedPlaylist | null {
@@ -236,7 +258,7 @@ function findBestSongloftSongMatch(query: string, songs: SongloftRecord[]): Song
       isLocal: isSongloftLocalSong(song),
     }))
     .filter(item => item.score > 0)
-    .sort((a, b) => Number(b.isLocal) - Number(a.isLocal) || b.score - a.score || a.index - b.index);
+    .sort((a, b) => b.score - a.score || Number(b.isLocal) - Number(a.isLocal) || a.index - b.index);
 
   return scored[0]?.song ?? null;
 }
@@ -258,14 +280,14 @@ function buildSongSearchHints(query: string, artist = ''): SongQueryHint[] {
     hints.push({ title: normalizedTitle, artist: normalizedArtist });
   };
 
-  pushHint(query, artist);
-
   if (!artist.trim()) {
     const ofMatch = query.trim().match(/^(.+?)的(.+)$/);
     if (ofMatch) {
       pushHint(ofMatch[2], ofMatch[1]);
     }
   }
+
+  pushHint(query, artist);
 
   return hints;
 }
@@ -301,7 +323,7 @@ function findBestSongloftSongMatchByHints(hints: SongQueryHint[], songs: Songlof
       };
     })
     .filter(item => item.score > 0)
-    .sort((a, b) => Number(b.isLocal) - Number(a.isLocal) || b.score - a.score || a.index - b.index);
+    .sort((a, b) => b.score - a.score || Number(b.isLocal) - Number(a.isLocal) || a.index - b.index);
 
   return scored[0]?.song ?? null;
 }
@@ -394,6 +416,9 @@ export function getDefaultVoiceCommands(): VoiceCommand[] {
     { type: 'set_volume', keywords: ['小声一点', '声音小一点', '音量小一点'], param: 'down', enabled: true },
     { type: 'next', keywords: ['下一首', '切歌', '换一首', '下一曲'], enabled: true },
     { type: 'previous', keywords: ['上一首', '上一曲'], enabled: true },
+    { type: 'sleep_timer', keywords: ['分钟后停止播放', '小时后停止播放', '首后停止播放', '分钟后停止', '小时后停止', '首后停止'], enabled: true },
+    { type: 'cancel_sleep_timer', keywords: ['取消定时停止', '取消睡眠定时', '取消定时'], enabled: true },
+    { type: 'query_sleep_timer', keywords: ['定时还剩多久', '查询定时', '还剩多久'], enabled: true },
     { type: 'stop', keywords: ['暂停播放', '停止播放', '暂停音乐', '停一下', 'pause', 'stop', '停止', '别播了', '关掉音乐', '关机', '关闭', '暂停', '闭嘴'], enabled: true },
   ];
 }
@@ -424,6 +449,7 @@ export class VoiceEngine {
   private resumeTimers: Map<string, any> = new Map();
   // 每次取消都递增代号，正在轮询的旧恢复任务据此自行退出（布尔标志会被随后的调度重置掉）
   private resumeEpochs: Map<string, number> = new Map();
+  private sleepTimers: Map<string, SleepTimer> = new Map();
 
   constructor(
     configManager: ConfigManager,
@@ -458,6 +484,7 @@ export class VoiceEngine {
     if (!enabled) {
       // 停用（含插件卸载）时清掉待执行的恢复定时器，避免之后仍向音箱推送播放
       this.cancelAllPendingResume();
+      this.cancelAllSleepTimers();
     }
     songloft.log.info(`[VoiceEngine] ${enabled ? 'Enabled' : 'Disabled'}`);
   }
@@ -465,6 +492,22 @@ export class VoiceEngine {
   /** 是否已启用 */
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  getSleepTimerState(accountId: string, deviceId: string): SleepTimerState {
+    return this.sleepTimers.get(this.sleepTimerKey(accountId, deviceId))?.getState()
+      ?? { active: false, mode: 'time', remaining: 0, startedAt: 0, total: 0 };
+  }
+
+  cancelSleepTimer(accountId: string, deviceId: string): boolean {
+    const key = this.sleepTimerKey(accountId, deviceId);
+    const timer = this.sleepTimers.get(key);
+    if (!timer) return false;
+    const wasActive = timer.isActive();
+    timer.cancel();
+    this.sleepTimers.delete(key);
+    this.playlistManagerMap.get(accountId, deviceId)?.setOnAdvanceHook(undefined);
+    return wasActive;
   }
 
   /**
@@ -495,11 +538,13 @@ export class VoiceEngine {
       return;
     }
 
-    // 固定控制优先于 AI：暂停/停止不能被 AI 误判或用户自定义缺词影响。
-    const builtinStop = this.matchBuiltinStopCommand(query);
-    if (builtinStop) {
-      songloft.log.info(`[VoiceEngine] [Rule] → Matched builtin stop: keyword="${builtinStop.keyword}"`);
-      await this.executeCommand(builtinStop, accountId, msg.device_id);
+    // Configured fixed controls must win before the builtin stop fallback: a timer
+    // phrase contains "停止播放", but it has a more specific configured meaning.
+    const fixedControl = await this.matchCommand(query, FIXED_CONTROL_COMMAND_TYPES);
+    const fixedResult = fixedControl ?? this.matchBuiltinStopCommand(query);
+    if (fixedResult) {
+      songloft.log.info(`[VoiceEngine] [Rule] → Matched fixed control: type=${fixedResult.command.type} keyword="${fixedResult.keyword}"`);
+      await this.executeCommand(fixedResult, accountId, msg.device_id, query);
       return;
     }
 
@@ -544,7 +589,7 @@ export class VoiceEngine {
     songloft.log.info(`[VoiceEngine] [Rule] → Matched: type=${result.command.type} keyword="${result.keyword}" argument="${result.argument}"`);
 
     // 执行口令
-    await this.executeCommand(result, accountId, msg.device_id);
+    await this.executeCommand(result, accountId, msg.device_id, query);
   }
 
   /**
@@ -584,7 +629,7 @@ export class VoiceEngine {
    * @param query - 用户说的话
    * @returns 匹配结果，null 表示未匹配
    */
-  private async matchCommand(query: string): Promise<MatchResult | null> {
+  private async matchCommand(query: string, allowedTypes?: ReadonlySet<string>): Promise<MatchResult | null> {
     const commands = await this.configManager.getVoiceCommands();
     if (commands.length === 0) {
       return null;
@@ -592,7 +637,7 @@ export class VoiceEngine {
 
     // 过滤已启用的口令并按优先级排序
     const enabledCommands = commands
-      .filter(cmd => cmd.enabled)
+      .filter(cmd => cmd.enabled && (!allowedTypes || allowedTypes.has(cmd.type)))
       .map(cmd => ({
         cmd,
         priority: COMMAND_PRIORITY[cmd.type] ?? 99,
@@ -657,7 +702,7 @@ export class VoiceEngine {
   /**
    * 执行匹配到的口令
    */
-  private async executeCommand(result: MatchResult, accountId: string, deviceId: string): Promise<void> {
+  private async executeCommand(result: MatchResult, accountId: string, deviceId: string, query = ''): Promise<void> {
     const pm = this.playlistManagerMap.get(accountId, deviceId);
     const wasPlaying = pm?.isPlaying() ?? false;
 
@@ -685,6 +730,15 @@ export class VoiceEngine {
         break;
       case 'previous':
         await this.executePrevious(accountId, deviceId);
+        break;
+      case 'sleep_timer':
+        await this.executeSleepTimer(query || result.argument, accountId, deviceId);
+        break;
+      case 'cancel_sleep_timer':
+        await this.executeCancelSleepTimer(accountId, deviceId);
+        break;
+      case 'query_sleep_timer':
+        await this.executeQuerySleepTimer(accountId, deviceId);
         break;
       case 'stop':
         await this.executeStop(accountId, deviceId);
@@ -765,6 +819,15 @@ export class VoiceEngine {
       case 'previous':
         await this.executePrevious(accountId, deviceId);
         break;
+      case 'sleep_timer':
+        await this.executeSleepTimerFromAI(result, accountId, deviceId);
+        break;
+      case 'cancel_sleep_timer':
+        await this.executeCancelSleepTimer(accountId, deviceId);
+        break;
+      case 'query_sleep_timer':
+        await this.executeQuerySleepTimer(accountId, deviceId);
+        break;
       case 'stop':
         await this.executeStop(accountId, deviceId);
         break;
@@ -779,7 +842,11 @@ export class VoiceEngine {
    * 非播放类命令执行后，尝试恢复被小爱语音唤醒中断的 URL 播放
    */
   private tryResumePlayback(commandType: string, wasPlaying: boolean, pm: import('../player/manager').PlaylistManager | null, accountId: string, deviceId: string): void {
-    const isNonPlaybackCommand = commandType === 'set_volume' || commandType === 'set_play_mode';
+    const isNonPlaybackCommand = commandType === 'set_volume'
+      || commandType === 'set_play_mode'
+      || commandType === 'sleep_timer'
+      || commandType === 'cancel_sleep_timer'
+      || commandType === 'query_sleep_timer';
     if (!isNonPlaybackCommand || !wasPlaying || !pm) return;
 
     pm.suspendForVoiceInteraction();
@@ -1279,8 +1346,16 @@ export class VoiceEngine {
     // 打断音箱当前播报
     await this.interruptBroadcast(accountId, deviceId);
 
+    let announcementAttempted = false;
+    const announceOnce = async (title: string, songArtist: string): Promise<void> => {
+      if (announcementAttempted) return;
+      announcementAttempted = true;
+      await this.announceBeforePlay(title, songArtist, accountId, deviceId);
+    };
+
     const songloftSong = await this.findSongloftLibrarySong(songName, artist);
     if (songloftSong) {
+      await announceOnce(songloftSong.title, songloftSong.artist);
       const ok = await pm.playStandalone([songloftSong], 0, 'single', {
         autoAdvance: false,
       });
@@ -1303,6 +1378,7 @@ export class VoiceEngine {
         if (standalone) {
           const playUrl = await URLBuilder.buildSongURL(standalone);
           if (playUrl) {
+            await announceOnce(standalone.title, standalone.artist);
             const ok = await pm.playStandalone([standaloneSongToPlayerSong(standalone, playUrl)], 0, 'single', {
               autoAdvance: false,
             });
@@ -1321,9 +1397,22 @@ export class VoiceEngine {
 
     if (!loc) {
       const resolvedSong = await this.resolveVoiceSearchSong(songName, artist, null);
+      if (resolvedSong && this.bridgeService?.playOnSpeaker) {
+        try {
+          await announceOnce(resolvedSong.title, resolvedSong.artist);
+          const played = await this.bridgeService.playOnSpeaker(accountId, deviceId, resolvedSong, { download: false });
+          if (played.url) {
+            songloft.log.info('[VoiceEngine] Played resolved song on speaker without download: ' + resolvedSong.title + ' - ' + resolvedSong.artist);
+            return;
+          }
+        } catch (error) {
+          songloft.log.warn(`[VoiceEngine] Online speaker play failed, will try download: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       if (resolvedSong) {
         const downloadedSong = await this.downloadResolvedSongToLibrary(resolvedSong, songName, artist || resolvedSong.artist);
         if (downloadedSong) {
+          await announceOnce(downloadedSong.title, downloadedSong.artist);
           const ok = await pm.playStandalone([downloadedSong], 0, 'single', {
             autoAdvance: false,
           });
@@ -1337,17 +1426,6 @@ export class VoiceEngine {
       }
 
       songloft.log.warn(`[VoiceEngine] Song not found locally: ${songName}, trying online search`);
-      if (resolvedSong && this.bridgeService?.playOnSpeaker) {
-        try {
-          const played = await this.bridgeService.playOnSpeaker(accountId, deviceId, resolvedSong);
-          if (played.url) {
-            songloft.log.info('[VoiceEngine] Played resolved song on speaker after local download miss: ' + resolvedSong.title + ' - ' + resolvedSong.artist);
-            return;
-          }
-        } catch (error) {
-          songloft.log.warn(`[VoiceEngine] Speaker fallback after auto download miss failed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
       // 本地缓存歌曲未击中，尝试在线搜索（需配置了外部搜索 API）
       if (!(await this.onlineSearcher.isExternalSearchConfigured())) {
         songloft.log.warn('[VoiceEngine] External search not configured, skip online search');
@@ -1380,6 +1458,7 @@ export class VoiceEngine {
     }
 
     // 播放歌单，从匹配到的歌曲索引开始
+    await announceOnce(loc.songTitle, loc.artist);
     const ok = await pm.play(loc.playlistId, loc.songIndex, playMode);
     if (ok) {
       songloft.log.info(`[VoiceEngine] Play song success: ${loc.songTitle} playlist="${loc.playlistName}" index=${loc.songIndex} mode=${playMode}`);
@@ -1545,9 +1624,112 @@ export class VoiceEngine {
    */
   private async executeStop(accountId: string, deviceId: string): Promise<void> {
     this.cancelPendingResume(accountId, deviceId);
+    this.cancelSleepTimer(accountId, deviceId);
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
     await pm.stop();
     songloft.log.info(`[VoiceEngine] Playback stopped`);
+  }
+
+  private sleepTimerKey(accountId: string, deviceId: string): string {
+    return accountId + ':' + deviceId;
+  }
+
+  private getOrCreateSleepTimer(accountId: string, deviceId: string): SleepTimer {
+    const key = this.sleepTimerKey(accountId, deviceId);
+    let timer = this.sleepTimers.get(key);
+    if (!timer) {
+      timer = new SleepTimer(() => {
+        this.expireSleepTimer(key, accountId, deviceId).catch(error => {
+          songloft.log.warn(`[VoiceEngine] Sleep timer expiration failed: ${String(error)}`);
+        });
+      });
+      this.sleepTimers.set(key, timer);
+    }
+    return timer;
+  }
+
+  private async expireSleepTimer(key: string, accountId: string, deviceId: string): Promise<void> {
+    this.sleepTimers.delete(key);
+    const pm = this.playlistManagerMap.get(accountId, deviceId);
+    if (!pm) return;
+    pm.setOnAdvanceHook(undefined);
+    await pm.stop();
+  }
+
+  private async setupSleepTimer(accountId: string, deviceId: string, mode: 'time' | 'songs', value: number): Promise<boolean> {
+    if (!Number.isFinite(value) || value <= 0) return false;
+    const timer = this.getOrCreateSleepTimer(accountId, deviceId);
+    const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
+    if (mode === 'time') {
+      pm.setOnAdvanceHook(undefined);
+      timer.setTime(value);
+    } else {
+      timer.setSongs(value);
+      pm.setOnAdvanceHook(() => timer.onSongAdvanced());
+    }
+    return timer.isActive();
+  }
+
+  private async executeSleepTimer(query: string, accountId: string, deviceId: string): Promise<void> {
+    const mode = detectSleepTimerMode(query);
+    if (mode === 'songs') {
+      const count = parseSongsCount(query);
+      if (!await this.setupSleepTimer(accountId, deviceId, 'songs', count)) {
+        await this.minaService.textToSpeech(accountId, deviceId, '抱歉，无法识别曲目数');
+        return;
+      }
+      await this.minaService.textToSpeech(accountId, deviceId, `好的，再播${count}首后将停止播放`);
+      return;
+    }
+    if (mode === 'time') {
+      const minutes = parseTimeDuration(query);
+      if (!await this.setupSleepTimer(accountId, deviceId, 'time', minutes)) {
+        await this.minaService.textToSpeech(accountId, deviceId, '抱歉，无法识别定时时间');
+        return;
+      }
+      await this.minaService.textToSpeech(accountId, deviceId, `好的，${this.formatSleepDuration(minutes)}后将停止播放`);
+      return;
+    }
+    await this.minaService.textToSpeech(accountId, deviceId, '抱歉，无法识别定时时间');
+  }
+
+  private async executeSleepTimerFromAI(result: AIAnalysisResult, accountId: string, deviceId: string): Promise<void> {
+    const songs = result.params.songs_count;
+    if (typeof songs === 'number' && await this.setupSleepTimer(accountId, deviceId, 'songs', songs)) {
+      await this.minaService.textToSpeech(accountId, deviceId, `好的，再播${songs}首后将停止播放`);
+      return;
+    }
+    const duration = result.params.duration;
+    if (typeof duration === 'number' && await this.setupSleepTimer(accountId, deviceId, 'time', duration)) {
+      await this.minaService.textToSpeech(accountId, deviceId, `好的，${this.formatSleepDuration(duration)}后将停止播放`);
+      return;
+    }
+    await this.minaService.textToSpeech(accountId, deviceId, '抱歉，无法识别定时时间');
+  }
+
+  private async executeCancelSleepTimer(accountId: string, deviceId: string): Promise<void> {
+    await this.minaService.textToSpeech(accountId, deviceId,
+      this.cancelSleepTimer(accountId, deviceId) ? '已取消定时停止' : '当前没有定时任务');
+  }
+
+  private async executeQuerySleepTimer(accountId: string, deviceId: string): Promise<void> {
+    await this.minaService.textToSpeech(accountId, deviceId, formatRemaining(this.getSleepTimerState(accountId, deviceId)));
+  }
+
+  private cancelAllSleepTimers(): void {
+    for (const key of Array.from(this.sleepTimers.keys())) {
+      const separator = key.indexOf(':');
+      if (separator >= 0) this.cancelSleepTimer(key.slice(0, separator), key.slice(separator + 1));
+    }
+  }
+
+  private formatSleepDuration(minutes: number): string {
+    if (minutes >= 60) {
+      const hours = Math.floor(minutes / 60);
+      const extraMinutes = minutes % 60;
+      return extraMinutes ? `${hours}小时${extraMinutes}分钟` : `${hours}小时`;
+    }
+    return `${minutes}分钟`;
   }
 
   private resumeKey(accountId: string, deviceId: string): string {
@@ -1679,6 +1861,69 @@ export class VoiceEngine {
       songloft.log.warn('[VoiceEngine] Failed to restore playback after voice interaction, cleaning state');
       await pm.stop();
     }
+  }
+
+  private async announceBeforePlay(
+    title: string,
+    artist: string,
+    accountId: string,
+    deviceId: string,
+  ): Promise<void> {
+    try {
+      const config = await this.configManager.getConfig();
+      if (!config.play_announcement_enabled || !title) return;
+
+      const text = (config.play_announcement_template || DEFAULT_PLAY_ANNOUNCEMENT_TEMPLATE)
+        .replace(/\{song\}/g, title)
+        .replace(/\{artist\}/g, artist || '未知歌手');
+      if (!text.trim()) return;
+
+      songloft.log.info(`[VoiceEngine] Play announcement: "${text}" mode=${config.play_announcement_wait_mode}`);
+      const announced = await this.minaService.textToSpeech(accountId, deviceId, text);
+      if (!announced) {
+        songloft.log.warn('[VoiceEngine] Play announcement TTS failed, continuing playback');
+        return;
+      }
+
+      await this.waitAfterAnnouncement(config, text.length, accountId, deviceId);
+    } catch (error) {
+      songloft.log.warn('[VoiceEngine] Play announcement failed, continuing playback: ' + String(error));
+    }
+  }
+
+  private async waitAfterAnnouncement(
+    config: Pick<PluginConfig, 'play_announcement_wait_mode' | 'play_announcement_delay'>,
+    textLength: number,
+    accountId: string,
+    deviceId: string,
+  ): Promise<void> {
+    if (config.play_announcement_wait_mode === 'fixed') {
+      const rawDelay = Number(config.play_announcement_delay);
+      const delaySeconds = Number.isFinite(rawDelay) ? Math.max(0, Math.min(10, rawDelay)) : 3;
+      await new Promise(resolve => setTimeout(resolve, Math.min(MAX_FIXED_ANNOUNCEMENT_WAIT_MS, delaySeconds * 1000)));
+      return;
+    }
+
+    if (config.play_announcement_wait_mode === 'poll') {
+      const startedAt = Date.now();
+      let seenPlaying = false;
+      while (Date.now() - startedAt < MAX_ANNOUNCEMENT_WAIT_MS) {
+        const remainingMs = MAX_ANNOUNCEMENT_WAIT_MS - (Date.now() - startedAt);
+        await new Promise(resolve => setTimeout(resolve, Math.min(ANNOUNCEMENT_POLL_INTERVAL_MS, remainingMs)));
+        if (Date.now() - startedAt >= MAX_ANNOUNCEMENT_WAIT_MS) return;
+
+        const status = this.parseDeviceStatus(await this.minaService.getPlayerStatus(accountId, deviceId));
+        if (status.status === 1) {
+          seenPlaying = true;
+          continue;
+        }
+        if (seenPlaying) return;
+      }
+      return;
+    }
+
+    const estimatedMs = Math.ceil(Math.max(0, textLength) / 4) * 1000 + 1000;
+    await new Promise(resolve => setTimeout(resolve, Math.min(MAX_ANNOUNCEMENT_WAIT_MS, estimatedMs)));
   }
 
   /**

@@ -258,32 +258,44 @@ export class TaskExecutor {
    * @param withSong - 是否从指定歌曲开始播放（play_playlist_from）
    */
   private async executePlayPlaylist(target: DeviceTarget, params: TaskParams, withSong: boolean): Promise<string> {
-    if (typeof params.playlist_id === 'number' && Number.isFinite(params.playlist_id) && params.playlist_id !== 0) {
-      const playMode = normalizePlayMode(params.play_mode, 'order');
-      const pm = await this.playlistManagerMap.getOrCreate(target.accountId, target.deviceId);
-      const ok = await pm.play(params.playlist_id, 0, playMode);
-      if (!ok) {
-        throw new Error(`播放歌单失败: #${params.playlist_id}`);
-      }
-      return `播放歌单 #${params.playlist_id} 成功`;
+    const hasPlaylistId = typeof params.playlist_id === 'number' && Number.isFinite(params.playlist_id) && params.playlist_id !== 0;
+    if (!params.playlist_name && !hasPlaylistId) {
+      throw new Error('未指定歌单名称');
     }
 
-    const playlistName = params.playlist_name;
-    if (!playlistName) {
-      throw new Error('未指定歌单名称');
+    // Numeric playlist/song ids can skip the song-index cache: playback reloads
+    // the playlist with the host sort, so a cached index would point at the wrong row.
+    if (hasPlaylistId && !params.playlist_name) {
+      const playMode = normalizePlayMode(params.play_mode, 'order');
+      const pm = await this.playlistManagerMap.getOrCreate(target.accountId, target.deviceId);
+      if (!withSong) {
+        const ok = await pm.play(params.playlist_id!, 0, playMode);
+        if (!ok) {
+          throw new Error(`播放歌单失败: #${params.playlist_id}`);
+        }
+        return `播放歌单 #${params.playlist_id} 成功`;
+      }
+      if (typeof params.song_id === 'number' && Number.isFinite(params.song_id) && params.song_id !== 0 && !params.song_name) {
+        const ok = await pm.playPlaylistFromSong(params.playlist_id!, params.song_id, playMode);
+        if (!ok) {
+          throw new Error(`播放歌单失败: #${params.playlist_id}`);
+        }
+        return `播放歌单 #${params.playlist_id}（从「#${params.song_id}」开始）成功`;
+      }
     }
 
     if (!this.indexingManager.isIndexReady()) {
       throw new Error('歌曲索引尚未就绪，请确保已刷新索引');
     }
 
-    // 通过名称查找歌单
-    const playlist = this.indexingManager.findPlaylistByName(playlistName);
+    const playlist = params.playlist_name
+      ? this.indexingManager.findPlaylistByName(params.playlist_name)
+      : this.indexingManager.getPlaylistById(params.playlist_id!);
     if (!playlist) {
-      throw new Error(`未找到匹配的歌单: ${playlistName}`);
+      throw new Error(`未找到匹配的歌单: ${params.playlist_name || params.playlist_id}`);
     }
 
-    songloft.log.info(`[TaskExecutor] 匹配到歌单 name=${playlistName} matched=${playlist.name} id=${playlist.id}`);
+    songloft.log.info(`[TaskExecutor] 匹配到歌单 name=${params.playlist_name || ''} id=${playlist.id} matched=${playlist.name}`);
 
     // 读取设备持久化状态，供「从上次进度继续」和「跟随上次播放模式」使用
     const devCfg = await this.getDeviceConfig(target);
@@ -302,6 +314,14 @@ export class TaskExecutor {
             songloft.log.info(`[TaskExecutor] 匹配到歌曲 song_name=${params.song_name} index=${idx}`);
           } else {
             songloft.log.warn(`[TaskExecutor] 未找到匹配的歌曲，从第一首开始 song_name=${params.song_name}`);
+          }
+        } else if (params.song_id) {
+          const result = await this.indexingManager.findSongIndexInPlaylistById(pid, params.song_id);
+          if (result.found) {
+            idx = result.index;
+            songloft.log.info(`[TaskExecutor] 匹配到歌曲 song_id=${params.song_id} index=${idx}`);
+          } else {
+            songloft.log.warn(`[TaskExecutor] 未找到匹配的歌曲，从第一首开始 song_id=${params.song_id}`);
           }
         }
         return { startIndex: idx, randomStart: false };
@@ -323,7 +343,7 @@ export class TaskExecutor {
     };
 
     const describeStart = (start: { startIndex: number; randomStart: boolean }): string => {
-      if (withSong && params.song_name) return `（从「${params.song_name}」开始）`;
+      if (withSong && (params.song_name || params.song_id)) return `（从「${params.song_name || '#' + params.song_id}」开始）`;
       if (start.randomStart) return '（随机起始）';
       if (params.start_position === 'resume' && start.startIndex > 0) return '（从上次进度继续）';
       return '';
@@ -339,7 +359,7 @@ export class TaskExecutor {
         await this.indexingManager.refresh();
         const newPlaylist = this.indexingManager.findPlaylistByName(playlist.name);
         if (!newPlaylist) {
-          throw new Error(`刷新索引后仍未找到歌单: ${playlistName}`);
+          throw new Error(`刷新索引后仍未找到歌单: ${playlist.name}`);
         }
         const retryStart = await resolveStart(newPlaylist.id);
         const retryOk = await pm.play(newPlaylist.id, retryStart.startIndex, playMode, { randomStart: retryStart.randomStart });

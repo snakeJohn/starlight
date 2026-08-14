@@ -58,4 +58,40 @@ describe('IndexingManager custom playlist fallback', () => {
       artist: '河图',
     });
   });
+
+  it('loads native playlist index entries with brief song data', async () => {
+    const getSongs = vi.fn(async () => [{ id: 7, title: '晚风', artist: '伍佰' }]);
+    (songloft.playlists as unknown as Record<string, unknown>).list = vi.fn(async () => [{
+      id: 12, name: '夜间歌单', song_count: 1, songCount: 1, type: 'normal',
+    }]);
+    (songloft.playlists as unknown as Record<string, unknown>).getSongs = getSongs;
+    const customPlaylists = {
+      list: vi.fn(async () => []),
+    } as unknown as CustomPlaylistService;
+    const manager = new IndexingManager(customPlaylists);
+
+    await manager.refresh();
+
+    expect(getSongs).toHaveBeenCalledWith(12, { limit: 100000, brief: true });
+  });
+
+  it('loads native playlist index entries with the host playlist sort preference', async () => {
+    const getSongs = vi.fn(async () => [{ id: 7, title: '晚风', artist: '伍佰' }]);
+    (songloft.playlists as unknown as Record<string, unknown>).list = vi.fn(async () => [{
+      id: 12, name: '夜间歌单', song_count: 1, songCount: 1, type: 'normal',
+    }]);
+    (songloft.playlists as unknown as Record<string, unknown>).getById = vi.fn(async () => ({
+      id: 12, sort_by: 'title', sort_order: 'desc',
+    }));
+    (songloft.playlists as unknown as Record<string, unknown>).getSongs = getSongs;
+    const customPlaylists = {
+      list: vi.fn(async () => []),
+    } as unknown as CustomPlaylistService;
+    const manager = new IndexingManager(customPlaylists);
+
+    await manager.refresh();
+
+    expect(getSongs).toHaveBeenCalledWith(12, { limit: 100000, brief: true, sort: 'title', order: 'desc' });
+    await expect(manager.findSongIndexInPlaylistById(12, 7)).resolves.toEqual({ index: 0, found: true });
+  });
 });

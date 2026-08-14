@@ -229,8 +229,22 @@ describe('registerPlaylistHandlers input validation', () => {
 
     const response = await router.handle(request('GET', '/playlists/12/songs'));
 
-    expect(getSongs).toHaveBeenCalledWith(12, { limit: 100000 });
+    expect(getSongs).toHaveBeenCalledWith(12, { limit: 100000, brief: true });
     expect(parseResponseBody(response)).toEqual({ success: true, data: [{ id: 7, title: 'Song' }] });
+  });
+
+  it('forwards the host playlist sort preference when listing songs', async () => {
+    const getById = vi.fn(async () => ({ id: 12, sort_by: 'artist', sort_order: 'asc' }));
+    const getSongs = vi.fn(async () => [{ id: 7, title: 'Song' }]);
+    (songloft.playlists as unknown as SongloftPlaylistsStub & { getById: typeof getById }).getById = getById;
+    (songloft.playlists as unknown as SongloftPlaylistsStub).getSongs = getSongs;
+    const { router } = createHarness();
+
+    const response = await router.handle(request('GET', '/playlists/12/songs'));
+
+    expect(getById).toHaveBeenCalledWith(12);
+    expect(getSongs).toHaveBeenCalledWith(12, { limit: 100000, brief: true, sort: 'artist', order: 'asc' });
+    expect(parseResponseBody(response).success).toBe(true);
   });
 
   it('rejects a fractional playlist_id on /player/play but keeps negative dynamic ids', async () => {

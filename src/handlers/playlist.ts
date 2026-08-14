@@ -4,7 +4,7 @@
 import { jsonResponse, parseQuery } from '@songloft/plugin-sdk';
 import { parseJsonBody } from '../system/body';
 import type { Router, HTTPRequest } from '@songloft/plugin-sdk';
-import { PlaylistManagerMap } from '../player/manager';
+import { PlaylistManagerMap, playlistSongQuery } from '../player/manager';
 import { MinaService } from '../service/service';
 import { isPlayMode } from '../player/modes';
 import type { PlayMode } from '../types';
@@ -97,7 +97,7 @@ export function registerPlaylistHandlers(
       if (!Number.isInteger(playlistId) || playlistId <= 0) {
         return jsonResponse({ success: false, error: 'invalid playlist id' });
       }
-      const songs = await songloft.playlists.getSongs(playlistId, { limit: 100000 });
+      const songs = await songloft.playlists.getSongs(playlistId, await playlistSongQuery(playlistId, { brief: true }));
       return jsonResponse({ success: true, data: songs });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });

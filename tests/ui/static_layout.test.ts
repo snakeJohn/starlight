@@ -224,6 +224,8 @@ describe('static UI layout copy', () => {
     expect(html).toContain('data-role="songlist-pagination"');
     expect(html).toContain('data-role="songlist-detail-pagination"');
     expect(html).toContain('data-role="ranking-pagination"');
+    expect(html).toContain('data-role="songloft-playlist-songs-pagination"');
+    expect(html).toContain('data-role="speaker-playlist-songs-pagination"');
   });
 
   it('adds search result clearing, selection, and batch controls', () => {

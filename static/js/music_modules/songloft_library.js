@@ -6,6 +6,7 @@ import {
     songloftPlaylistId,
 } from '../shared/songloft_playlists.js';
 import { $, setState, state, toast } from '../state.js';
+import { bindPagination, clampPage, musicPageSize, pageCount, renderPaginationInto } from './pagination.js';
 import {
     renderEmptyState,
     renderListScroller,
@@ -15,6 +16,7 @@ import {
 } from './renderers.js';
 
 let songloftLibraryDependencies = null;
+const songloftPlaylistSongsPageSize = musicPageSize('songloftPlaylistSongs');
 
 export function setSongloftLibraryDependencies(dependencies) {
     songloftLibraryDependencies = dependencies;
@@ -79,12 +81,30 @@ async function toggleSongloftLibraryPanel(kind, load) {
     }
 }
 
-function renderSongloftSongList(role, songs, emptyText) {
+function renderSongloftSongList(role, songs, emptyText, startIndex = 0) {
     const node = $(`[data-role="${role}"]`);
     if (!node) return;
     node.innerHTML = songs.length
-        ? renderListScroller(songs.map((song, index) => renderSongloftSongRow(song, index)).join(''), `${role}-scroll`)
+        ? renderListScroller(songs.map((song, index) => renderSongloftSongRow(song, startIndex + index)).join(''), `${role}-scroll`)
         : renderEmptyState(emptyText);
+}
+
+function renderSongloftPlaylistSongsPage(page = 1) {
+    const songs = asArray(state.songloftPlaylistSongs);
+    const currentPage = clampPage(page, pageCount(songs.length, songloftPlaylistSongsPageSize));
+    const start = (currentPage - 1) * songloftPlaylistSongsPageSize;
+    renderSongloftSongList(
+        'songloft-playlist-songs',
+        songs.slice(start, start + songloftPlaylistSongsPageSize),
+        '这个 Songloft 歌单没有歌曲。',
+        start,
+    );
+    renderPaginationInto('songloft-playlist-songs-pagination', {
+        scope: 'songloft-playlist-songs',
+        page: currentPage,
+        total: songs.length,
+        pageSize: songloftPlaylistSongsPageSize,
+    });
 }
 
 function renderSongloftPlaylists(playlists) {
@@ -140,7 +160,7 @@ async function loadSongloftPlaylistSongs(playlist, index) {
     });
     $('[data-role="songloft-playlist-title"]').textContent = songloftPlaylistTitle(playlist);
     $('[data-role="songloft-playlist-songs-total"]').textContent = String(songs.length);
-    renderSongloftSongList('songloft-playlist-songs', songs, '这个 Songloft 歌单没有歌曲。');
+    renderSongloftPlaylistSongsPage(1);
     return songs;
 }
 
@@ -157,6 +177,8 @@ async function importSongloftPlaylistToCustom(playlist) {
 
 export function bindSongloftLibrary() {
     const { playSongloftSongOnSpeaker, setControlDisabled } = getSongloftLibraryDependencies();
+
+    bindPagination('songloft-playlist-songs-pagination', renderSongloftPlaylistSongsPage);
 
     $('[data-action="load-songloft-songs"]')?.addEventListener('click', async event => {
         const button = event.currentTarget;

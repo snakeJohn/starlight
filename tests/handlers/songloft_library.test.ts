@@ -36,6 +36,7 @@ type SongloftSongsStub = {
 
 type SongloftPlaylistsStub = {
   list: () => Promise<unknown>;
+  getById?: (playlistId: number) => Promise<unknown>;
   getSongs: (playlistId: number) => Promise<unknown>;
 };
 
@@ -112,7 +113,32 @@ describe('registerSongloftLibraryHandlers', () => {
     const response = await router.handle(request('GET', '/api/songloft/playlists/2/songs'));
 
     expect(response.statusCode).toBe(200);
-    expect(songloft.playlists.getSongs).toHaveBeenCalledWith(2);
+    expect(songloft.playlists.getSongs).toHaveBeenCalledWith(2, { limit: 100000, brief: true });
+    expect(parseResponseBody(response).data).toEqual({
+      list: [{ id: 'song-2', title: 'Playlist Song' }],
+      total: 11,
+    });
+  });
+
+  it('forwards the host playlist sort preference when listing library songs', async () => {
+    (songloft.playlists as unknown as SongloftPlaylistsStub).getById = vi.fn(async () => ({
+      id: 2, sort_by: 'artist', sort_order: 'asc',
+    }));
+    (songloft.playlists as unknown as SongloftPlaylistsStub).getSongs = vi.fn(async () => ({
+      songs: [{ id: 'song-2', title: 'Playlist Song' }],
+      count: 11,
+    }));
+    const { router } = createHarness();
+
+    const response = await router.handle(request('GET', '/api/songloft/playlists/2/songs'));
+
+    expect(response.statusCode).toBe(200);
+    expect(songloft.playlists.getSongs).toHaveBeenCalledWith(2, {
+      limit: 100000,
+      brief: true,
+      sort: 'artist',
+      order: 'asc',
+    });
     expect(parseResponseBody(response).data).toEqual({
       list: [{ id: 'song-2', title: 'Playlist Song' }],
       total: 11,

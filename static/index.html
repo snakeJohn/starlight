@@ -105,6 +105,7 @@
                                 <span data-role="songloft-playlist-songs-total">0</span>
                             </div>
                             <div data-role="songloft-playlist-songs"></div>
+                            <div data-role="songloft-playlist-songs-pagination"></div>
                         </section>
                     </div>
                 </section>
@@ -342,6 +343,25 @@
                                 <label class="toggle-line"><input name="voice_command_enabled" type="checkbox" disabled><span>语音口令</span></label>
                                 <label class="toggle-line"><input name="force_mp3" type="checkbox"><span>强制 MP3</span></label>
                                 <label class="toggle-line"><input name="radio_force_mp3" type="checkbox"><span>电台强制 MP3</span></label>
+                                <label class="toggle-line"><input name="play_announcement_enabled" type="checkbox"><span>播放前公告</span></label>
+                            </div>
+                            <label class="wide-field">
+                                <span>公告模板</span>
+                                <input name="play_announcement_template" placeholder="即将播放{artist}的{song}">
+                            </label>
+                            <div class="form-grid-2">
+                                <label>
+                                    <span>公告等待</span>
+                                    <select name="play_announcement_wait_mode">
+                                        <option value="auto">自动估算</option>
+                                        <option value="fixed">固定时长</option>
+                                        <option value="poll">设备状态</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>固定等待（秒）</span>
+                                    <input name="play_announcement_delay" type="number" min="0" max="10" step="0.5" value="3">
+                                </label>
                             </div>
                             <div class="inline-actions speaker-settings-actions">
                                 <button class="primary-button" type="submit">保存设置</button>
@@ -451,6 +471,7 @@
                             <div class="speaker-playlist-songs" data-role="speaker-playlist-songs">
                                 <div class="empty-state">请选择歌单。</div>
                             </div>
+                            <div data-role="speaker-playlist-songs-pagination"></div>
                         </section>
                     </section>
                     <div class="speaker-side-stack">

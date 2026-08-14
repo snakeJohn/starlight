@@ -10,6 +10,9 @@ import {
 } from '../shared/songloft_playlists.js';
 import { $, $$, durationLabel, escapeHtml, selectedDevicePayload, setState, state, toast } from '../state.js';
 import { renderArtwork, songArtist, songTitle, songloftPlaylistTitle } from '../music_modules/renderers.js';
+import { bindPagination, clampPage, musicPageSize, pageCount, renderPaginationInto } from '../music_modules/pagination.js';
+
+const speakerPlaylistSongsPageSize = musicPageSize('speakerPlaylistSongs');
 
 function playlistCount(playlist) {
     return songloftPlaylistCount(playlist);
@@ -271,17 +274,26 @@ function renderPlaylistList(playlists) {
         : '<div class="empty-state">暂无 Songloft 普通歌单。</div>';
 }
 
-function renderSongList(songs) {
+function renderSongList(songs, page = 1) {
     const list = $('[data-role="speaker-playlist-songs"]');
     if (!list) return;
+    const currentPage = clampPage(page, pageCount(songs.length, speakerPlaylistSongsPageSize));
+    const start = (currentPage - 1) * speakerPlaylistSongsPageSize;
+    const pageSongs = songs.slice(start, start + speakerPlaylistSongsPageSize);
     const currentIndex = String(state.speakerPlayerPlaylistId || '') === String(state.speakerPlaylistId || '')
         ? Number(state.speakerPlayerCurrentIndex)
         : -1;
-    list.innerHTML = songs.length
-        ? `<div class="list-scroll speaker-playlist-song-scroll"><div class="list-stack tight">${songs.map((song, index) => (
-            renderSongRow(song, index, index === currentIndex, { action: 'speaker-playlist-song' })
+    list.innerHTML = pageSongs.length
+        ? `<div class="list-scroll speaker-playlist-song-scroll"><div class="list-stack tight">${pageSongs.map((song, index) => (
+            renderSongRow(song, start + index, start + index === currentIndex, { action: 'speaker-playlist-song' })
         )).join('')}</div></div>`
         : '<div class="empty-state">这个歌单没有歌曲。</div>';
+    renderPaginationInto('speaker-playlist-songs-pagination', {
+        scope: 'speaker-playlist-songs',
+        page: currentPage,
+        total: songs.length,
+        pageSize: speakerPlaylistSongsPageSize,
+    });
 }
 
 export async function loadSpeakerPlaylistSongs(id = state.speakerPlaylistId) {
@@ -358,6 +370,9 @@ function selectedPlaylist() {
 
 export function bindSpeakerPlaylists({ refreshPlayerStatus } = {}) {
     bindSpeakerSongListDrawer({ refreshPlayerStatus });
+    bindPagination('speaker-playlist-songs-pagination', page => (
+        renderSongList(state.speakerPlaylistSongs || [], page)
+    ));
 
     $('[data-action="speaker-playlist-refresh"]')?.addEventListener('click', async event => {
         const btn = event.currentTarget;

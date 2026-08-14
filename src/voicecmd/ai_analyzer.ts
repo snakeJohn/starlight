@@ -33,6 +33,9 @@ const AI_SYSTEM_PROMPT = `你是一个智能音箱语音指令分析专家，擅
 | next | 切到下一首 | 无 |
 | previous | 切到上一首 | 无 |
 | stop | 停止播放 | 无 |
+| sleep_timer | 定时停止播放 | duration 或 songs_count |
+| cancel_sleep_timer | 取消定时停止 | 无 |
+| query_sleep_timer | 查询定时剩余 | 无 |
 | unknown | 无法识别意图 | 无 |
 
 ## params 参数说明
@@ -44,6 +47,8 @@ const AI_SYSTEM_PROMPT = `你是一个智能音箱语音指令分析专家，擅
 - **set_play_mode**: {"mode": "order|random|once|single|loop"}，其中 once=单曲播放一次，single=单曲循环
 - **set_volume**: {"volume": 数字, "direction": "up|down|absolute（方向，up/down 时 volume 可忽略）"}
 - **next/previous/stop**: {}
+- **sleep_timer**: {"duration": 分钟数} 或 {"songs_count": 曲目数}
+- **cancel_sleep_timer/query_sleep_timer**: {}
 
 ## 解析规则
 

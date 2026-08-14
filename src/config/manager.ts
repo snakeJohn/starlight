@@ -32,6 +32,14 @@ const STORAGE_KEY_AI_CONFIG = STORAGE_PREFIX + 'ai_config';
 /** 日志最大条数（环形缓冲） */
 const MAX_SCHEDULE_LOGS = 200;
 
+/** 只追加现有配置里完全没有的口令类型，不覆盖用户已改过的同类口令。 */
+export function mergeMissingVoiceCommands(existing: VoiceCommand[], defaults: VoiceCommand[]): VoiceCommand[] {
+  if (!existing.length) return defaults.slice();
+  const existingTypes = new Set(existing.map(cmd => cmd.type));
+  const missing = defaults.filter(cmd => !existingTypes.has(cmd.type));
+  return missing.length === 0 ? existing : [...existing, ...missing];
+}
+
 /** 默认插件配置 */
 function defaultPluginConfig(): PluginConfig {
   return {
@@ -55,6 +63,10 @@ function defaultPluginConfig(): PluginConfig {
     touchscreen_lyrics_enabled: false,
     interrupt_tts_hint_enabled: false,
     interrupt_tts_hint_text: '正在搜索，请稍候',
+    play_announcement_enabled: false,
+    play_announcement_template: '即将播放{artist}的{song}',
+    play_announcement_wait_mode: 'auto',
+    play_announcement_delay: 3,
     conversation_poll_interval: 1,
     conversation_poll_debug: false,
     smart_resume_timeout: 30,
@@ -285,6 +297,16 @@ export class ConfigManager {
   /** 获取语音口令配置 */
   async getVoiceCommands(): Promise<VoiceCommand[]> {
     return this.load<VoiceCommand[]>(STORAGE_KEY_VOICE_COMMANDS, []);
+  }
+
+  /** 把默认口令里尚未保存过的类型补进已有配置并落盘。 */
+  async ensureVoiceCommandDefaults(defaults: VoiceCommand[]): Promise<VoiceCommand[]> {
+    const existing = await this.getVoiceCommands();
+    const merged = mergeMissingVoiceCommands(existing, defaults);
+    if (merged !== existing) {
+      await this.saveVoiceCommands(merged);
+    }
+    return merged;
   }
 
   /** 保存语音口令配置 */

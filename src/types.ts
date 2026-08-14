@@ -107,6 +107,10 @@ export interface PluginConfig {
   touchscreen_lyrics_enabled?: boolean;
   interrupt_tts_hint_enabled: boolean;
   interrupt_tts_hint_text: string;
+  play_announcement_enabled: boolean;
+  play_announcement_template: string;
+  play_announcement_wait_mode: 'auto' | 'fixed' | 'poll';
+  play_announcement_delay: number;
   conversation_poll_interval: number;
   /** 对话轮询调试日志开关 */
   conversation_poll_debug?: boolean;
@@ -165,6 +169,7 @@ export interface TaskParams {
   playlist_name?: string;
   playlist_id?: number;
   song_name?: string;      // 用于 play_playlist_from 指定起始歌曲
+  song_id?: number;        // 用于 play_playlist_from 以 ID 指定起始歌曲（选择器产出）
   play_mode?: string;
   volume?: number;
   /** play_playlist 起始位置：beginning(默认) | random | resume */
@@ -194,7 +199,7 @@ export interface WebhookConfig {
 
 /** 语音口令配置 */
 export interface VoiceCommand {
-  type: string;            // "play_playlist" | "play_song" | "set_play_mode" | "set_volume" | "next" | "previous" | "stop"
+  type: string;            // "play_playlist" | "play_song" | "set_play_mode" | "set_volume" | "next" | "previous" | "stop" | sleep timer commands
   keywords: string[];
   param?: string;          // 附加参数（播放模式值、音量方向等）
   enabled: boolean;
@@ -224,6 +229,8 @@ export interface AIAnalysisResult {
     mode?: string;
     volume?: number;
     direction?: string;
+    duration?: number;
+    songs_count?: number;
   };
   /** AI 置信度 */
   confidence: 'high' | 'medium' | 'low';

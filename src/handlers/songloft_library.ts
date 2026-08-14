@@ -2,6 +2,7 @@ import type { Router } from '@songloft/plugin-sdk';
 import { runApi } from '../system/response';
 import { StarlightError, toStarlightError } from '../system/errors';
 import type { PlaylistManagerMap, PlayerSong } from '../player/manager';
+import { playlistSongQuery } from '../player/manager';
 import { isPlayMode } from '../player/modes';
 import type { PlayMode } from '../types';
 import { parseJsonBody, type JsonBodyRequest } from '../system/body';
@@ -497,7 +498,13 @@ export function registerSongloftLibraryHandlers(router: Router, options: Songlof
     runApi(() => importJobs.get(params.id)));
 
   router.get('/api/songloft/playlists/:id/songs', async (_req, params) =>
-    runApi(async () => normalizeList(await songloft.playlists.getSongs(requirePositiveInteger(params.id, 'playlist id')))));
+    runApi(async () => {
+      const playlistId = requirePositiveInteger(params.id, 'playlist id');
+      return normalizeList(await songloft.playlists.getSongs(
+        playlistId,
+        await playlistSongQuery(playlistId, { brief: true }),
+      ));
+    }));
 
   router.get('/api/songloft/local-songs', async () =>
     runApi(async () => {

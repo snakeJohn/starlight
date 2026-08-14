@@ -796,6 +796,72 @@ describe('BridgeService', () => {
     );
   });
 
+  it('can push a search result to the speaker without downloading first', async () => {
+    const downloader = { downloadSong: vi.fn(async () => ({ song_id: 42, status: 'ok' })) };
+    const { platforms, runtimes, minaService } = createService();
+    const serviceWithDownload = new BridgeService(
+      platforms,
+      runtimes,
+      minaService,
+      undefined,
+      downloader,
+    );
+
+    const played = await serviceWithDownload.playOnSpeaker('acc-1', 'dev-1', song, { download: false });
+
+    expect(downloader.downloadSong).not.toHaveBeenCalled();
+    expect(played.url).toBeTruthy();
+    expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', played.url);
+  });
+
+  it('does not import when stream-first speaker play cannot resolve the original hit', async () => {
+    const downloader = { downloadSong: vi.fn(async () => ({ song_id: 42, status: 'ok' })) };
+    const { platforms, runtimes, minaService } = createService({ url: null });
+    const serviceWithDownload = new BridgeService(
+      platforms,
+      runtimes,
+      minaService,
+      undefined,
+      downloader,
+    );
+
+    await expect(serviceWithDownload.playOnSpeaker('acc-1', 'dev-1', song, { download: false })).rejects.toMatchObject({
+      code: 'PLAY_URL_RESOLVE_FAILED',
+    });
+    expect(downloader.downloadSong).not.toHaveBeenCalled();
+  });
+
+  it('falls back to another platform stream without importing when the original hit has no URL', async () => {
+    const downloader = { downloadSong: vi.fn(async () => ({ song_id: 42, status: 'ok' })) };
+    const fallbackSong = {
+      ...song,
+      source_data: {
+        platform: 'kg',
+        quality: '320k',
+        songInfo: { source: 'kg', name: 'Song', singer: 'Singer', album: 'Album', duration: 200, hash: 'fallback' },
+      },
+    } satisfies SearchResultSong;
+    const provider = createProvider('kg', [fallbackSong]);
+    const runtimes = {
+      getMusicUrl: vi.fn(async (_platform: string, _quality: string, songInfo: { musicId?: string; hash?: string }) =>
+        songInfo.hash === 'fallback' ? 'https://audio.test/fallback.mp3' : null),
+    } as unknown as RuntimeManager;
+    const platforms = {
+      all: vi.fn(() => [{ id: provider.id, name: provider.name }]),
+      get: vi.fn((id: string) => id === provider.id ? provider : null),
+    } as unknown as PlatformRegistry;
+    const minaService = {
+      playURL: vi.fn(async () => true),
+    } as unknown as MinaService;
+    const service = new BridgeService(platforms, runtimes, minaService, undefined, downloader);
+
+    await expect(service.playOnSpeaker('acc-1', 'dev-1', song, { download: false })).resolves.toEqual({
+      url: 'https://audio.test/fallback.mp3',
+    });
+    expect(downloader.downloadSong).not.toHaveBeenCalled();
+    expect(minaService.playURL).toHaveBeenCalledWith('acc-1', 'dev-1', 'https://audio.test/fallback.mp3');
+  });
+
   it('loads speaker songs into a temporary single-song playlist when a playlist manager is available', async () => {
     const { service, minaService, playlistManager, playlistManagerMap } = createService({ usePlaylistManager: true });
 
@@ -1546,7 +1612,7 @@ describe('OnlineSearcher bridge integration', () => {
     await expect(searcher.searchAndPlay('Song', { title: 'Song' }, 'acc-1', 'dev-1', {} as MinaService)).resolves.toBe(true);
 
     expect(bridge.externalSearch).toHaveBeenCalledWith('Song');
-    expect(bridge.playOnSpeaker).toHaveBeenCalledWith('acc-1', 'dev-1', song);
+    expect(bridge.playOnSpeaker).toHaveBeenCalledWith('acc-1', 'dev-1', song, { download: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

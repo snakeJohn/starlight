@@ -87,10 +87,20 @@ export function configFromForm(form) {
         'scheduled_tasks_enabled',
         'force_mp3',
         'radio_force_mp3',
+        'play_announcement_enabled',
     ]) {
         if (hasField(form, name)) {
             payload[name] = boolValue(form, name);
         }
+    }
+    if (hasField(form, 'play_announcement_template')) {
+        payload.play_announcement_template = textValue(form, 'play_announcement_template');
+    }
+    if (hasField(form, 'play_announcement_wait_mode')) {
+        payload.play_announcement_wait_mode = textValue(form, 'play_announcement_wait_mode');
+    }
+    if (hasField(form, 'play_announcement_delay')) {
+        payload.play_announcement_delay = numberValue(form, 'play_announcement_delay') ?? 3;
     }
     return payload;
 }
@@ -121,6 +131,10 @@ export async function loadConfig() {
             'scheduled_tasks_enabled',
             'force_mp3',
             'radio_force_mp3',
+            'play_announcement_enabled',
+            'play_announcement_template',
+            'play_announcement_wait_mode',
+            'play_announcement_delay',
         ]) {
             setField(form, name, config[name]);
         }

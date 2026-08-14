@@ -12,6 +12,20 @@ import { fetchWithTimeout } from '../utils/fetch_timeout';
 import type { PlayState, PlayMode, PlayerStatus } from '../types';
 import { sourceDiagnostics } from '../diagnostics/source_logs';
 
+export async function playlistSongQuery(playlistId: number, extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  const query: Record<string, unknown> = { limit: 100000, ...extra };
+  try {
+    const playlist = await songloft.playlists.getById(playlistId) as { sort_by?: string; sort_order?: string } | null;
+    if (playlist?.sort_by) {
+      query.sort = playlist.sort_by;
+      query.order = playlist.sort_order || 'asc';
+    }
+  } catch (error) {
+    songloft.log.warn(`[PlaylistManager] getById for sort failed playlistId=${playlistId}: ${String(error)}`);
+  }
+  return query;
+}
+
 // ===== 歌曲类型 =====
 
 /** 歌曲信息（从宿主API返回） */
@@ -274,6 +288,7 @@ export class PlaylistManager {
   private randomPlayed: Set<number> = new Set(); // 随机模式已播放索引
   private voiceSuspendedAt: number = 0; // suspendForVoiceInteraction 首次调用时间戳
   private autoAdvance = true;
+  private onAdvanceHook?: () => boolean;
   /** 正在解析歌词的歌曲，避免来回切歌时重复发起 */
   private readonly lyricFillInFlight = new Set<PlayerSong>();
   /**
@@ -306,6 +321,11 @@ export class PlaylistManager {
   }
 
   // ===== 公开方法 =====
+
+  /** Registers a synchronous hook that can intercept the next automatic song advance. */
+  setOnAdvanceHook(hook: (() => boolean) | undefined): void {
+    this.onAdvanceHook = hook;
+  }
 
   /**
    * 播放歌单
@@ -1000,7 +1020,7 @@ export class PlaylistManager {
 
         // 使用 songloft.playlists.getSongs 桥接调用（与 Go WASM 版本的 hostFunctions.CallRouter 等价）
         // 这样不需要 hostBaseUrl 和 pluginToken，直接通过内部桥接访问数据库
-        const songs = normalizePlayerSongs(await songloft.playlists.getSongs(playlistId, { limit: 100000 }));
+        const songs = normalizePlayerSongs(await songloft.playlists.getSongs(playlistId, await playlistSongQuery(playlistId)));
         songloft.log.info(`[PlaylistManager] loadPlaylistSongs playlistId=${playlistId} returned=${songs.length}${retry ? ' (retry)' : ''}`);
         if (songs.length === 0) {
           return null;
@@ -1443,6 +1463,11 @@ export class PlaylistManager {
       });
     }
 
+    if (this.onAdvanceHook?.()) {
+      songloft.log.info('[PlaylistManager] Auto-next intercepted by advance hook');
+      return;
+    }
+
     if (this.playMode === 'once') {
       songloft.log.info('[PlaylistManager] Once mode complete, stopping');
       this.state = 'stopped';
@@ -1620,7 +1645,7 @@ export class PlaylistManagerMap {
             songs = result;
           }
         } else {
-          songs = normalizePlayerSongs(await songloft.playlists.getSongs(devCfg.playlist_id, { limit: 100000 }));
+          songs = normalizePlayerSongs(await songloft.playlists.getSongs(devCfg.playlist_id, await playlistSongQuery(devCfg.playlist_id)));
         }
       } catch (e) {
         songloft.log.warn('[PlaylistManagerMap] Failed to load songs via bridge: ' + String(e));

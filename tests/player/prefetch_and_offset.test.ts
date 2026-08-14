@@ -184,6 +184,28 @@ describe('auto-next timer offset', () => {
     expect(setTimeoutSpy.mock.calls.map((call) => call[1])).toContain(95_000);
     manager.cleanup();
   });
+
+  it('lets an advance hook stop at a song boundary without starting the next song', async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetch();
+      const { manager, minaService } = createManager({ prefetch_next_song: false });
+      const hook = vi.fn(() => {
+        void manager.stop();
+        return true;
+      });
+      manager.setOnAdvanceHook(hook);
+
+      await manager.playStandalone([hostSong(1, '第一首', 1), hostSong(2, '第二首', 1)], 0, 'order');
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      expect(hook).toHaveBeenCalledTimes(1);
+      expect(minaService.playURL).toHaveBeenCalledTimes(1);
+      expect(manager.getStatus()).toMatchObject({ state: 'stopped', current_index: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('on-demand lyric fill', () => {

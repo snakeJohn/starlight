@@ -4,6 +4,7 @@
 import type { CustomPlaylistService } from '../custom_playlists/service';
 import type { CustomPlaylist, CustomPlaylistSong } from '../custom_playlists/types';
 import { syntheticPlaylistId, syntheticSongId } from '../custom_playlists/synthetic';
+import { playlistSongQuery } from '../player/manager';
 import { AsyncLockRegistry } from '../system/locks';
 import { StarlightError } from '../system/errors';
 
@@ -315,7 +316,7 @@ export class IndexingManager {
       const plSongsStart = Date.now();
       for (const pl of newPlaylists) {
         try {
-          const plSongs = (await songloft.playlists.getSongs(pl.id, { limit: 100000 })) ?? [];
+          const plSongs = (await songloft.playlists.getSongs(pl.id, await playlistSongQuery(pl.id, { brief: true }))) ?? [];
           newPlaylistSongsCache.set(pl.id, plSongs.map(s => ({
             id: s.id,
             title: (s as any).title ?? '',
@@ -460,6 +461,22 @@ export class IndexingManager {
       return { index: matched[0].index, found: true };
     }
 
+    return { index: 0, found: false };
+  }
+
+  /**
+   * 按歌曲 ID 在指定歌单中查找索引位置
+   */
+  async findSongIndexInPlaylistById(playlistId: number, songId: number): Promise<{ index: number; found: boolean }> {
+    if (!this.indexReady || !songId) {
+      return { index: 0, found: false };
+    }
+
+    const songs = this.playlistSongsCache.get(playlistId) ?? [];
+    const idx = songs.findIndex(s => s.id === songId);
+    if (idx >= 0) {
+      return { index: idx, found: true };
+    }
     return { index: 0, found: false };
   }
 

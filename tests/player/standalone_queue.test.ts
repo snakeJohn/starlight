@@ -302,4 +302,23 @@ describe('PlaylistManager standalone queue', () => {
       current_song: expect.objectContaining({ title: '可播歌曲' }),
     });
   });
+
+  it('loads playlist songs using the host playlist sort preference', async () => {
+    const songloft = (globalThis as typeof globalThis & { songloft: any }).songloft;
+    songloft.playlists.getById = vi.fn(async () => ({ id: 301, sort_by: 'title', sort_order: 'desc' }));
+    songloft.playlists.getSongs = vi.fn(async () => ([
+      { id: 3012, type: 'remote', title: '第二首', artist: '歌手', duration: 181, url: 'https://audio.test/second.mp3' },
+      { id: 3011, type: 'remote', title: '第一首', artist: '歌手', duration: 180, url: 'https://audio.test/first.mp3' },
+    ]));
+    const { manager } = createManager();
+
+    await expect(manager.play(301, 0, 'order')).resolves.toBe(true);
+
+    expect(songloft.playlists.getById).toHaveBeenCalledWith(301);
+    expect(songloft.playlists.getSongs).toHaveBeenCalledWith(301, {
+      limit: 100000,
+      sort: 'title',
+      order: 'desc',
+    });
+  });
 });

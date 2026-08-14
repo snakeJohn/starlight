@@ -9,6 +9,7 @@ import type { ScheduledTask } from '../../src/types';
 function createExecutor() {
   const manager = {
     play: vi.fn(async () => true),
+    playPlaylistFromSong: vi.fn(async () => true),
   };
   const configManager = {
     getAccounts: vi.fn(async () => [{
@@ -33,6 +34,8 @@ function createExecutor() {
     isIndexReady: vi.fn(() => false),
     findPlaylistByName: vi.fn(),
     findSongInPlaylist: vi.fn(),
+    getPlaylistById: vi.fn(),
+    findSongIndexInPlaylistById: vi.fn(),
   };
   const monitor = {
     start: vi.fn(),
@@ -84,5 +87,23 @@ describe('TaskExecutor', () => {
     })]);
     expect(indexingManager.isIndexReady).not.toHaveBeenCalled();
     expect(manager.play).toHaveBeenCalledWith(42, 0, 'loop');
+  });
+
+  it('starts play_playlist_from at song_id without using the unsorted index cache', async () => {
+    const { executor, manager, indexingManager } = createExecutor();
+
+    const logs = await executor.execute(task({
+      action: 'play_playlist_from',
+      params: { playlist_id: 42, song_id: 99, play_mode: 'order' },
+    }));
+
+    expect(logs).toEqual([expect.objectContaining({
+      success: true,
+      message: expect.stringContaining('从「#99」开始'),
+    })]);
+    expect(indexingManager.isIndexReady).not.toHaveBeenCalled();
+    expect(indexingManager.findSongIndexInPlaylistById).not.toHaveBeenCalled();
+    expect(manager.playPlaylistFromSong).toHaveBeenCalledWith(42, 99, 'order');
+    expect(manager.play).not.toHaveBeenCalled();
   });
 });

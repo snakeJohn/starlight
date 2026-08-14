@@ -253,6 +253,129 @@ describe('VoiceEngine Songloft library matching', () => {
     expect(playlistManager.playStandalone).not.toHaveBeenCalled();
   });
 
+  it('does not play another local song by the same artist when the requested title is missing', async () => {
+    const songloft = testSongloft();
+    songloft.songs.list = vi.fn(async () => [
+      {
+        id: 11,
+        type: 'local',
+        title: '七里香',
+        artist: '周杰伦',
+        duration: 240,
+        url: '',
+      },
+      {
+        id: 12,
+        type: 'local',
+        title: '稻香',
+        artist: '周杰伦',
+        duration: 223,
+        url: '',
+      },
+    ]);
+    const resolvedSong = createSearchResultSong({ title: '青花瓷', artist: '周杰伦' });
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => resolvedSong),
+      playOnSpeaker: vi.fn(async () => ({ url: 'https://audio.test/qinghuaci.mp3' })),
+    };
+    const downloadService = {
+      downloadSong: vi.fn(async () => ({ song_id: 99, status: 'ok', path: 'downloads/qhc.mp3' })),
+    };
+    const { engine, playlistManager } = createEngine({
+      indexedSongLocation: null,
+      standaloneSong: null,
+      bridgeService,
+      downloadService,
+    });
+
+    await engine.handleMessage(message('播放歌曲周杰伦的青花瓷'));
+
+    expect(playlistManager.playStandalone).not.toHaveBeenCalledWith(
+      [expect.objectContaining({ title: '七里香' })],
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(playlistManager.playStandalone).not.toHaveBeenCalledWith(
+      [expect.objectContaining({ title: '稻香' })],
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(bridgeService.resolveSearchSong).toHaveBeenCalledWith('青花瓷', '周杰伦');
+    expect(bridgeService.playOnSpeaker).toHaveBeenCalledWith(
+      'acc-1',
+      'speaker-1',
+      expect.objectContaining({ title: '青花瓷', artist: '周杰伦' }),
+      { download: false },
+    );
+    expect(downloadService.downloadSong).not.toHaveBeenCalled();
+  });
+
+  it('plays the requested local title instead of another local song by the same artist', async () => {
+    const songloft = testSongloft();
+    songloft.songs.list = vi.fn(async () => [
+      {
+        id: 11,
+        type: 'local',
+        title: '七里香',
+        artist: '周杰伦',
+        duration: 240,
+        url: '',
+      },
+      {
+        id: 13,
+        type: 'local',
+        title: '青花瓷',
+        artist: '周杰伦',
+        duration: 239,
+        url: '',
+      },
+    ]);
+    const { engine, playlistManager } = createEngine({
+      indexedSongLocation: null,
+      standaloneSong: null,
+    });
+
+    await engine.handleMessage(message('播放歌曲周杰伦的青花瓷'));
+
+    expect(playlistManager.playStandalone).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 13,
+        title: '青花瓷',
+        artist: '周杰伦',
+      }),
+    ], 0, 'single', { autoAdvance: false });
+  });
+
+  it('streams a missing song to the speaker instead of downloading it first', async () => {
+    const resolvedSong = createSearchResultSong({ title: '伊斯坦堡', artist: '陈奕迅' });
+    const bridgeService = {
+      resolveSearchSong: vi.fn(async () => resolvedSong),
+      playOnSpeaker: vi.fn(async () => ({ url: 'https://audio.test/istanbul.mp3' })),
+    };
+    const downloadService = {
+      downloadSong: vi.fn(async () => ({ song_id: 990, status: 'ok', path: 'downloads/istanbul.mp3' })),
+    };
+    const { engine, playlistManager } = createEngine({
+      indexedSongLocation: null,
+      standaloneSong: null,
+      bridgeService,
+      downloadService,
+    });
+
+    await engine.handleMessage(message('播放歌曲伊斯坦堡'));
+
+    expect(bridgeService.playOnSpeaker).toHaveBeenCalledWith(
+      'acc-1',
+      'speaker-1',
+      expect.objectContaining({ title: '伊斯坦堡' }),
+      { download: false },
+    );
+    expect(downloadService.downloadSong).not.toHaveBeenCalled();
+    expect(playlistManager.playStandalone).not.toHaveBeenCalled();
+  });
+
   it('plays a local Songloft library song before a remote match with the same title', async () => {
     const songloft = testSongloft();
     songloft.songs.list = vi.fn(async () => [
@@ -316,7 +439,12 @@ describe('VoiceEngine Songloft library matching', () => {
     await engine.handleMessage(message('播放歌曲 深海'));
 
     expect(bridgeService.externalSearch).toHaveBeenCalledWith('深海');
-    expect(bridgeService.playOnSpeaker).toHaveBeenCalledWith('acc-1', 'speaker-1', expect.objectContaining({ title: '深海' }));
+    expect(bridgeService.playOnSpeaker).toHaveBeenCalledWith(
+      'acc-1',
+      'speaker-1',
+      expect.objectContaining({ title: '深海' }),
+      { download: false },
+    );
     expect(minaService.textToSpeech).not.toHaveBeenCalledWith('acc-1', 'speaker-1', '未找到歌曲：深海');
   });
 
@@ -499,8 +627,7 @@ describe('VoiceEngine Songloft library matching', () => {
 
     await engine.handleMessage(message('播放许嵩的宿敌'));
 
-    expect(bridgeService.resolveSearchSong).toHaveBeenNthCalledWith(1, '许嵩的宿敌', '');
-    expect(bridgeService.resolveSearchSong).toHaveBeenNthCalledWith(2, '宿敌', '许嵩');
+    expect(bridgeService.resolveSearchSong).toHaveBeenCalledWith('宿敌', '许嵩');
     expect(downloadService.downloadSong).toHaveBeenCalledWith(expect.objectContaining({
       source_data: expect.objectContaining({ quality: 'flac' }),
     }));

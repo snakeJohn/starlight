@@ -3,6 +3,7 @@ import { ConversationMonitor } from '../../src/conversation/monitor';
 import type { AccountManager } from '../../src/account/manager';
 import type { ConfigManager } from '../../src/config/manager';
 import type { AskMessage } from '../../src/types';
+import { setPollDebug } from '../../src/utils/debug';
 
 /** Drain a few microtasks so an in-flight start reaches an await gate. */
 async function flushMicrotasks(times = 8): Promise<void> {
@@ -20,8 +21,54 @@ function ask(timestamp_ms: number, question: string): AskMessage {
 
 describe('ConversationMonitor polling', () => {
   afterEach(() => {
+    setPollDebug(false);
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('hides high-frequency polling details unless conversation debug logging is enabled', async () => {
+    vi.useFakeTimers();
+    const history = ask(1_000, '历史口令');
+    const quietCurrent = ask(1_001, '静默轮询');
+    const debugCurrent = ask(1_002, '调试轮询');
+    const minaClient = {
+      getLatestAskFromXiaoai: vi.fn()
+        .mockResolvedValueOnce([history])
+        .mockResolvedValueOnce([history, quietCurrent])
+        .mockResolvedValueOnce([history, quietCurrent, debugCurrent]),
+    };
+    const accountManager = {
+      getAccounts: vi.fn(async () => [{ id: 'acc-1' }]),
+      getManagedDevices: vi.fn(async () => [{ device_id: 'speaker-1', device_name: '客厅音箱', hardware: 'LX06' }]),
+      getMinaClient: vi.fn(() => minaClient),
+    } as unknown as AccountManager;
+    const configManager = {
+      getConfig: vi.fn(async () => ({ conversation_poll_interval: 1 })),
+      getWebhooks: vi.fn(async () => []),
+    } as unknown as ConfigManager;
+    const monitor = new ConversationMonitor(accountManager, configManager);
+    const info = vi.spyOn(songloft.log, 'info');
+
+    setPollDebug(false);
+    await monitor.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    monitor.getMessages();
+
+    const quietLogs = info.mock.calls.map(args => args.join(' ')).join('\n');
+    expect(quietLogs).not.toContain('returned 2 messages');
+    expect(quietLogs).not.toContain('after filter: 1 new');
+    expect(quietLogs).not.toContain('getMessages total_stored');
+
+    info.mockClear();
+    setPollDebug(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    monitor.getMessages();
+
+    const debugLogs = info.mock.calls.map(args => args.join(' ')).join('\n');
+    expect(debugLogs).toContain('returned 3 messages');
+    expect(debugLogs).toContain('after filter: 1 new');
+    expect(debugLogs).toContain('getMessages total_stored');
+    monitor.stop();
   });
 
   it('uses the configured one-second polling interval and forwards new Xiaoai messages', async () => {

@@ -901,6 +901,88 @@ describe('speaker playlist browser', () => {
     expect(fetchMock).toHaveBeenCalledWith('api/songloft/playlists/12/songs', expect.any(Object));
   });
 
+  it('paginates large speaker playlists with stable source indices and resets on playlist change', async () => {
+    const playlistSelect = new FakeElement();
+    const playlistList = new FakeElement();
+    const playlistSongs = new FakeElement();
+    const playlistSummary = new FakeElement();
+    const pagination = new FakeElement();
+    const elements = new Map<string, FakeElement>([
+      ['[data-role="speaker-playlist-select"]', playlistSelect],
+      ['[data-role="speaker-playlist-list"]', playlistList],
+      ['[data-role="speaker-playlist-songs"]', playlistSongs],
+      ['[data-role="speaker-playlist-summary"]', playlistSummary],
+      ['[data-role="speaker-playlist-songs-pagination"]', pagination],
+    ]);
+    vi.stubGlobal('document', {
+      querySelector: vi.fn((selector: string) => elements.get(selector) ?? null),
+      querySelectorAll: vi.fn(() => []),
+      createElement: vi.fn(() => new FakeElement()),
+      body: new FakeElement(),
+    });
+    vi.stubGlobal('window', { setTimeout: vi.fn(), dispatchEvent: vi.fn() });
+    vi.stubGlobal('CustomEvent', vi.fn((type, init) => ({ type, ...init })));
+
+    const firstSongs = Array.from({ length: 45 }, (_, index) => ({
+      id: index + 1,
+      title: `甲歌 ${index + 1}`,
+      artist: '甲',
+      duration: 180,
+    }));
+    const secondSongs = Array.from({ length: 25 }, (_, index) => ({
+      id: index + 101,
+      title: `乙歌 ${index + 1}`,
+      artist: '乙',
+      duration: 180,
+    }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'api/songloft/playlists') {
+        return okResponse([
+          { id: 12, name: '甲歌单', type: 'normal', song_count: 45 },
+          { id: 13, name: '乙歌单', type: 'normal', song_count: 25 },
+        ]);
+      }
+      if (url.endsWith('/12/songs')) return okResponse(firstSongs);
+      if (url.endsWith('/13/songs')) return okResponse(secondSongs);
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    const { bindSpeakerPlaylists, loadSpeakerPlaylists } = await import('../../static/js/speaker_modules/playlists.js') as {
+      bindSpeakerPlaylists(options?: { refreshPlayerStatus?: () => Promise<unknown> }): void;
+      loadSpeakerPlaylists(): Promise<unknown[]>;
+    };
+    bindSpeakerPlaylists();
+    await loadSpeakerPlaylists();
+
+    expect(playlistSongs.innerHTML.match(/data-action="speaker-playlist-song"/g)).toHaveLength(20);
+    expect(playlistSongs.innerHTML).toContain('甲歌 20');
+    expect(playlistSongs.innerHTML).not.toContain('甲歌 21');
+
+    const pageRoot = new FakeElement();
+    pageRoot.dataset.page = '1';
+    pageRoot.dataset.totalPages = '3';
+    pageRoot.dataset.pagination = 'speaker-playlist-songs';
+    const nextButton = new FakeElement();
+    nextButton.dataset.pageAction = 'next';
+    nextButton.closest = vi.fn((selector: string) => (
+      selector === '[data-page-action]' ? nextButton : pageRoot
+    ));
+    await pagination.dispatch('click', nextButton);
+
+    expect(playlistSongs.innerHTML.match(/data-action="speaker-playlist-song"/g)).toHaveLength(20);
+    expect(playlistSongs.innerHTML).toContain('甲歌 21');
+    expect(playlistSongs.innerHTML).toContain('data-index="20"');
+    expect(playlistSongs.innerHTML).not.toContain('甲歌 1</span>');
+
+    playlistSelect.value = '13';
+    await playlistSelect.dispatch('change');
+
+    expect(playlistSongs.innerHTML).toContain('乙歌 1');
+    expect(playlistSongs.innerHTML).not.toContain('乙歌 21');
+    expect(pagination.innerHTML).toContain('data-page="1"');
+  });
+
   it('plays a clicked Songloft playlist song through the MIoT playlist endpoint', async () => {
     const playlistSongs = new FakeElement();
     const speakerPlayerMode = new FakeElement();

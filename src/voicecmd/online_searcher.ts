@@ -159,7 +159,7 @@ export class OnlineSearcher {
           return false;
         }
 
-        const played = await this.bridgeService.playOnSpeaker(accountId, deviceId, result);
+        const played = await this.bridgeService.playOnSpeaker(accountId, deviceId, result, { download: false });
         return Boolean(played.url);
       } catch (e) {
         songloft.log.warn('[OnlineSearcher] Bridge search/play error: ' + String(e));

@@ -9,6 +9,7 @@ import { ConfigManager } from '../config/manager';
 import type { ConversationMessage, AskMessage, WebhookConfig } from '../types';
 import { MinaHTTPClient } from '../mina/client';
 import { validateOutboundWebhookUrl } from '../utils/url_safety';
+import { isPollDebug } from '../utils/debug';
 
 // ===== 类型定义 =====
 
@@ -272,7 +273,9 @@ export class ConversationMonitor {
       result = result.slice(result.length - limit);
     }
 
-    songloft.log.info(`[ConversationMonitor] getMessages total_stored=${this.messages.length} returning=${result.length} (limit=${limit} sinceTs=${sinceTimestampMs})`);
+    if (isPollDebug()) {
+      songloft.log.info(`[ConversationMonitor] getMessages total_stored=${this.messages.length} returning=${result.length} (limit=${limit} sinceTs=${sinceTimestampMs})`);
+    }
     return result;
   }
 
@@ -496,9 +499,10 @@ export class ConversationMonitor {
     // 成功拿到结果（含空数组）即清除错误
     dm.lastError = '';
 
-    // Quiet when empty — default poll is 1s; do not emit info spam for zero results.
+    // Steady-state polls return the latest N history records every second.
+    // Only dump that payload when conversation_poll_debug is on.
     const msgCount = askMessages.length;
-    if (msgCount > 0) {
+    if (isPollDebug() && msgCount > 0) {
       const summary = askMessages.map(m => {
         const q = m.response?.answer?.[0]?.question ?? '?';
         return `[ts=${m.timestamp_ms} q="${q.substring(0, 50)}"]`;
@@ -549,9 +553,11 @@ export class ConversationMonitor {
     if (!this.isRunCurrent(runGeneration) || !dm.isRunning) {
       return;
     }
-    songloft.log.info(
-      `[ConversationMonitor] pollDevice device=${dm.deviceId} after filter: ${newMessages.length} new (lastTimestampMs=${dm.lastTimestampMs})`,
-    );
+    if (isPollDebug()) {
+      songloft.log.info(
+        `[ConversationMonitor] pollDevice device=${dm.deviceId} after filter: ${newMessages.length} new (lastTimestampMs=${dm.lastTimestampMs})`,
+      );
+    }
 
     // 更新最后时间戳
     dm.lastTimestampMs = maxTimestamp;

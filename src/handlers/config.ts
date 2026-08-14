@@ -117,6 +117,10 @@ export function registerConfigHandlers(
           touchscreen_lyrics_enabled: !!config.touchscreen_lyrics_enabled,
           interrupt_tts_hint_enabled: !!config.interrupt_tts_hint_enabled,
           interrupt_tts_hint_text: config.interrupt_tts_hint_text || '正在搜索，请稍候',
+          play_announcement_enabled: !!config.play_announcement_enabled,
+          play_announcement_template: config.play_announcement_template || '即将播放{artist}的{song}',
+          play_announcement_wait_mode: config.play_announcement_wait_mode || 'auto',
+          play_announcement_delay: config.play_announcement_delay ?? 3,
           conversation_poll_interval: config.conversation_poll_interval ?? 1,
           conversation_poll_debug: !!config.conversation_poll_debug,
           smart_resume_timeout: config.smart_resume_timeout ?? 30,
@@ -254,6 +258,24 @@ export function registerConfigHandlers(
         config.interrupt_tts_hint_text = typeof body.interrupt_tts_hint_text === 'string'
           ? body.interrupt_tts_hint_text.trim()
           : '正在搜索，请稍候';
+      }
+
+      if (body.play_announcement_enabled !== undefined) {
+        config.play_announcement_enabled = !!body.play_announcement_enabled;
+      }
+      if (body.play_announcement_template !== undefined) {
+        config.play_announcement_template = typeof body.play_announcement_template === 'string'
+          ? body.play_announcement_template.trim()
+          : '即将播放{artist}的{song}';
+      }
+      if (body.play_announcement_wait_mode !== undefined) {
+        const waitMode = String(body.play_announcement_wait_mode);
+        if (waitMode === 'auto' || waitMode === 'fixed' || waitMode === 'poll') {
+          config.play_announcement_wait_mode = waitMode;
+        }
+      }
+      if (body.play_announcement_delay !== undefined) {
+        config.play_announcement_delay = clampNumber(body.play_announcement_delay, 0, 10, 3);
       }
 
       // 更新 conversation_poll_interval（联动 Monitor 重启）

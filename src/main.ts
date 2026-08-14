@@ -173,13 +173,8 @@ async function onInit(): Promise<void> {
   const executor = new TaskExecutor(configManager, minaService, playlistManagerMap, indexingManager, conversationMonitor);
   scheduler = new Scheduler(configManager, executor);
 
-  // 如果配置中没有语音口令配置，写入默认配置
-  const existingCommands = await configManager.getVoiceCommands();
-  if (!existingCommands || existingCommands.length === 0) {
-    const defaultCommands = getDefaultVoiceCommands();
-    await configManager.saveVoiceCommands(defaultCommands);
-    songloft.log.info(`[VoiceCmd] Initialized ${defaultCommands.length} default voice commands`);
-  }
+  const voiceCommands = await configManager.ensureVoiceCommandDefaults(getDefaultVoiceCommands());
+  songloft.log.info(`[VoiceCmd] Voice commands ready: ${voiceCommands.length}`);
 
   // 注册所有路由
   const miotRouter = prefixRouter(router, '/api/miot');
