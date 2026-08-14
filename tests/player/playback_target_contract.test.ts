@@ -99,12 +99,19 @@ describe('PlaylistManager song-id playlist targeting', () => {
     const { manager } = createManager();
     let resolveFirst!: (songs: PlayerSong[]) => void;
     let resolveSecond!: (songs: PlayerSong[]) => void;
+    let secondLoadStarted!: () => void;
+    const secondLoad = new Promise<void>(resolve => { secondLoadStarted = resolve; });
+    songloft.playlists.getById = vi.fn(async () => ({ id: 0 }));
     songloft.playlists.getSongs = vi.fn()
       .mockImplementationOnce(() => new Promise<PlayerSong[]>(resolve => { resolveFirst = resolve; }))
-      .mockImplementationOnce(() => new Promise<PlayerSong[]>(resolve => { resolveSecond = resolve; })) as typeof songloft.playlists.getSongs;
+      .mockImplementationOnce(() => new Promise<PlayerSong[]>(resolve => {
+        resolveSecond = resolve;
+        secondLoadStarted();
+      })) as typeof songloft.playlists.getSongs;
 
     const firstPlay = manager.play(9, 0, 'order');
     const secondPlay = manager.play(10, 0, 'order');
+    await secondLoad;
 
     resolveSecond([song(20)]);
     await expect(secondPlay).resolves.toBe(true);
