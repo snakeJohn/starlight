@@ -58,7 +58,7 @@ describe('PlaylistManager song-id playlist targeting', () => {
 
   it('selects the requested song id from the freshly loaded playlist order', async () => {
     const { manager, minaService } = createManager();
-    songloft.playlists.getSongs = vi.fn(async () => [song(22), song(21), song(23)]) as typeof songloft.playlists.getSongs;
+    songloft.playlists.getSongs = vi.fn(async () => [song(22), song(21), song(23)]) as unknown as typeof songloft.playlists.getSongs;
 
     await expect(manager.playPlaylistFromSong(9, 21, 'order', 0)).resolves.toBe(true);
 
@@ -70,7 +70,7 @@ describe('PlaylistManager song-id playlist targeting', () => {
 
   it('falls back to the validated request index when song id is absent from the fresh list', async () => {
     const { manager } = createManager();
-    songloft.playlists.getSongs = vi.fn(async () => [song(10), song(11), song(12)]) as typeof songloft.playlists.getSongs;
+    songloft.playlists.getSongs = vi.fn(async () => [song(10), song(11), song(12)]) as unknown as typeof songloft.playlists.getSongs;
 
     await expect(manager.playPlaylistFromSong(9, 99, 'order', 2)).resolves.toBe(true);
 
@@ -83,7 +83,7 @@ describe('PlaylistManager song-id playlist targeting', () => {
       radio_force_mp3: true,
       server_host: 'http://songloft.test:18191',
     });
-    songloft.playlists.getSongs = vi.fn(async () => [song(7, 'radio')]) as typeof songloft.playlists.getSongs;
+    songloft.playlists.getSongs = vi.fn(async () => [song(7, 'radio')]) as unknown as typeof songloft.playlists.getSongs;
 
     await expect(manager.playPlaylistFromSong(9, 7)).resolves.toBe(true);
 
@@ -101,13 +101,13 @@ describe('PlaylistManager song-id playlist targeting', () => {
     let resolveSecond!: (songs: PlayerSong[]) => void;
     let secondLoadStarted!: () => void;
     const secondLoad = new Promise<void>(resolve => { secondLoadStarted = resolve; });
-    songloft.playlists.getById = vi.fn(async () => ({ id: 0 }));
+    songloft.playlists.getById = vi.fn(async () => ({ id: 0 })) as unknown as typeof songloft.playlists.getById;
     songloft.playlists.getSongs = vi.fn()
       .mockImplementationOnce(() => new Promise<PlayerSong[]>(resolve => { resolveFirst = resolve; }))
       .mockImplementationOnce(() => new Promise<PlayerSong[]>(resolve => {
         resolveSecond = resolve;
         secondLoadStarted();
-      })) as typeof songloft.playlists.getSongs;
+      })) as unknown as typeof songloft.playlists.getSongs;
 
     const firstPlay = manager.play(9, 0, 'order');
     const secondPlay = manager.play(10, 0, 'order');
