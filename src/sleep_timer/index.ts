@@ -18,6 +18,7 @@ export class SleepTimer {
   private remaining = 0;
   private total = 0;
   private startedAt = 0;
+  private generation = 0;
 
   constructor(private readonly onExpire: ExpireCallback) {}
 
@@ -30,7 +31,8 @@ export class SleepTimer {
     this.total = minutes * 60_000;
     this.remaining = this.total;
     this.startedAt = Date.now();
-    this.timeout = setTimeout(() => this.expire(), this.total);
+    const generation = ++this.generation;
+    this.timeout = setTimeout(() => this.expire(generation), this.total);
   }
 
   setSongs(count: number): void {
@@ -54,6 +56,7 @@ export class SleepTimer {
   }
 
   cancel(): void {
+    this.generation += 1;
     if (this.timeout !== null) {
       clearTimeout(this.timeout);
       this.timeout = null;
@@ -84,7 +87,8 @@ export class SleepTimer {
     return this.active;
   }
 
-  private expire(): void {
+  private expire(generation?: number): void {
+    if (generation !== undefined && generation !== this.generation) return;
     if (!this.active) return;
     this.cancel();
     try {
