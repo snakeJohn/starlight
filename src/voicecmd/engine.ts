@@ -1352,6 +1352,9 @@ export class VoiceEngine {
       announcementAttempted = true;
       await this.announceBeforePlay(title, songArtist, accountId, deviceId);
     };
+    const allowAnnouncementRetry = (): void => {
+      announcementAttempted = false;
+    };
 
     const songloftSong = await this.findSongloftLibrarySong(songName, artist);
     if (songloftSong) {
@@ -1405,7 +1408,9 @@ export class VoiceEngine {
             songloft.log.info('[VoiceEngine] Played resolved song on speaker without download: ' + resolvedSong.title + ' - ' + resolvedSong.artist);
             return;
           }
+          allowAnnouncementRetry();
         } catch (error) {
+          allowAnnouncementRetry();
           songloft.log.warn(`[VoiceEngine] Online speaker play failed, will try download: ${error instanceof Error ? error.message : String(error)}`);
         }
       }

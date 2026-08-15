@@ -262,4 +262,24 @@ describe('VoiceEngine play announcements', () => {
     expect(playlistManager.play).toHaveBeenCalledTimes(2);
     expect(minaService.textToSpeech).toHaveBeenCalledTimes(1);
   });
+
+  it('announces the download fallback after stream-first playback fails', async () => {
+    const { engine, minaService, playlistManager } = createEngine({ standalone: null });
+    const resolved = { id: 'stream-id', title: '流媒体歌曲', artist: '流媒体歌手', source: 'kw' };
+    const downloaded = { id: 31, title: '下载歌曲', artist: '本地歌手', url: 'https://audio.test/local.mp3' };
+    const internal = engine as any;
+    internal.bridgeService = {
+      resolveSearchSong: vi.fn(async () => resolved),
+      playOnSpeaker: vi.fn(async () => ({})),
+    };
+    internal.downloadService = { downloadSong: vi.fn(async () => ({ song_id: 31 })) };
+    internal.loadSongloftLibrarySongById = vi.fn(async () => downloaded);
+    internal.downloadResolvedSongToLibrary = vi.fn(async () => downloaded);
+
+    await engine.handleMessage(message('播放歌曲 流媒体歌曲'));
+
+    expect(minaService.textToSpeech).toHaveBeenNthCalledWith(1, 'acc-1', 'speaker-1', '即将播放流媒体歌手的流媒体歌曲');
+    expect(minaService.textToSpeech).toHaveBeenNthCalledWith(2, 'acc-1', 'speaker-1', '即将播放本地歌手的下载歌曲');
+    expect(playlistManager.playStandalone).toHaveBeenCalledWith([downloaded], 0, 'single', { autoAdvance: false });
+  });
 });

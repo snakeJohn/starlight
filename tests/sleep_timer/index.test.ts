@@ -63,6 +63,33 @@ describe('SleepTimer', () => {
     vi.useRealTimers();
   });
 
+  it('ignores an already queued callback from a timer that was reset', () => {
+    const expire = vi.fn();
+    const callbacks: Array<() => void> = [];
+    const originalSetTimeout = globalThis.setTimeout;
+    const originalClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = ((callback: () => void) => {
+      callbacks.push(callback);
+      return callbacks.length as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = vi.fn() as unknown as typeof clearTimeout;
+
+    try {
+      const timer = new SleepTimer(expire);
+      timer.setTime(1);
+      const staleCallback = callbacks[0];
+      timer.setTime(2);
+
+      staleCallback();
+
+      expect(expire).not.toHaveBeenCalled();
+      expect(timer.getState()).toMatchObject({ active: true, total: 120_000 });
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+      globalThis.clearTimeout = originalClearTimeout;
+    }
+  });
+
   it('does not activate timers with non-positive values', () => {
     const timer = new SleepTimer(vi.fn());
     timer.setTime(0);
