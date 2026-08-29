@@ -93,5 +93,31 @@ describe('IndexingManager custom playlist fallback', () => {
 
     expect(getSongs).toHaveBeenCalledWith(12, { limit: 100000, brief: true, sort: 'title', order: 'desc' });
     await expect(manager.findSongIndexInPlaylistById(12, 7)).resolves.toEqual({ index: 0, found: true });
+    await expect(manager.findSongInPlaylist(12, '晚风')).resolves.toEqual({ index: 0, found: true, songId: 7 });
+  });
+
+  it('refreshes once when a playlist name is missing from the index', async () => {
+    const list = vi.fn(async () => [{ id: 21, name: '新歌单', song_count: 1 }]);
+    (songloft.playlists as unknown as Record<string, unknown>).list = list;
+    (songloft.playlists as unknown as Record<string, unknown>).getSongs = vi.fn(async () => [
+      { id: 7, title: '晚风', artist: '伍佰' },
+    ]);
+    const manager = new IndexingManager();
+
+    await expect(manager.findPlaylistByNameWithRefresh('新歌单')).resolves.toMatchObject({ id: 21, name: '新歌单' });
+    expect(list).toHaveBeenCalledTimes(1);
+
+    // 同一冷却窗口内的再次 miss 不应反复重建索引。
+    await expect(manager.findPlaylistByNameWithRefresh('不存在')).resolves.toBeNull();
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes once when a playlist id is missing from the index', async () => {
+    const list = vi.fn(async () => [{ id: 31, name: '按 ID 歌单', song_count: 0 }]);
+    (songloft.playlists as unknown as Record<string, unknown>).list = list;
+    const manager = new IndexingManager();
+
+    await expect(manager.getPlaylistByIdWithRefresh(31)).resolves.toMatchObject({ id: 31, name: '按 ID 歌单' });
+    expect(list).toHaveBeenCalledTimes(1);
   });
 });

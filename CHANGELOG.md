@@ -10,6 +10,9 @@
 
 ### Fixed
 
+- Synced the latest MIoT playback updates: host song IDs are preserved when starting a playlist from a song, playlist-name/ID misses refresh the index on demand, and standalone queues no longer send playlist ID `0` to the host playlist API.
+- The player toggle now pauses or resumes audio started by the host or another plugin even when Starlight has no local playlist loaded.
+- Fixed stale test doubles in the download service suite so the project type-checks cleanly.
 - Plugin `onDeinit` now disables the voice engine and drops live LX sync WebSocket peers so hot-reload does not leave orphan connections.
 - Conversation monitor no longer emits per-second `info` logs when devices return zero messages.
 - Voice “播放歌单” no longer fails silently on Music API devices (LX05/LX06/L15A 等): `player_play_music` now falls back to `player_play_url`, playlist load retries once, stale playlist IDs re-match after index refresh, and failures speak TTS feedback.
@@ -31,4 +34,5 @@
 
 ### Tests
 
+- Added regression coverage for host song-ID playback, on-demand playlist index refresh, global-vs-playlist fuzzy matching, standalone queue normalization, and external playback pause/resume.
 - Added regression coverage for unsupported seek behavior, status capability flags, frontend progress seek gating, and the speaker playlist count badge.

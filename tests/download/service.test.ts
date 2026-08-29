@@ -200,8 +200,8 @@ describe('DownloadService', () => {
     const songsApi = songloft.songs as typeof songloft.songs & { list: ReturnType<typeof vi.fn>; download: ReturnType<typeof vi.fn> };
     songsApi.list = vi.fn(async () => ([
       { id: 88, title: ' Song ', artist: 'SINGER', album: 'Album', duration: 180, type: 'local' as const, file_path: 'library/song.flac' },
-    ]));
-    songsApi.download = vi.fn();
+    ])) as typeof songsApi.list;
+    songsApi.download = vi.fn() as typeof songsApi.download;
     const service = new DownloadService(runtime, createPlatforms([]));
 
     await expect(service.downloadSong(song)).resolves.toEqual({
@@ -220,7 +220,7 @@ describe('DownloadService', () => {
     } as unknown as RuntimeManager;
     installRemoteImport(503);
     const songsApi = songloft.songs as typeof songloft.songs & { download: ReturnType<typeof vi.fn> };
-    songsApi.download = vi.fn(async () => ({ status: 'ok' }));
+    songsApi.download = vi.fn(async () => ({ status: 'ok' })) as typeof songsApi.download;
     const service = new DownloadService(runtime, createPlatforms([]));
     const highResolutionSong = {
       ...song,

@@ -7,7 +7,7 @@
 import { ConfigManager } from '../config/manager';
 import { MinaService } from '../service/service';
 import { PlaylistManagerMap } from '../player/manager';
-import { IndexingManager } from '../indexing/manager';
+import { IndexingManager, type IndexedPlaylist } from '../indexing/manager';
 import { ConversationMonitor } from '../conversation/monitor';
 import { normalizePlayMode } from '../player/modes';
 import type { ScheduledTask, TaskLog, TaskTarget, TaskParams, DeviceConfig } from '../types';
@@ -288,9 +288,18 @@ export class TaskExecutor {
       throw new Error('歌曲索引尚未就绪，请确保已刷新索引');
     }
 
-    const playlist = params.playlist_name
-      ? this.indexingManager.findPlaylistByName(params.playlist_name)
-      : this.indexingManager.getPlaylistById(params.playlist_id!);
+    let playlist: IndexedPlaylist | null;
+    if (params.playlist_name) {
+      const lookup = this.indexingManager.findPlaylistByNameWithRefresh;
+      playlist = typeof lookup === 'function'
+        ? await lookup.call(this.indexingManager, params.playlist_name)
+        : this.indexingManager.findPlaylistByName(params.playlist_name);
+    } else {
+      const lookup = this.indexingManager.getPlaylistByIdWithRefresh;
+      playlist = typeof lookup === 'function'
+        ? await lookup.call(this.indexingManager, params.playlist_id!)
+        : this.indexingManager.getPlaylistById(params.playlist_id!);
+    }
     if (!playlist) {
       throw new Error(`未找到匹配的歌单: ${params.playlist_name || params.playlist_id}`);
     }
@@ -304,27 +313,34 @@ export class TaskExecutor {
     const playMode = normalizePlayMode(params.play_mode || devCfg?.play_mode, 'order');
 
     // 计算给定歌单 ID 下的起始位置（歌单 ID 失效重试时会用新 ID 再算一次）
-    const resolveStart = async (pid: number): Promise<{ startIndex: number; randomStart: boolean }> => {
+    const resolveStart = async (pid: number): Promise<{ startIndex: number; randomStart: boolean; songId?: number }> => {
       if (withSong) {
-        let idx = 0;
         if (params.song_name) {
           const result = await this.indexingManager.findSongInPlaylist(pid, params.song_name);
           if (result.found) {
-            idx = result.index;
-            songloft.log.info(`[TaskExecutor] 匹配到歌曲 song_name=${params.song_name} index=${idx}`);
+            songloft.log.info(`[TaskExecutor] 匹配到歌曲 song_name=${params.song_name} index=${result.index} songId=${result.songId}`);
+            return {
+              startIndex: result.index,
+              randomStart: false,
+              ...(typeof result.songId === 'number' && result.songId > 0 ? { songId: result.songId } : {}),
+            };
           } else {
             songloft.log.warn(`[TaskExecutor] 未找到匹配的歌曲，从第一首开始 song_name=${params.song_name}`);
           }
         } else if (params.song_id) {
           const result = await this.indexingManager.findSongIndexInPlaylistById(pid, params.song_id);
           if (result.found) {
-            idx = result.index;
-            songloft.log.info(`[TaskExecutor] 匹配到歌曲 song_id=${params.song_id} index=${idx}`);
+            songloft.log.info(`[TaskExecutor] 匹配到歌曲 song_id=${params.song_id} index=${result.index}`);
           } else {
             songloft.log.warn(`[TaskExecutor] 未找到匹配的歌曲，从第一首开始 song_id=${params.song_id}`);
           }
+          return {
+            startIndex: result.found ? result.index : 0,
+            randomStart: false,
+            ...(params.song_id > 0 ? { songId: params.song_id } : {}),
+          };
         }
-        return { startIndex: idx, randomStart: false };
+        return { startIndex: 0, randomStart: false };
       }
 
       switch (params.start_position) {
@@ -351,18 +367,25 @@ export class TaskExecutor {
 
     const pm = await this.playlistManagerMap.getOrCreate(target.accountId, target.deviceId);
     const start = await resolveStart(playlist.id);
-    const ok = await pm.play(playlist.id, start.startIndex, playMode, { randomStart: start.randomStart });
+    const ok = start.songId
+      ? await pm.playPlaylistFromSong(playlist.id, start.songId, playMode, start.startIndex)
+      : await pm.play(playlist.id, start.startIndex, playMode, { randomStart: start.randomStart });
     if (!ok) {
       // 歌单 ID 已失效（扫描后 auto-create 歌单 ID 变化）：刷新索引后重试一次
       if (pm.isLastPlayNotFound()) {
         songloft.log.warn(`[TaskExecutor] 歌单 ID ${playlist.id} 已失效，刷新索引后重试`);
         await this.indexingManager.refresh();
-        const newPlaylist = this.indexingManager.findPlaylistByName(playlist.name);
+        const lookup = this.indexingManager.findPlaylistByNameWithRefresh;
+        const newPlaylist = typeof lookup === 'function'
+          ? await lookup.call(this.indexingManager, playlist.name)
+          : this.indexingManager.findPlaylistByName(playlist.name);
         if (!newPlaylist) {
           throw new Error(`刷新索引后仍未找到歌单: ${playlist.name}`);
         }
         const retryStart = await resolveStart(newPlaylist.id);
-        const retryOk = await pm.play(newPlaylist.id, retryStart.startIndex, playMode, { randomStart: retryStart.randomStart });
+        const retryOk = retryStart.songId
+          ? await pm.playPlaylistFromSong(newPlaylist.id, retryStart.songId, playMode, retryStart.startIndex)
+          : await pm.play(newPlaylist.id, retryStart.startIndex, playMode, { randomStart: retryStart.randomStart });
         if (!retryOk) {
           throw new Error(`播放歌单失败(重试): ${newPlaylist.name}`);
         }

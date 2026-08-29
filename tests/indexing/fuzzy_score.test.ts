@@ -7,7 +7,10 @@ import { IndexingManager } from '../../src/indexing/manager';
  *   2. 按「标题+歌手」缓存评分 —— 同一首歌常同时存在于多个歌单
  * 两者都必须是**等价**优化：只能变快，不能改变匹配结果。
  */
-function managerWith(playlists: Array<{ id: number; name: string; songs: Array<{ id: number; title: string; artist: string }> }>) {
+function managerWith(
+  playlists: Array<{ id: number; name: string; songs: Array<{ id: number; title: string; artist: string }> }>,
+  globalSongs = playlists.flatMap((p) => p.songs),
+) {
   const manager = new IndexingManager();
   const internals = manager as unknown as {
     playlists: Array<{ id: number; name: string; nameLower: string; songCount: number }>;
@@ -19,7 +22,7 @@ function managerWith(playlists: Array<{ id: number; name: string; songs: Array<{
   internals.playlists = playlists.map((p) => ({
     id: p.id, name: p.name, nameLower: p.name.toLowerCase(), songCount: p.songs.length,
   }));
-  internals.songs = playlists.flatMap((p) => p.songs).map((s) => ({
+  internals.songs = globalSongs.map((s) => ({
     id: s.id, title: s.title, artist: s.artist, album: '',
     titleLower: s.title.toLowerCase(), artistLower: s.artist.toLowerCase(),
   }));
@@ -89,5 +92,18 @@ describe('fuzzy match stays correct after the short-circuit and memoisation', ()
     const b = await multi.findSongByName('共享曲目');
     expect(a?.songTitle).toBe('共享曲目');
     expect(b?.songTitle).toBe('共享曲目');
+  });
+
+  it('defers to a much better global exact match instead of a lower playlist match', async () => {
+    const playlistSong = { id: 51, title: '夜曲 - 周杰伦', artist: '周杰伦' };
+    const standaloneSong = { id: 52, title: '夜曲', artist: '周杰伦' };
+    const manager = managerWith(
+      [{ id: 1, name: '流行', songs: [playlistSong] }],
+      [standaloneSong, playlistSong],
+    );
+
+    // 全局精确命中不在歌单时返回 null，由调用方走独立歌曲路径，
+    // 不应被歌单内较低分的包含匹配抢走。
+    await expect(manager.findSongByName('夜曲')).resolves.toBeNull();
   });
 });

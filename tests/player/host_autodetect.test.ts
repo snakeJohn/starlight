@@ -135,6 +135,66 @@ describe('playlist host auto-detection', () => {
     expect(manager.play).not.toHaveBeenCalled();
   });
 
+  it('pauses externally playing audio even when the local manager has no playlist', async () => {
+    const router = createRouter();
+    const manager = {
+      isPlaying: vi.fn(() => false),
+      hasPlaylist: vi.fn(() => false),
+      getStatus: vi.fn(() => ({ position: 37 })),
+      pause: vi.fn(async () => true),
+    };
+    const managerMap = {
+      getOrCreate: vi.fn(async () => manager),
+    } as unknown as PlaylistManagerMap;
+    const minaService = {
+      getPlayerStatus: vi.fn(async () => ({ data: { info: JSON.stringify({ status: 1 }) } })),
+    } as unknown as MinaService;
+    registerPlaylistHandlers(router, managerMap, minaService);
+
+    const response = await router.handle(request('POST', '/player/toggle', {
+      account_id: 'acc-1',
+      device_id: 'dev-1',
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response)).toMatchObject({
+      success: true,
+      data: { message: 'playlist paused', state: 'paused' },
+    });
+    expect(manager.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes externally paused audio when the local manager has no playlist', async () => {
+    const router = createRouter();
+    const manager = {
+      isPlaying: vi.fn(() => false),
+      hasPlaylist: vi.fn(() => false),
+      getStatus: vi.fn(() => ({ position: 37 })),
+      pause: vi.fn(async () => true),
+    };
+    const managerMap = {
+      getOrCreate: vi.fn(async () => manager),
+    } as unknown as PlaylistManagerMap;
+    const minaService = {
+      getPlayerStatus: vi.fn(async () => ({ data: { info: JSON.stringify({ status: 2 }) } })),
+      resumePlay: vi.fn(async () => true),
+    } as unknown as MinaService;
+    registerPlaylistHandlers(router, managerMap, minaService);
+
+    const response = await router.handle(request('POST', '/player/toggle', {
+      account_id: 'acc-2',
+      device_id: 'dev-2',
+    }));
+
+    expect(response.statusCode).toBe(200);
+    expect(parseResponseBody(response)).toMatchObject({
+      success: true,
+      data: { message: 'playlist resumed', state: 'playing' },
+    });
+    expect(minaService.resumePlay).toHaveBeenCalledWith('acc-2', 'dev-2');
+    expect(manager.pause).not.toHaveBeenCalled();
+  });
+
   it('reports unsupported seek without updating device position cache', async () => {
     const router = createRouter();
     const manager = {

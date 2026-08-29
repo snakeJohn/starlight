@@ -367,6 +367,24 @@ describe('speaker player module', () => {
     expect(globalToggleButton.textContent).toBe('');
   });
 
+  it('does not treat standalone queue playlist_id 0 as a host playlist', async () => {
+    installPlayerRenderDom();
+    const { state } = await import('../../static/js/state.js') as {
+      state: { speakerPlayerPlaylistId: string };
+    };
+    state.speakerPlayerPlaylistId = '12';
+
+    const { renderPlayerStatus } = await import('../../static/js/speaker_modules/player.js') as SpeakerPlayerModule;
+    renderPlayerStatus({
+      state: 'playing',
+      is_playing: true,
+      playlist_id: 0,
+      current_song: { title: '独立队列歌曲', artist: '测试歌手' },
+    });
+
+    expect(state.speakerPlayerPlaylistId).toBe('');
+  });
+
   it('keeps the real progress after toggle instead of zeroing it from the toggle reply', async () => {
     const { elements } = installPlayerRenderDom();
 

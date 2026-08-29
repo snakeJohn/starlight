@@ -1274,7 +1274,10 @@ export class VoiceEngine {
     }
 
     // 模糊匹配歌单
-    const matchedPlaylist = this.indexingManager.findPlaylistByName(playlistName);
+    const playlistLookup = this.indexingManager.findPlaylistByNameWithRefresh;
+    const matchedPlaylist = typeof playlistLookup === 'function'
+      ? await playlistLookup.call(this.indexingManager, playlistName)
+      : this.indexingManager.findPlaylistByName(playlistName);
     if (!matchedPlaylist) {
       songloft.log.warn(`[VoiceEngine] Playlist not found: ${playlistName}`);
       await this.minaService.textToSpeech(accountId, deviceId, `未找到歌单：${playlistName}`);
@@ -1297,7 +1300,10 @@ export class VoiceEngine {
     if (pm.isLastPlayNotFound()) {
       songloft.log.warn(`[VoiceEngine] Stale playlist ID ${matchedPlaylist.id} in playPlaylist, refreshing index and retrying`);
       await this.indexingManager.refresh();
-      const newPlaylist = this.indexingManager.findPlaylistByName(matchedPlaylist.name);
+      const retryLookup = this.indexingManager.findPlaylistByNameWithRefresh;
+      const newPlaylist = typeof retryLookup === 'function'
+        ? await retryLookup.call(this.indexingManager, matchedPlaylist.name)
+        : this.indexingManager.findPlaylistByName(matchedPlaylist.name);
       if (newPlaylist) {
         songloft.log.info(`[VoiceEngine] Re-matched playlist after refresh: ${newPlaylist.name} (id=${newPlaylist.id})`);
         const retryOk = await pm.play(newPlaylist.id, 0, playMode);
@@ -1464,7 +1470,9 @@ export class VoiceEngine {
 
     // 播放歌单，从匹配到的歌曲索引开始
     await announceOnce(loc.songTitle, loc.artist);
-    const ok = await pm.play(loc.playlistId, loc.songIndex, playMode);
+    const ok = loc.songId && loc.songId > 0
+      ? await pm.playPlaylistFromSong(loc.playlistId, loc.songId, playMode, loc.songIndex)
+      : await pm.play(loc.playlistId, loc.songIndex, playMode);
     if (ok) {
       songloft.log.info(`[VoiceEngine] Play song success: ${loc.songTitle} playlist="${loc.playlistName}" index=${loc.songIndex} mode=${playMode}`);
       return;
@@ -1475,7 +1483,9 @@ export class VoiceEngine {
       await this.indexingManager.refresh();
       const newLoc = await this.indexingManager.findSongByName(songName);
       if (newLoc) {
-        const retryOk = await pm.play(newLoc.playlistId, newLoc.songIndex, playMode);
+        const retryOk = newLoc.songId && newLoc.songId > 0
+          ? await pm.playPlaylistFromSong(newLoc.playlistId, newLoc.songId, playMode, newLoc.songIndex)
+          : await pm.play(newLoc.playlistId, newLoc.songIndex, playMode);
         if (retryOk) {
           songloft.log.info(`[VoiceEngine] Retry play song success: ${newLoc.songTitle}`);
           return;

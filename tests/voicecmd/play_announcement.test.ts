@@ -43,6 +43,7 @@ function createEngine(options: {
     songIndex: number;
     songTitle: string;
     artist: string;
+    songId?: number;
   } | null>;
 } = {}) {
   const commands: VoiceCommand[] = [
@@ -73,6 +74,7 @@ function createEngine(options: {
     hasPlaylist: vi.fn(() => false),
     prepareForNewPlayback: vi.fn(),
     playStandalone: vi.fn(async () => true),
+    playPlaylistFromSong: vi.fn(async () => true),
     play: vi.fn(async () => true),
     isLastPlayNotFound: vi.fn(() => false),
   };
@@ -261,6 +263,26 @@ describe('VoiceEngine play announcements', () => {
 
     expect(playlistManager.play).toHaveBeenCalledTimes(2);
     expect(minaService.textToSpeech).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the host song id for indexed voice playback', async () => {
+    const location = {
+      playlistId: 10,
+      playlistName: '夜间歌单',
+      songIndex: 2,
+      songId: 31,
+      songTitle: '父亲',
+      artist: '筷子兄弟',
+    };
+    const { engine, playlistManager } = createEngine({
+      standalone: null,
+      indexedLocations: [location],
+    });
+
+    await engine.handleMessage(message('播放歌曲 父亲'));
+
+    expect(playlistManager.playPlaylistFromSong).toHaveBeenCalledWith(10, 31, 'order', 2);
+    expect(playlistManager.play).not.toHaveBeenCalled();
   });
 
   it('announces the download fallback after stream-first playback fails', async () => {

@@ -21,6 +21,7 @@ function createExecutor() {
       }],
     }]),
     getConfig: vi.fn(async () => ({ conversation_monitor_enabled: false })),
+    getDevices: vi.fn(async () => []),
     saveConfig: vi.fn(async () => {}),
   } as unknown as ConfigManager;
   const minaService = {
@@ -33,8 +34,10 @@ function createExecutor() {
   const indexingManager = {
     isIndexReady: vi.fn(() => false),
     findPlaylistByName: vi.fn(),
+    findPlaylistByNameWithRefresh: vi.fn(),
     findSongInPlaylist: vi.fn(),
     getPlaylistById: vi.fn(),
+    getPlaylistByIdWithRefresh: vi.fn(),
     findSongIndexInPlaylistById: vi.fn(),
   };
   const monitor = {
@@ -104,6 +107,27 @@ describe('TaskExecutor', () => {
     expect(indexingManager.isIndexReady).not.toHaveBeenCalled();
     expect(indexingManager.findSongIndexInPlaylistById).not.toHaveBeenCalled();
     expect(manager.playPlaylistFromSong).toHaveBeenCalledWith(42, 99, 'order');
+    expect(manager.play).not.toHaveBeenCalled();
+  });
+
+  it('uses the host song id when scheduling from a song name', async () => {
+    const { executor, manager, indexingManager } = createExecutor();
+    indexingManager.isIndexReady.mockReturnValue(true);
+    indexingManager.findPlaylistByNameWithRefresh.mockResolvedValue({
+      id: 42,
+      name: '夜间歌单',
+      nameLower: '夜间歌单',
+      songCount: 4,
+    });
+    indexingManager.findSongInPlaylist.mockResolvedValue({ index: 3, found: true, songId: 99 });
+
+    const logs = await executor.execute(task({
+      action: 'play_playlist_from',
+      params: { playlist_name: '夜间歌单', song_name: '目标歌曲', play_mode: 'order' },
+    }));
+
+    expect(logs).toEqual([expect.objectContaining({ success: true })]);
+    expect(manager.playPlaylistFromSong).toHaveBeenCalledWith(42, 99, 'order', 3);
     expect(manager.play).not.toHaveBeenCalled();
   });
 });

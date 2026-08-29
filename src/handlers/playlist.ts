@@ -41,6 +41,40 @@ export function getDeviceStatusCache(accountId: string, deviceId: string): Devic
   return deviceStatusCache.get(accountId + ':' + deviceId);
 }
 
+/**
+ * 在本地没有托管歌单时读取设备真实状态，支持切换宿主/外部队列的播放状态。
+ * 优先复用短缓存；缓存未命中时才探测设备，避免每次按钮点击都重复请求云端。
+ */
+async function getKnownDevicePlaybackState(
+  accountId: string,
+  deviceId: string,
+  minaService: MinaService,
+): Promise<string | undefined> {
+  const cached = getDeviceStatusCache(accountId, deviceId);
+  if (cached && Date.now() - cached.timestamp < DEVICE_STATUS_TTL) {
+    return cached.state;
+  }
+  if (typeof minaService.getPlayerStatus !== 'function') return cached?.state;
+  try {
+    const raw = await minaService.getPlayerStatus(accountId, deviceId);
+    const info = raw?.data?.info;
+    if (typeof info !== 'string') return cached?.state;
+    const parsed = JSON.parse(info);
+    const state = parsed.status === 1
+      ? 'playing'
+      : parsed.status === 2
+        ? 'paused'
+        : parsed.status === 0
+          ? 'stopped'
+          : undefined;
+    if (state) updateDeviceStatusCache(accountId, deviceId, { state });
+    return state ?? cached?.state;
+  } catch (e: any) {
+    songloft.log.warn('[player/toggle] getPlayerStatus failed: ' + String(e));
+    return cached?.state;
+  }
+}
+
 /** 并发请求合并：同一设备同时只穿透一次云端状态查询 */
 export async function getOrFetchDeviceStatus(
   accountId: string,
@@ -201,9 +235,24 @@ export function registerPlaylistHandlers(
 
       const manager = await playlistManagerMap.getOrCreate(account_id, device_id);
       const status = manager.getStatus();
+      const hasPlaylist = manager.hasPlaylist();
+      const deviceState = hasPlaylist
+        ? undefined
+        : await getKnownDevicePlaybackState(account_id, device_id, minaService);
 
-      if (manager.isPlaying()) {
-        // 正在播放，暂停
+      if (!hasPlaylist && deviceState === 'paused') {
+        const resumed = await minaService.resumePlay(account_id, device_id);
+        if (!resumed) {
+          return jsonResponse({ success: false, error: 'failed to resume playback' });
+        }
+        updateDeviceStatusCache(account_id, device_id, { state: 'playing' });
+        return jsonResponse({ success: true, data: { message: 'playlist resumed', state: 'playing' } });
+      }
+
+      if (manager.isPlaying() || (!hasPlaylist && deviceState === 'playing')) {
+        // 正在播放，暂停；本地没有队列时也要允许暂停设备上由宿主/插件外
+        // 发起的播放。PlaylistManager.pause() 在空闲状态下只发送幂等的
+        // 设备暂停命令，不会伪造可恢复的本地队列。
         const lastPosition = manager.getStatus().position;
         const paused = await manager.pause();
         if (!paused) {
@@ -214,7 +263,7 @@ export function registerPlaylistHandlers(
         return jsonResponse({ success: true, data: { message: 'playlist paused', state: 'paused' } });
       }
 
-      if (!manager.hasPlaylist()) {
+      if (!hasPlaylist) {
         return jsonResponse({ success: false, error: 'no playlist loaded, please select a playlist first' });
       }
 

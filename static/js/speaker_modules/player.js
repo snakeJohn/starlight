@@ -108,6 +108,12 @@ function normalizePlayMode(mode) {
     return ['loop', 'once', 'single', 'random', 'order'].includes(mode) ? mode : 'order';
 }
 
+/** Host playlist IDs are positive; 0 denotes a standalone playback queue. */
+function normalizeHostPlaylistId(value) {
+    const id = Number(value);
+    return Number.isFinite(id) && id > 0 ? String(id) : '';
+}
+
 function playModeIcon(mode) {
     const normalized = normalizePlayMode(mode);
     return {
@@ -561,8 +567,8 @@ export function renderPlayerStatus(status = {}) {
     }
 
     const playlistId = status.playlist_id === undefined || status.playlist_id === null
-        ? state.speakerPlayerPlaylistId
-        : String(status.playlist_id);
+        ? normalizeHostPlaylistId(state.speakerPlayerPlaylistId)
+        : normalizeHostPlaylistId(status.playlist_id);
     const parsedIndex = Number(status.current_index);
     setState({
         speakerPlayerState: nextState,

@@ -25,6 +25,8 @@ export interface SongLocation {
   playlistId: number;
   playlistName: string;
   songIndex: number;
+  /** 宿主歌曲 ID；自建歌单可能为负数的合成 ID。 */
+  songId?: number;
   songTitle: string;
   artist: string;
 }
@@ -223,6 +225,9 @@ const MAX_SEARCH_RESULTS = 10;
 /** 最低匹配分数阈值 — 低于此分数的模糊匹配视为无效（编辑距离噪声最高约 30，子串匹配 40+） */
 const MIN_MATCH_SCORE = 40;
 
+/** 歌单 miss 后的全量刷新冷却，避免每条未命中口令都重建索引。 */
+const PLAYLIST_REFRESH_COOLDOWN_MS = 60_000;
+
 type CustomPlaylistReader = Pick<CustomPlaylistService, 'list'>;
 
 /**
@@ -260,6 +265,8 @@ export class IndexingManager {
   private playlists: IndexedPlaylist[] = [];
   private playlistSongsCache: Map<number, Array<{ id: number; title: string; artist: string }>> = new Map();
   private lastRefreshTime: number = 0;
+  private lastPlaylistRefreshTime: number = 0;
+  private pendingPlaylistRefreshPromise: Promise<void> | null = null;
   private isRefreshing: boolean = false;
   private indexReady: boolean = false;
   private readonly locks = new AsyncLockRegistry();
@@ -423,12 +430,74 @@ export class IndexingManager {
   }
 
   /**
+   * 查找歌单，内存索引 miss 时按需刷新一次再重试。
+   * 运行期间新建的歌单不会出现在启动时的快照中，因此只在真 miss 时刷新，
+   * 并用冷却窗口避免连续未命中导致重复全量刷新。
+   */
+  async findPlaylistByNameWithRefresh(name: string): Promise<IndexedPlaylist | null> {
+    if (!name) return null;
+
+    let result = this.findPlaylistByName(name);
+    if (result) return result;
+
+    if (await this.refreshPlaylistIndexOnMiss(`findPlaylistByNameWithRefresh: 内存索引未命中「${name}」`)) {
+      result = this.findPlaylistByName(name);
+    }
+
+    return result;
+  }
+
+  /**
    * 按ID获取歌单
    * @param id - 歌单ID
    * @returns 歌单信息，未找到返回 null
    */
   getPlaylistById(id: number): IndexedPlaylist | null {
     return this.playlists.find(pl => pl.id === id) ?? null;
+  }
+
+  /** 按 ID 查找歌单，内存索引 miss 时按需刷新一次再重试。 */
+  async getPlaylistByIdWithRefresh(id: number): Promise<IndexedPlaylist | null> {
+    if (!Number.isFinite(id) || id === 0) return null;
+
+    let result = this.getPlaylistById(id);
+    if (result) return result;
+
+    if (await this.refreshPlaylistIndexOnMiss(`getPlaylistByIdWithRefresh: 内存索引未命中 id=${id}`)) {
+      result = this.getPlaylistById(id);
+    }
+
+    return result;
+  }
+
+  /** 按需刷新歌单索引；同一时间窗口内的并发 miss 共用一次刷新。 */
+  private async refreshPlaylistIndexOnMiss(reason: string): Promise<boolean> {
+    if (this.pendingPlaylistRefreshPromise) {
+      await this.pendingPlaylistRefreshPromise;
+      return true;
+    }
+
+    const now = Date.now();
+    const hasPassedCooldown = this.lastPlaylistRefreshTime === 0
+      || now - this.lastPlaylistRefreshTime >= PLAYLIST_REFRESH_COOLDOWN_MS;
+    if (this.isRefreshing || !hasPassedCooldown) {
+      const remainingMs = Math.max(0, PLAYLIST_REFRESH_COOLDOWN_MS - (now - this.lastPlaylistRefreshTime));
+      songloft.log.info(`[IndexingManager] ${reason}: skip refresh (refreshing=${this.isRefreshing}, cooldown=${remainingMs}ms)`);
+      return false;
+    }
+
+    this.lastPlaylistRefreshTime = now;
+    songloft.log.warn(`[IndexingManager] ${reason}，触发全量刷新`);
+    const refreshPromise = this.refresh().then(() => undefined);
+    this.pendingPlaylistRefreshPromise = refreshPromise;
+    try {
+      await refreshPromise;
+      return true;
+    } finally {
+      if (this.pendingPlaylistRefreshPromise === refreshPromise) {
+        this.pendingPlaylistRefreshPromise = null;
+      }
+    }
   }
 
   /**
@@ -438,7 +507,7 @@ export class IndexingManager {
    * @param songName - 歌曲名称
    * @returns { index, found }，index 为歌曲在歌单中的位置
    */
-  async findSongInPlaylist(playlistId: number, songName: string): Promise<{ index: number; found: boolean }> {
+  async findSongInPlaylist(playlistId: number, songName: string): Promise<{ index: number; found: boolean; songId?: number }> {
     if (!this.indexReady || !songName) {
       return { index: 0, found: false };
     }
@@ -448,7 +517,7 @@ export class IndexingManager {
       return { index: 0, found: false };
     }
 
-    const candidates = songs.map((s, i) => ({ title: s.title, index: i }));
+    const candidates = songs.map((s, i) => ({ title: s.title, index: i, id: s.id }));
 
     const matched = fuzzySearchList(
       songName,
@@ -458,7 +527,7 @@ export class IndexingManager {
     );
 
     if (matched.length > 0) {
-      return { index: matched[0].index, found: true };
+      return { index: matched[0].index, found: true, songId: matched[0].id };
     }
 
     return { index: 0, found: false };
@@ -530,6 +599,7 @@ export class IndexingManager {
             playlistId: pl.id,
             playlistName: pl.name,
             songIndex: idx,
+            songId: s.id,
             songTitle: s.title,
             artist: s.artist,
           });
@@ -543,6 +613,7 @@ export class IndexingManager {
             playlistId: pl.id,
             playlistName: pl.name,
             songIndex: idx,
+            songId: s.id,
             songTitle: s.title,
             artist: s.artist,
           };
@@ -556,6 +627,19 @@ export class IndexingManager {
     for (let i = 0; i < matchedSongs.length; i++) {
       const loc = songLocationMap.get(matchedSongs[i].id);
       if (loc) {
+        // 全局最佳歌曲不在任何歌单、且明显优于当前歌单候选时，
+        // 交给调用方走独立歌曲路径，避免低分歌单匹配抢走精确命中。
+        if (i > 0) {
+          const bestGlobalScore = scoreSongMatch(songName, matchedSongs[0].title, matchedSongs[0].artist);
+          const thisScore = scoreSongMatch(songName, matchedSongs[i].title, matchedSongs[i].artist);
+          if (bestGlobalScore > thisScore + 5) {
+            songloft.log.warn(
+              `[IndexingManager] findSongByName: 最佳全局匹配 "${matchedSongs[0].title}" (score=${bestGlobalScore.toFixed(1)}) 不在歌单，` +
+              `跳过低分歌单匹配 "${matchedSongs[i].title}" (score=${thisScore.toFixed(1)})，转独立歌曲路径`
+            );
+            break;
+          }
+        }
         songloft.log.info(`[IndexingManager] findSongByName done (${elapsedMs}ms) → "${loc.songTitle}" by "${loc.artist}" in playlist="${loc.playlistName}" (globalRank=#${i + 1})`);
         return loc;
       }
